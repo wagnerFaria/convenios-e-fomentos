@@ -1,0 +1,131 @@
+# Revisão de segurança e checklist de pendências
+
+Revisão feita ao final da Fase 8, sobre o código e os testes existentes. Complementa o [README](README.md).
+Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 corrigido nesta revisão · ⚠️ risco aceito/limitação · ⏳ pendente.
+
+## 1. Escopo e método
+
+- Leitura dirigida do código por área (autenticação, autorização, entrada/saída, banco, segredos, logs, infraestrutura).
+- `golangci-lint` com `gosec`, `errorlint` e `noctx` (sem avisos) e `govulncheck` nas dependências.
+- Todos os achados abaixo que puderam virar teste viraram teste de regressão.
+- Verificação de ponta a ponta com a imagem Docker real (migração → API → `/ready`, `/docs`, `seed`, `cleanup`).
+- **Não** foi feito: teste de intrusão externo, fuzzing, análise de carga nem revisão por terceiros.
+
+## 2. Resultado por área
+
+### Autenticação
+- ✅ Senhas em Argon2id (parâmetros gravados no hash, comparação em tempo constante); política de 8–128 caracteres.
+- ✅ Login com mensagem genérica; a senha é verificada mesmo quando a conta não existe (tempo equalizado).
+- ✅ JWT HS256 com `iss`, `aud` e `exp` obrigatórios; audiências distintas (`admin`/`api`) com segredos distintos; algoritmo `none` e
+  tokens de outra audiência rejeitados.
+- ✅ Refresh token opaco (32 bytes, só o SHA-256 no banco), rotação atômica, reutilização revoga a família, expiração por ociosidade e máxima.
+- ✅ Bloqueio, desativação e revogação valem na hora: cada requisição confere a sessão no banco (sem cache).
+- ✅ Tokens de convite, redefinição e confirmação: uso único consumido atomicamente, com validade; token de outro tipo/sujeito é recusado.
+- ✅ Tokens de API: 256 bits, só o HMAC-SHA256 no banco, exibidos uma vez, `Cache-Control: no-store`, revogação/expiração imediatas.
+- 🔧 O registro inicial por HTTP agora vem **desabilitado em produção** (`INITIAL_REGISTRATION_ENABLED`); antes, uma instalação nova
+  exposta podia ser "tomada" por quem chegasse primeiro. Em produção use `cli admin:create`.
+- 🔧 Parâmetros do Argon2 passaram a ser validados (e, em produção, não podem ficar abaixo do mínimo da OWASP).
+- ⚠️ Não há MFA/2FA nem bloqueio de conta por tentativas: só rate limit por IP + identificador (`RATE_LIMIT_AUTH_PER_MINUTE`).
+  Ataques distribuídos (credential stuffing) exigem proteção adicional no proxy/WAF.
+- ⚠️ JWT simétrico (HS256), sem `kid`: trocar um segredo invalida todos os access tokens (até 15 min) e não há rotação gradual.
+
+### Autorização
+- ✅ Ação não registrada sempre nega; Super Admin também.
+- ✅ Filtros de condição são tipados e viram SQL somente parametrizado e apenas com colunas do `Schema`; a injeção em `sort`, `q`, `status`
+  e nos filtros de auditoria foi testada.
+- ✅ Campos: leitura remove o não permitido (chaves fora do schema nunca saem); escrita recusa (422) campos não permitidos e **todos** os
+  campos de sistema, inclusive para o Super Admin.
+- ✅ Registro único (leitura/edição/exclusão/publicação) é conferido contra o filtro da permissão (403 fora dele).
+- ✅ Mudar `status` exige a ação `publish` mesmo com o campo liberado.
+- ✅ Só um Super Admin concede/retira a role Super Admin ou convida com ela; ninguém desativa/exclui a própria conta; o último Super Admin
+  ativo é protegido por lock consultivo (testado com requisições concorrentes).
+- ✅ Cada rota de `/admin` tem teste de 401 (sem token) e 403 (sem permissão).
+- 🔧 Um teste unitário revelou (Fase 4) que `fields: []` ("nenhum campo") virava `null` ("todos os campos") ao normalizar — corrigido, com regressão.
+- ⚠️ Quem tem `settings.roles.update` pode editar a própria role e se conceder mais permissões (exceto a role Super Admin, imutável).
+  É o comportamento esperado de um RBAC administrável, como no Strapi: conceda essa permissão com critério.
+- ⚠️ Public e Authenticated não herdam permissões uma da outra (como no Strapi); revisar ao configurar a API pública.
+
+### Entrada e saída
+- ✅ Corpo limitado (`MAX_BODY_BYTES`, 413); JSON rejeita campos desconhecidos; validação com mensagens em português.
+- ✅ A API pública usa uma struct de visão (`PublicDocument`): `observacao_interna` e demais campos internos não existem na resposta.
+- ✅ Erros 500 nunca vazam detalhes (só o `requestId`); pânicos são capturados.
+- ✅ Templates de e-mail usam `html/template` (escape automático; `javascript:` neutralizado) e são validados ao salvar.
+- ✅ Cabeçalhos de e-mail recusam quebra de linha (sem injeção de cabeçalho).
+- ✅ Redirecionamento da confirmação de e-mail só para URL `http(s)` absoluta, configurável apenas por administrador com permissão.
+- 🔧 `X-Request-ID` do cliente agora é validado (`[A-Za-z0-9._-]{1,64}`); antes qualquer texto de até 64 bytes era refletido em cabeçalho e log.
+- 🔧 Todas as respostas levam `Cache-Control: no-store` (dados dinâmicos/pessoais não devem ir para caches compartilhados).
+- ✅ CSRF não se aplica: a autenticação é por cabeçalho `Authorization`, sem cookies. CORS restrito às origens configuradas.
+
+### Disponibilidade
+- 🔧 Limite geral por IP em todas as rotas (`RATE_LIMIT_GLOBAL_PER_MINUTE`, padrão 600), além do limite específico de autenticação.
+- ✅ Timeouts do servidor HTTP, corpo limitado, `Argon2` com memória limitada e tamanho máximo de senha (anti-DoS).
+- ✅ IP real só via `X-Forwarded-For` quando a conexão vem de um proxy em `TRUSTED_PROXIES`.
+- ⚠️ O rate limit é em memória, por instância. Com várias instâncias o limite efetivo é multiplicado; use também o proxy.
+- 🔧 Sessões e tokens de uso único só cresciam: novo comando `cleanup` (`make cleanup`) remove os vencidos há mais de N dias.
+
+### Banco de dados
+- ✅ SQL via sqlc; SQL montado à mão em apenas três listagens, com valores em `$n` e colunas/ordenação de listas permitidas.
+- ✅ Chaves estrangeiras com `ON DELETE` coerente, `CHECK`s de domínio (status, tipos, arrays JSON) e índices únicos parciais.
+- ✅ Operações compostas em transação (substituição de permissões, exclusão de role movendo usuários, convite, lote de exclusões).
+- ⚠️ Sem criptografia em repouso, backups ou TLS para o PostgreSQL por conta da aplicação: configure `sslmode=verify-full` na `DATABASE_URL` em produção.
+
+### Segredos e logs
+- ✅ Em produção a aplicação não sobe com segredos ausentes, curtos, com valor de desenvolvimento ou com os dois segredos JWT iguais.
+- ✅ O log de acesso registra só método, caminho (sem query string), status e duração; senhas, tokens e hashes nunca são registrados.
+- ✅ Auditoria sem senhas, tokens nem hashes (testado para tokens de API e usuários finais).
+- ⚠️ Em desenvolvimento, o `LogMailer` registra o corpo dos e-mails (com tokens) e o `seed` imprime senhas de exemplo. Isso só ocorre
+  fora de produção; em produção sem SMTP os e-mails são descartados sem o corpo.
+
+### Dependências
+- ✅ `govulncheck`: nenhuma vulnerabilidade alcançável. Atualizados `golang.org/x/crypto`, `moby/go-archive` e `moby/sys/user`
+  (esta última pelo `testcontainers`, só em testes).
+- ⚠️ Restou o aviso GO-2026-5932 (`x/crypto/openpgp`, sem correção): a aplicação **não importa** esse pacote.
+- Reexecute `govulncheck ./...` e `go list -m -u all` periodicamente (ex.: no CI).
+
+### Infraestrutura
+- ✅ Imagem multi-stage, binário estático em `distroless/static:nonroot` (sem shell, sem gerenciador de pacotes).
+- ⚠️ O `/docs` carrega a UI (Scalar) de um CDN, sem SRI, e fica público; a CSP da página libera só esse CDN. Em produção, bloqueie
+  `/docs` no proxy se a documentação não deve ser pública, ou sirva a UI localmente.
+- ⚠️ `Strict-Transport-Security` é enviado sempre, mas só tem efeito em HTTPS: termine o TLS no proxy.
+
+## 3. Riscos aceitos e limitações conhecidas
+
+| Tema | Descrição | Mitigação / quando tratar |
+|---|---|---|
+| Enumeração de contas | O cadastro de usuário final responde 409 `already_taken` para e-mail/usuário existentes; em "esqueci a senha" há diferença de latência (grava token e envia e-mail só quando a conta existe). As respostas HTTP são idênticas. | Rate limit. Para eliminar o canal de tempo, enfileirar o envio de e-mails. |
+| E-mail síncrono | O envio SMTP acontece dentro da requisição; falha de envio é registrada no log, mas não chega ao cliente. | Fila/worker de e-mail quando o volume pedir. |
+| Confirmação de e-mail ligada depois | Usuários já logados sem confirmar só são barrados no próximo refresh/login. | Aceitável; revogar sessões ao ligar a opção se necessário. |
+| Convite expirado | Não há endpoint de reenvio: é preciso excluir o administrador pendente e convidar de novo. | ⏳ Ver pendências. |
+| Auditoria | Sem retenção/rotação, sem assinatura de integridade; conteúdo (documentos) não é auditado. | Política de retenção e arquivamento conforme a necessidade. |
+| Rate limit por instância | Ver "Disponibilidade". | Redis ou proxy quando houver várias instâncias. |
+| Sem MFA | Ver "Autenticação". | Planejar TOTP/WebAuthn para administradores. |
+
+## 4. Checklist de pendências
+
+**Funcionalidades fora do escopo definido** (decisões já documentadas no README):
+- ⏳ OAuth/OIDC: estrutura pronta (`end_users.provider`, `enduser.Provider`); nenhum provedor implementado.
+- ⏳ i18n/locales: preparado (`SupportsLocales`, `properties`), sem conteúdo localizado.
+- ⏳ Frontend administrativo.
+
+**Melhorias identificadas (nenhuma bloqueia o uso):**
+- ⏳ Reenvio de convite de administrador expirado (`POST /admin/users/{id}/resend-invite`).
+- ⏳ Troca de senha do administrador logado (hoje: redefinição por e-mail/CLI).
+- ⏳ Bloquear/desbloquear administradores por endpoint (a coluna `blocked` existe e é respeitada; a API cobre ativar/desativar).
+- ⏳ Opção para desabilitar ou servir localmente o `/docs`.
+- ⏳ Fila de e-mails; retenção da auditoria; MFA para administradores.
+- ⏳ Pipeline de CI executando `make lint`, `make test`, `make cover-authz` e `govulncheck`.
+- ⏳ Métricas/observabilidade (Prometheus, traces); hoje há logs JSON com `request_id` e `/ready`.
+- ⏳ `make dev` depende do `air`, que é opcional e não vem instalado.
+
+## 5. Checklist para colocar em produção
+
+1. `APP_ENV=production` e `JWT_ADMIN_SECRET`, `JWT_API_SECRET`, `API_TOKEN_SALT` aleatórios (`openssl rand -hex 32`), distintos entre si.
+2. `DATABASE_URL` com `sslmode=verify-full`; usuário do banco com o mínimo de privilégios; backups agendados.
+3. TLS no proxy reverso, `TRUSTED_PROXIES` com o CIDR dele e `CORS_ALLOWED_ORIGINS` só com o(s) domínio(s) do front.
+4. `PUBLIC_URL` correto e SMTP configurado (`SMTP_*`); sem SMTP os e-mails são descartados.
+5. Criar o primeiro Super Admin pela CLI; manter `INITIAL_REGISTRATION_ENABLED` vazio/`false`.
+6. Rodar `cli migrate:up` antes de subir a nova versão; **não** rodar o `seed` em produção, a menos que se queira criar as roles de exemplo
+   (os usuários de exemplo só existem com `APP_ENV=development`).
+7. Agendar `cli cleanup` (diário) e acompanhar `GET /ready`.
+8. Decidir sobre a exposição de `/docs` e revisar as permissões das roles (principalmente `settings.roles.*` e `settings.users.*`).
+9. Rodar `govulncheck ./...` e a suíte completa no pipeline antes de cada release.
