@@ -4,26 +4,14 @@ import { withSentryConfig } from '@sentry/nextjs/config';
 // Define the base Next.js configuration
 const baseConfig: NextConfig = {
   output: process.env.BUILD_STANDALONE === 'true' ? 'standalone' : undefined,
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'api.slingacademy.com',
-        port: ''
-      },
-      {
-        protocol: 'https',
-        hostname: 'img.clerk.com',
-        port: ''
-      },
-      {
-        protocol: 'https',
-        hostname: 'clerk.com',
-        port: ''
-      }
-    ]
-  },
   transpilePackages: ['geist'],
+  // O backend monta os links de e-mail como <PUBLIC_URL>/admin/...; o frontend os atende em /auth/...
+  async redirects() {
+    return [
+      { source: '/admin/reset-password', destination: '/auth/reset-password', permanent: false },
+      { source: '/admin/accept-invite', destination: '/auth/accept-invite', permanent: false }
+    ];
+  },
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production'
   }

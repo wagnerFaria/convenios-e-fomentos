@@ -1,11 +1,8 @@
 import { Icons } from '@/components/icons';
 
 export interface PermissionCheck {
+  /** Ação do backend exigida (ex.: `admin::settings.users.read`). Super Admin sempre passa. */
   permission?: string;
-  plan?: string;
-  feature?: string;
-  role?: string;
-  requireOrg?: boolean;
 }
 
 export interface NavItem {
