@@ -4,6 +4,8 @@ import Header from '@/components/layout/header';
 import { InfoSidebar } from '@/components/layout/info-sidebar';
 import { InfobarProvider } from '@/components/ui/infobar';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+import { AwaitingAccess } from '@/features/auth/components/awaiting-access';
+import { fullName } from '@/features/auth/full-name';
 import { SessionProvider } from '@/features/auth/session-provider';
 import { getSession } from '@/lib/auth/session';
 import type { Metadata } from 'next';
@@ -25,6 +27,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // devem chamar getSession().
   const session = await getSession();
   if (!session) redirect('/auth/sign-in');
+  // Primeiro acesso: a conta existe, mas ainda sem perfil (roles) — nada do painel abriria.
+  if (!session.isSuperAdmin && session.permissions.length === 0) {
+    return <AwaitingAccess name={fullName(session)} />;
+  }
   // Persisting the sidebar state in the cookie.
   const cookieStore = await cookies();
   const defaultOpen = cookieStore.get('sidebar_state')?.value === 'true';

@@ -12,16 +12,9 @@ import type { TokenPair } from '@/lib/api/types';
 
 /**
  * Proxy autenticado para o backend (padrão BFF): o navegador só fala com o Next, que injeta o
- * Bearer a partir do cookie httpOnly e renova o par de tokens quando necessário.
+ * Bearer (access token do MT Login) a partir do cookie httpOnly e renova o par de tokens quando
+ * necessário.
  */
-
-// Rotas que devolvem tokens ou criam sessão passam apenas pelas server actions.
-const BLOCKED = new Set([
-  'admin/auth/login',
-  'admin/auth/refresh',
-  'admin/auth/accept-invite',
-  'admin/auth/register-first'
-]);
 
 const FORWARDED_RESPONSE_HEADERS = ['content-type', 'retry-after', 'x-request-id'];
 
@@ -32,7 +25,7 @@ function errorResponse(status: number, code: string, message: string) {
 function targetPath(segments: string[]): string | null {
   if (segments.some((s) => s === '' || s === '.' || s === '..' || s.includes('/'))) return null;
   const path = segments.join('/');
-  if (!path.startsWith('admin/') || BLOCKED.has(path)) return null;
+  if (!path.startsWith('admin/')) return null;
   return `/${path}`;
 }
 
@@ -71,7 +64,7 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] 
   const renew = async () => {
     if (!refresh) return false;
     try {
-      renewed = await refreshTokenPair(refresh, req.headers);
+      renewed = await refreshTokenPair(refresh);
     } catch {
       return false;
     }

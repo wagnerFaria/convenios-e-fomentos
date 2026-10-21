@@ -7,7 +7,7 @@ This is a Next.js 16 + shadcn/ui admin dashboard starter kit.
 - **[AGENTS.md](./AGENTS.md)** — Full project overview, tech stack, structure, conventions, data fetching patterns, deployment
 - **[docs/forms.md](./docs/forms.md)** — Form system: TanStack Form + Zod, composable fields, validation, multi-step, sheet/dialog forms
 - **[docs/themes.md](./docs/themes.md)** — Theme system: OKLCH colors, adding themes, font config
-- **Auth** — próprio, contra o backend Go: tokens em cookies httpOnly (`src/lib/auth/`), proxy autenticado em `src/app/api/backend/[...path]`, renovação em `src/proxy.ts`, permissões via `useCan()` / `<Can>` (`src/features/auth/session-provider.tsx`). Chamadas do navegador usam `apiClient` (`src/lib/api-client.ts`); erros são `ApiError`.
+- **Auth** — login pelo **MT Login** (Keycloak, Authorization Code + PKCE) conduzido pelo servidor do Next: `src/app/auth/login` e `src/app/auth/callback` (route handlers), `src/lib/auth/oidc.ts`; tokens em cookies httpOnly (`src/lib/auth/`), proxy autenticado em `src/app/api/backend/[...path]`, renovação em `src/proxy.ts`, permissões via `useCan()` / `<Can>` (`src/features/auth/session-provider.tsx`). A identidade do administrador é o CPF; sem roles o usuário vê "Aguardando liberação". Chamadas do navegador usam `apiClient` (`src/lib/api-client.ts`); erros são `ApiError`.
 - **[docs/deployment.md](./docs/deployment.md)** — Deployment: Vercel, production environment variables, Docker
 
 ## Critical Conventions

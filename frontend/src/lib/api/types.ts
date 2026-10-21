@@ -12,12 +12,16 @@ export interface ApiResponse<T> {
   meta?: ApiMeta;
 }
 
+/** Tokens do MT Login (Keycloak). */
 export interface TokenPair {
   accessToken: string;
-  refreshToken: string;
+  /** Ausente se o MT Login não devolver refresh token: ao expirar o access token, novo login (o SSO costuma ser transparente). */
+  refreshToken?: string;
   tokenType: string;
   /** Segundos até o access token expirar. */
   expiresIn: number;
+  /** Segundos até o refresh token expirar (a sessão SSO), quando informado. */
+  refreshExpiresIn?: number;
 }
 
 export interface AdminRoleRef {
@@ -37,6 +41,9 @@ export interface AdminPermission {
 
 export interface AdminMe {
   id: string;
+  /** CPF completo e formatado, só do próprio usuário. */
+  cpf: string;
+  /** Nome, CPF e e-mail vêm do MT Login. */
   email: string;
   firstName: string;
   lastName: string;
@@ -44,14 +51,4 @@ export interface AdminMe {
   isSuperAdmin: boolean;
   roles: AdminRoleRef[];
   permissions: AdminPermission[];
-}
-
-export interface AdminSession {
-  id: string;
-  userAgent: string;
-  ip: string;
-  createdAt: string;
-  lastUsedAt: string;
-  expiresAt: string;
-  current: boolean;
 }

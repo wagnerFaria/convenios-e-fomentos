@@ -33,7 +33,7 @@ export default async function proxy(req: NextRequest) {
 
   let pair;
   try {
-    pair = await refreshTokenPair(refresh, req.headers);
+    pair = await refreshTokenPair(refresh);
   } catch {
     return new NextResponse('Serviço indisponível. Tente novamente.', { status: 503 });
   }
