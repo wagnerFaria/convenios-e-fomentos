@@ -1,43 +1,89 @@
+// Comando api sobe o servidor HTTP.
 package main
 
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/wagner/convenios-e-fomentos/backend/internal/app"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/config"
-	"github.com/wagner/convenios-e-fomentos/backend/internal/httpserver"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/logging"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
 )
 
 func main() {
-	cfg := config.Load()
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "erro fatal:", err)
+		os.Exit(1)
+	}
+}
 
-	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           httpserver.NewRouter(),
-		ReadHeaderTimeout: 5 * time.Second,
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := logging.New(os.Stdout, cfg.LogLevel)
+	slog.SetDefault(log)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := database.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	var mail mailer.Mailer = mailer.NopMailer{Log: log}
+	switch {
+	case cfg.SMTPHost != "":
+		mail = mailer.SMTP{Host: cfg.SMTPHost, Port: cfg.SMTPPort, User: cfg.SMTPUser, Password: cfg.SMTPPassword, From: cfg.SMTPFrom}
+	case !cfg.IsProduction():
+		mail = mailer.LogMailer{Log: log}
+	}
+	application, err := app.New(cfg, log, pool, mail)
+	if err != nil {
+		return err
+	}
+	if err := application.Start(ctx); err != nil {
+		return err
 	}
 
+	srv := &http.Server{
+		Addr:              fmt.Sprintf(":%d", cfg.HTTPPort),
+		Handler:           application.Handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("servidor ouvindo em %s", srv.Addr)
+		log.Info("servidor iniciado", "addr", srv.Addr, "env", cfg.AppEnv)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("erro no servidor: %v", err)
+			errCh <- err
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("erro ao encerrar: %v", err)
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		log.Info("encerrando servidor")
 	}
-	log.Println("servidor encerrado")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err = srv.Shutdown(shutdownCtx)
+	application.APITokens.Wait() // conclui as gravações pendentes de last_used_at
+	return err
 }
