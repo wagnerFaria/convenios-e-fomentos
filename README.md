@@ -39,9 +39,10 @@ Navegador ──► Next.js (:3000) ──► API Go (:8080) ──► PostgreSQ
               └─ proxy /api/backend/*  └─ /admin/*  /api/*  /docs
 ```
 
-O navegador **nunca** fala direto com a API nem enxerga os tokens: o login é feito por *server actions* do Next, que guardam
-o access token e o refresh token em cookies `httpOnly`; as chamadas autenticadas passam pelo proxy `/api/backend/*`, que
-injeta o `Authorization: Bearer` e renova o par de tokens quando necessário. Detalhes na
+O navegador **nunca** fala direto com a API nem enxerga os tokens: o login é feito pelo **MT Login** (Keycloak, OIDC com
+Authorization Code + PKCE) e conduzido pelo servidor do Next, que guarda o access token e o refresh token em cookies `httpOnly`; as chamadas autenticadas passam pelo proxy `/api/backend/*`, que
+injeta o `Authorization: Bearer` e renova o par de tokens quando necessário. A API só **valida** o token do MT Login
+(assinatura via JWKS); quem é o administrador é decidido pelo **CPF** do token. Detalhes na
 [seção 9](#9-autenticação-e-e-mails-em-desenvolvimento).
 
 ## 2. Pré-requisitos
@@ -97,37 +98,46 @@ docker compose down -v
 
 ## 4. Primeiro acesso
 
-Um banco novo não tem nenhum administrador. Escolha **uma** das opções:
+O login é sempre pelo **MT Login**; não há senha local. A identidade do administrador é o **CPF** (nome e e-mail são copiados
+do MT Login a cada acesso). Quem entra pela primeira vez ganha uma conta ativa e **sem perfil**, e vê "Aguardando liberação"
+até um administrador atribuir roles. Por isso o primeiro Super Admin precisa ser criado antes:
 
-### Opção A — Tela de configuração inicial
+### Pré-requisitos (uma vez)
 
-Abra <http://localhost:3000/auth/setup>, preencha nome, e-mail e senha (mínimo de 8 caracteres). O primeiro Super Admin é
-criado e você já entra no painel. Essa tela só funciona **enquanto não existir nenhum administrador** (depois, o backend
-responde `setup_completed` e você é levado ao login). Em produção o registro por HTTP vem desabilitado; use a CLI (opção C).
+1. No `.env` da raiz, as variáveis `MTLOGIN_*`, `JWKS_URI` e `OIDC_ISSUER` (veja o [`.env.example`](.env.example)). Sem elas a
+   API não sobe.
+2. No client do Keycloak (`MTLOGIN_CLIENT_ID`), cadastrar a URL de retorno (`MTLOGIN_REDIRECT_URI`, por padrão
+   `http://localhost:3000/auth/callback`) e a de pós-logout (`http://localhost:3000/auth/sign-in`).
+3. Ter um usuário no MT Login **de homologação**, liberado pelo time do MT Login (CPF fora das bases oficiais precisa de liberação
+   manual). O CPF vem no claim `preferred_username` (também há `cpf`); é o padrão de `OIDC_CPF_CLAIM`.
 
-### Opção B — Seed com usuários de desenvolvimento
+O `projeto-template-integracao` é o client de exemplo do MT Login, para testes. Cada aplicação deve ter o **seu** client, por ambiente
+(HOMOL e PROD), solicitado à SEPLAG (`governancadigital@seplag.mt.gov.br`); veja
+[`docs/documentacao-mti-app-cloud-mti-mt-gov-br-mt-login.md`](docs/documentacao-mti-app-cloud-mti-mt-gov-br-mt-login.md).
 
-```bash
-docker compose exec api go run ./cmd/cli seed
-```
+### Criar o primeiro Super Admin
 
-O seed é idempotente e cria roles e permissões padrão, departamentos de exemplo e, **só em desenvolvimento**, um usuário por
-role: `super@`, `editor@`, `author@`, `revisor@` e `usuario@dev.local`. **As senhas aleatórias aparecem no log apenas na
-primeira execução**; copie-as na hora (campo `senha`). Se perdê-las, redefina com `admin:reset-password` (opção C) ou
-recomece com `docker compose down -v`.
-
-> Depois do seed já existem administradores, então a tela `/auth/setup` deixa de funcionar. Use a opção A **ou** a B como
-> primeiro passo; se quiser as duas coisas, faça a A primeiro e rode o seed em seguida.
-
-### Opção C — CLI
+Escolha **uma** das opções, com o seu CPF:
 
 ```bash
-docker compose exec api go run ./cmd/cli admin:create --email voce@exemplo.com --password 'uma-senha-forte'
-docker compose exec api go run ./cmd/cli admin:reset-password --email voce@exemplo.com --password 'nova-senha'
+# CLI (idempotente; também promove quem já entrou como usuário comum)
+docker compose exec api go run ./cmd/cli admin:create --cpf 000.000.000-00
+
+# ou pelo seed: defina SEED_SUPER_ADMIN_CPF=000.000.000-00 (lista separada por vírgulas) no .env e rode
+docker compose up -d api && docker compose exec api go run ./cmd/cli seed
 ```
 
-Os demais administradores são convidados pelo painel; em desenvolvimento a URL do convite (e os e-mails em geral) aparece
-nos logs da API (veja a [seção 9](#9-autenticação-e-e-mails-em-desenvolvimento)).
+Depois abra <http://localhost:3000>, clique em **Entrar com MT Login** e autentique. No primeiro acesso o nome e o e-mail são
+preenchidos a partir do MT Login e você já entra como Super Admin.
+
+### Os demais administradores
+
+- **Pré-cadastro:** um administrador com a permissão `admin::settings.users.create` cadastra o **CPF** e as roles
+  (`POST /admin/users`); no primeiro acesso da pessoa o registro é completado e já vem com as roles. Até lá o status é `pending`.
+- **Criação automática:** quem entra sem pré-cadastro vira administrador ativo sem roles (veja acima) e pode receber roles depois.
+- O seed ainda cria, **só em desenvolvimento**, um administrador de exemplo por role (`super@`, `editor@`, `author@`,
+  `revisor@dev.local`) com **CPFs fictícios**: servem para ver as listagens, mas não conseguem entrar (não existem no MT Login).
+  O usuário final `usuario@dev.local` continua tendo senha, que aparece no log do seed apenas na primeira execução.
 
 ## 5. Como o ambiente de desenvolvimento funciona
 
@@ -154,8 +164,8 @@ cache do Next, mantidos dentro do Docker para não misturar com o host).
 **Configuração.** Tudo é parametrizável por variáveis (`.env` na raiz ou shell; o shell tem precedência) e tem um padrão de
 desenvolvimento no compose, então nada é obrigatório. Os padrões que importam:
 
-- `PUBLIC_URL` e `CORS_ALLOWED_ORIGINS` (`http://localhost:${WEB_EXTERNAL_PORT}`): os links dos e-mails (convite, redefinição de
-  senha) abrem o frontend. O Next redireciona `/admin/reset-password` e `/admin/accept-invite` para as telas `/auth/...`.
+- `PUBLIC_URL` e `CORS_ALLOWED_ORIGINS` (`http://localhost:${WEB_EXTERNAL_PORT}`): os links dos e-mails dos usuários finais
+  abrem o frontend.
 - `TRUSTED_PROXIES=172.16.0.0/12`: o backend confia no `X-Forwarded-For` enviado pelo Next (rede padrão do Docker), para que
   o rate limit de login considere o IP do usuário e não o do servidor Next.
 - `DATABASE_URL`: montada a partir de `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` (host `db`, na rede do Docker).
@@ -258,10 +268,12 @@ abram o frontend. Comandos do `Makefile` do backend: `run`, `dev`, `build`, `tes
 |---|---|
 | `APP_ENV` | `development` \| `test` \| `production`. Em produção os segredos viram obrigatórios. |
 | `DATABASE_URL` | String de conexão do PostgreSQL. |
-| `JWT_ADMIN_SECRET`, `JWT_API_SECRET`, `API_TOKEN_SALT` | Segredos (≥ 32 caracteres e distintos em produção). Os valores de exemplo são só para desenvolvimento. |
+| `JWKS_URI`, `OIDC_ISSUER`, `OIDC_CLIENT_ID` | **Obrigatórias.** MT Login: chaves públicas, emissor e client que a API aceita nos tokens dos administradores. |
+| `OIDC_CPF_CLAIM` | Claim do access token que traz o CPF (padrão `preferred_username`). |
+| `SEED_SUPER_ADMIN_CPF` | CPFs (vírgula) que o `seed` torna Super Admin. |
+| `JWT_API_SECRET`, `API_TOKEN_SALT` | Segredos (≥ 32 caracteres e distintos em produção). Os valores de exemplo são só para desenvolvimento. |
 | `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_*` | Duração dos tokens (15 min / 7 dias de inatividade / 30 dias no máximo). |
 | `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, `PUBLIC_URL` | CORS, proxies confiáveis (IP real) e URL base dos links de e-mail. |
-| `INITIAL_REGISTRATION_ENABLED` | Habilita `register-first` por HTTP; sem valor, só fora de produção. |
 | `SMTP_*` | Envio de e-mail; sem `SMTP_HOST` os e-mails são apenas registrados no log. |
 
 **Compose de desenvolvimento** (`.env` na raiz; modelo em [`.env.example`](.env.example)):
@@ -271,35 +283,40 @@ abram o frontend. Comandos do `Makefile` do backend: `run`, `dev`, `build`, `tes
 | Portas no host | `WEB_EXTERNAL_PORT` (3000), `API_EXTERNAL_PORT` (8080), `DB_PORT` (5432) |
 | Usuário do host | `UID`, `GID` (1000) |
 | PostgreSQL | `POSTGRES_IMAGE`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` (opcional) |
-| Backend | `APP_ENV`, `LOG_LEVEL`, `PUBLIC_URL`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, `JWT_ADMIN_SECRET`, `JWT_API_SECRET`, `API_TOKEN_SALT`, `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_MAX_TTL`, `REFRESH_TOKEN_IDLE_TTL`, `RATE_LIMIT_AUTH_PER_MINUTE`, `RATE_LIMIT_GLOBAL_PER_MINUTE`, `SMTP_*` |
-| Frontend | `API_URL`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SENTRY_DISABLED`, `NEXT_TELEMETRY_DISABLED`, `WATCHPACK_POLLING` |
+| Backend | `APP_ENV`, `LOG_LEVEL`, `PUBLIC_URL`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, `JWKS_URI`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CPF_CLAIM`, `SEED_SUPER_ADMIN_CPF`, `JWT_API_SECRET`, `API_TOKEN_SALT`, `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_MAX_TTL`, `REFRESH_TOKEN_IDLE_TTL`, `RATE_LIMIT_AUTH_PER_MINUTE`, `RATE_LIMIT_GLOBAL_PER_MINUTE`, `SMTP_*` |
+| Frontend | `MTLOGIN_AUTHORIZATION_URI`, `MTLOGIN_TOKEN_URI`, `MTLOGIN_END_SESSION_URI`, `MTLOGIN_CLIENT_ID`, `MTLOGIN_CLIENT_SECRET` (só client confidencial), `MTLOGIN_REDIRECT_URI`, `API_URL`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SENTRY_DISABLED`, `NEXT_TELEMETRY_DISABLED`, `WATCHPACK_POLLING` |
 
 ## 9. Autenticação e e-mails em desenvolvimento
 
-**Sessão.** Login, logout, setup, "esqueci a senha", redefinição e aceite de convite são *server actions*
-([`frontend/src/features/auth/actions.ts`](frontend/src/features/auth/actions.ts)). O access token (15 min) e o refresh token
-ficam em cookies `httpOnly` + `SameSite=Lax` (`Secure` em produção):
+**Sessão.** O login é Authorization Code + PKCE com o MT Login, conduzido por route handlers do Next:
+
+1. `GET /auth/login` ([`route.ts`](frontend/src/app/auth/login/route.ts)) gera `state`, `nonce` e o verificador PKCE (cookie `httpOnly`
+   de 10 min) e redireciona ao MT Login.
+2. `GET /auth/callback` ([`route.ts`](frontend/src/app/auth/callback/route.ts)) confere o `state`, troca o `code` pelos tokens e os
+   grava em cookies `httpOnly` + `SameSite=Lax` (`Secure` em produção): o access token (`cf_access`) e o refresh token (`cf_refresh`).
+   Os tokens do Keycloak são grandes; acima de ~3,8 KB o login falha com a mensagem "excede o limite de armazenamento".
+3. A primeira chamada autenticada à API cria (ou atualiza) o administrador pelo CPF do token.
 
 - [`frontend/src/proxy.ts`](frontend/src/proxy.ts) protege `/dashboard/*`: sem cookie redireciona ao login; com o access token
   expirado, renova o par de tokens antes de renderizar.
 - [`frontend/src/app/api/backend/[...path]/route.ts`](frontend/src/app/api/backend/[...path]/route.ts) é o proxy autenticado
-  usado pelo navegador (`apiClient` em [`src/lib/api-client.ts`](frontend/src/lib/api-client.ts)). Só repassa `/admin/*`,
-  bloqueia as rotas que devolvem tokens e renova automaticamente em caso de 401.
-- A renovação é **serializada por refresh token**: o backend rotaciona o token a cada uso e revoga a sessão inteira se um token
-  já usado for reapresentado, então requisições simultâneas compartilham a mesma renovação
-  ([`src/lib/auth/refresh.ts`](frontend/src/lib/auth/refresh.ts)). Isso vale para um único processo do Next; várias instâncias
+  usado pelo navegador (`apiClient` em [`src/lib/api-client.ts`](frontend/src/lib/api-client.ts)). Só repassa `/admin/*` e renova
+  automaticamente em caso de 401.
+- A renovação usa o refresh token no endpoint de token do MT Login e é **serializada por refresh token**, porque o Keycloak pode
+  rotacionar o token a cada uso e revogar a sessão se um token já usado for reapresentado
+  ([`src/lib/auth/refresh.ts`](frontend/src/lib/auth/refresh.ts)). Vale para um único processo do Next; várias instâncias
   exigiriam um lock distribuído.
+- **Sair** limpa os cookies e vai ao `MTLOGIN_END_SESSION_URI`, encerrando também o SSO (o Keycloak pode pedir uma confirmação,
+  porque não guardamos o `id_token` para enviar como `id_token_hint`).
+- A documentação do MT Login mostra a resposta do `/token` **sem** `refresh_token` e `expires_in`. O frontend tolera isso: usa o `exp`
+  do JWT e, sem refresh token, ao expirar o access token pede novo login (transparente enquanto o SSO estiver ativo).
+- Conta desativada/bloqueada (ou token sem CPF válido) leva a `/auth/denied`; conta sem roles vê "Aguardando liberação".
 - Permissões na interface: `useCan()` e `<Can>` leem as permissões do `/admin/auth/me`. Servem só para esconder elementos; quem
   autoriza de fato é sempre o backend.
 
-**E-mails.** Sem `SMTP_HOST`, a API não envia nada: registra o e-mail no log, com o link completo. Para testar a redefinição de
-senha ou o convite:
-
-```bash
-docker compose logs api | grep "e-mail (modo desenvolvimento)"
-```
-
-Copie a URL (`http://localhost:3000/admin/reset-password?token=...`) e abra no navegador. Os tokens são de uso único.
+**E-mails.** Os e-mails existem só para os **usuários finais** (confirmação de e-mail e redefinição de senha). Sem `SMTP_HOST`,
+a API não envia nada: registra o e-mail no log, com o link completo (`docker compose logs api | grep "e-mail (modo desenvolvimento)"`).
+Os tokens são de uso único. Administradores não recebem e-mails: não há senha nem convite.
 
 ## 10. Testes, lint e formatação
 
@@ -334,10 +351,13 @@ O frontend ainda não tem suíte de testes automatizados; a verificação de pon
 | `3000` ou `8080` ocupadas | Pare o processo que as usa (`ss -ltnp \| grep -E ':(3000\|8080)'`). Ou mude `WEB_EXTERNAL_PORT` / `API_EXTERNAL_PORT` no `.env` (`PUBLIC_URL` e CORS acompanham a porta do frontend). |
 | Alterações em arquivos não recarregam (macOS/Windows) | `WATCHPACK_POLLING=true` para o frontend; para a API, defina `poll = true` em `[build]` do `backend/.air.toml`. |
 | `permission denied` em `tmp/`, `.next/` ou `go.sum` | Arquivos criados como root por uma execução anterior. `sudo chown -R $USER backend/tmp frontend/.next` e confira `UID`/`GID`. |
-| Tela de setup devolve "registro inicial já concluído" | Já existe administrador (talvez criado pelo seed). Entre pelo login, ou recomece com `docker compose down -v`. |
-| Esqueci a senha dos usuários do seed | `docker compose exec api go run ./cmd/cli admin:reset-password --email super@dev.local --password '...'`. |
+| API não sobe: `JWKS_URI é obrigatório...` | Faltam as variáveis do MT Login no `.env` (veja a seção 4). |
+| "Entrar" mostra "não está configurado" | Faltam `MTLOGIN_*` no `.env`; depois `docker compose up -d web`. |
+| Erro do Keycloak sobre `redirect_uri` | A URL de `MTLOGIN_REDIRECT_URI` (ou a de pós-logout) não está cadastrada no client. |
+| Entra no MT Login mas cai em `/auth/denied` (`invalid_identity`) | O claim de `OIDC_CPF_CLAIM` não traz um CPF válido; confira o token. |
+| Entra e vê "Aguardando liberação" | Conta nova sem roles: peça a um Super Admin (ou use `admin:create --cpf`, seção 4). |
 | API sobe e cai com erro de conexão ao banco | O banco ainda iniciava; `docker compose logs db api`. O `migrate` só libera a API com o `db` saudável. |
-| `429 rate_limited` no login | Muitas tentativas (limite por IP+e-mail). Aguarde um minuto. |
+| `429 rate_limited` no login de usuário final | Muitas tentativas (limite por IP+e-mail). Aguarde um minuto. |
 | Erros de tipos estranhos referindo `.next/types` | Cache gerado antigo: `docker compose rm -sf web && docker volume rm convenios-dev_web-next`, ou `rm -rf frontend/.next` no modo host. |
 | Mudou dependências e o `web` não enxerga | `docker compose restart web` (roda `bun install` de novo). Em último caso, `docker volume rm convenios-dev_web-node-modules`. |
 | Logout inesperado ao usar várias instâncias do Next | A renovação de tokens é serializada por processo; veja a [seção 9](#9-autenticação-e-e-mails-em-desenvolvimento). |
@@ -349,7 +369,7 @@ O frontend ainda não tem suíte de testes automatizados; a verificação de pon
 ├── docker-compose.dev.yml      # ambiente completo de desenvolvimento (live reload)
 ├── .dockerignore
 ├── backend/                    # API em Go
-│   ├── cmd/api, cmd/cli        # servidor HTTP e CLI (migrate, seed, admin:create, cleanup...)
+│   ├── cmd/api, cmd/cli        # servidor HTTP e CLI (migrate, seed, admin:create --cpf, cleanup...)
 │   ├── internal/
 │   │   ├── app/                # montagem do grafo de dependências + testes de integração
 │   │   ├── auth/ admin/        # autenticação e gestão de administradores
@@ -363,7 +383,7 @@ O frontend ainda não tem suíte de testes automatizados; a verificação de pon
 │   └── README.md, SEGURANCA.md
 ├── frontend/                   # painel Next.js
 │   ├── src/app/                # rotas: /auth/*, /dashboard/*, /api/backend/[...path]
-│   ├── src/features/auth/      # ações, formulários, sessão, permissões no cliente
+│   ├── src/features/auth/      # logout, sessão, permissões no cliente, telas de acesso
 │   ├── src/lib/auth, src/lib/api, src/lib/api-client.ts
 │   ├── src/proxy.ts            # guarda de rotas e renovação de tokens
 │   ├── src/components/         # UI (shadcn/ui), layout, formulários, data-table
