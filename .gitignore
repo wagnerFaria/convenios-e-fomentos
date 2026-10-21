@@ -1,0 +1,21 @@
+# Segredos e ambiente local
+.env
+.env.*
+!.env.example
+
+# Dependências e builds
+node_modules/
+dist/
+build/
+*.log
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Editores
+.idea/
+*.swp
+
+# Saída local do graphify
+graphify-out/
