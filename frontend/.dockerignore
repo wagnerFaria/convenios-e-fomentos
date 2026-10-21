@@ -75,3 +75,6 @@ AGENTS.md
 
 # Cleanup guide
 __CLEANUP__/
+
+# Env local do desenvolvimento
+.env.local

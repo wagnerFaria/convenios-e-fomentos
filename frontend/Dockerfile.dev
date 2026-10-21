@@ -1,0 +1,13 @@
+# Imagem de desenvolvimento do frontend: Bun + Next em modo dev (HMR).
+# O código-fonte NÃO é copiado: o docker-compose.dev.yml o monta como volume.
+FROM oven/bun:1
+
+WORKDIR /app
+
+# node_modules e .next vivem em volumes nomeados; criá-los aqui com o dono "bun"
+# faz o Docker inicializar os volumes com a permissão correta.
+RUN mkdir -p /app/node_modules /app/.next && chown -R bun:bun /app
+
+USER bun
+EXPOSE 3000
+CMD ["sh", "-c", "bun install --frozen-lockfile && exec bun --bun run dev"]

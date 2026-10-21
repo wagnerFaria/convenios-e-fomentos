@@ -1,0 +1,16 @@
+# Segurança do contexto de build: nada de segredos, dependências ou artefatos.
+# (Os builds do compose usam backend/ e frontend/ como contexto; cada um tem o seu .dockerignore.)
+.git
+.env
+.env.*
+!.env.example
+**/node_modules
+**/.next
+**/tmp
+**/bin
+graphify-out
+docs
+*.md
+.vscode
+.idea
+.DS_Store

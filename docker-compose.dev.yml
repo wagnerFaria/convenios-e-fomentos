@@ -1,0 +1,92 @@
+# Ambiente de desenvolvimento completo (PostgreSQL + migrações + API + frontend) com live reload.
+#
+#   docker compose -f docker-compose.dev.yml up --build
+#
+#   Frontend:  http://localhost:3000        API: http://localhost:8080  (docs em /docs)
+#
+# Edite os arquivos normalmente no host: a API recompila com o air e o Next aplica HMR.
+# Variáveis opcionais (em um .env na raiz ou no shell): DB_PORT, UID, GID, WATCHPACK_POLLING.
+
+name: convenios-dev
+
+x-api: &api
+  build:
+    context: ./backend
+    dockerfile: Dockerfile.dev
+  # UID/GID do host (padrão 1000): arquivos criados no volume não ficam como root.
+  user: "${UID:-1000}:${GID:-1000}"
+  volumes:
+    - ./backend:/app
+    - go-mod:/go/pkg
+    - go-build:/cache
+  environment: &api-env
+    APP_ENV: development
+    DATABASE_URL: postgres://app:app@db:5432/app?sslmode=disable
+    # Os links de e-mail (convite, redefinição de senha) devem abrir o frontend.
+    PUBLIC_URL: http://localhost:3000
+    CORS_ALLOWED_ORIGINS: http://localhost:3000
+    # Rede padrão do Docker: o X-Forwarded-For enviado pelo Next é considerado no rate limit.
+    TRUSTED_PROXIES: 172.16.0.0/12
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      # Mude DB_PORT se a 5432 do host estiver ocupada.
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    <<: *api
+    command: ["go", "run", "./cmd/cli", "migrate:up"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *api
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      # Mantém as dependências e o cache do Next dentro do contêiner (não sobrescritos pelo host).
+      - web-node-modules:/app/node_modules
+      - web-next:/app/.next
+    environment:
+      # Chamadas do servidor do Next ao backend; o navegador só fala com o Next.
+      API_URL: http://api:8080
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_SENTRY_DISABLED: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      # Use "true" no macOS/Windows se o HMR não detectar mudanças.
+      WATCHPACK_POLLING: ${WATCHPACK_POLLING:-false}
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  go-mod:
+  go-build:
+  web-node-modules:
+  web-next:
