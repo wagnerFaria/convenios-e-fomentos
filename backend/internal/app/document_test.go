@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -15,16 +16,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	appPkg "github.com/wagner/convenios-e-fomentos/backend/internal/app"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/seed"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/testutil"
 )
 
-// runSeed executa o seed e devolve as senhas dos usuários de desenvolvimento criadas (email → senha).
-func (e *env) runSeed(development bool) map[string]string {
+// runSeed executa o seed e devolve as senhas geradas no log (email → senha): só o usuário final de
+// desenvolvimento tem senha, os administradores entram pelo MT Login.
+func (e *env) runSeed(development bool, superAdminCPFs ...string) map[string]string {
 	e.t.Helper()
 	var buf bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&buf, nil))
 	require.NoError(e.t, seed.Run(context.Background(), seed.Deps{Pool: e.pool, Hasher: appPkg.Hasher(e.cfg), Engine: e.app.Authz,
-		EndUsers: e.app.EndUsers, Log: log, Development: development}))
+		EndUsers: e.app.EndUsers, Log: log, Development: development, SuperAdminCPFs: superAdminCPFs}))
 	out := map[string]string{}
 	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
 		if line == "" {
@@ -33,7 +37,9 @@ func (e *env) runSeed(development bool) map[string]string {
 		var rec map[string]any
 		require.NoError(e.t, json.Unmarshal([]byte(line), &rec))
 		if email, ok := rec["email"].(string); ok {
-			out[email], _ = rec["senha"].(string)
+			if senha, _ := rec["senha"].(string); senha != "" {
+				out[email] = senha
+			}
 		}
 	}
 	return out
@@ -46,17 +52,25 @@ func (e *env) deptID(name string) string {
 	return id.String()
 }
 
+// devToken é o access token do MT Login do administrador de desenvolvimento do seed (pelo CPF fictício).
+func (e *env) devToken(email string) string {
+	e.t.Helper()
+	for _, u := range seed.DevUsers {
+		if u.Email == email {
+			tok := e.oidc.Token(testutil.Identity{CPF: u.CPF, Email: u.Email, Given: u.First, Family: u.Last})
+			require.Equal(e.t, 200, e.do("GET", "/admin/auth/me", nil, tok).Status)
+			return tok
+		}
+	}
+	require.Fail(e.t, "usuário de desenvolvimento inexistente", email)
+	return ""
+}
+
 // seeded devolve o ambiente já semeado, o token do Super Admin e uma função de login dos usuários de desenvolvimento.
 func seeded(t *testing.T) (*env, string, func(email string) string) {
 	e, boss := setup(t)
-	pw := e.runSeed(true)
-	return e, boss, func(email string) string {
-		t.Helper()
-		p, ok := pw[email]
-		require.True(t, ok, "sem senha para %s", email)
-		access, _ := e.loginOK(email, p)
-		return access
-	}
+	e.runSeed(true)
+	return e, boss, e.devToken
 }
 
 func (e *env) newDoc(token string, body map[string]any) resp {
@@ -73,7 +87,7 @@ func (e *env) docID(token string, body map[string]any) string {
 func TestSeedIdempotenteEEstrutura(t *testing.T) {
 	e, boss := setup(t)
 	first := e.runSeed(true)
-	assert.Len(t, first, 5, "um usuário de cada role: 4 de admin e 1 de usuário final")
+	assert.Len(t, first, 1, "só o usuário final de desenvolvimento tem senha; os administradores usam o MT Login")
 	for email, pw := range first {
 		assert.GreaterOrEqual(t, len(pw), 12, email)
 	}
@@ -150,15 +164,38 @@ func TestUsuariosDeDesenvolvimentoFuncionam(t *testing.T) {
 	e, _ := setup(t)
 	pw := e.runSeed(true)
 	for _, email := range []string{"super@dev.local", "editor@dev.local", "author@dev.local", "revisor@dev.local"} {
-		tok, _ := e.loginOK(email, pw[email])
-		me := e.do("GET", "/admin/auth/me", nil, tok)
+		me := e.do("GET", "/admin/auth/me", nil, e.devToken(email))
 		assert.Equal(t, 200, me.Status, email)
 	}
-	assert.Equal(t, true, e.do("GET", "/admin/auth/me", nil, func() string { t, _ := e.loginOK("super@dev.local", pw["super@dev.local"]); return t }()).data()["isSuperAdmin"])
+	assert.Equal(t, true, e.do("GET", "/admin/auth/me", nil, e.devToken("super@dev.local")).data()["isSuperAdmin"])
 	assert.Equal(t, 200, e.userLogin("usuario@dev.local", pw["usuario@dev.local"]).Status)
 	assert.Equal(t, 200, e.userLogin("usuario", pw["usuario@dev.local"]).Status)
-	me := e.do("GET", "/admin/auth/me", nil, func() string { t, _ := e.loginOK("author@dev.local", pw["author@dev.local"]); return t }())
+	me := e.do("GET", "/admin/auth/me", nil, e.devToken("author@dev.local"))
 	assert.Equal(t, e.deptID("Financeiro"), me.data()["departmentId"])
+}
+
+func TestSeedGarantiSuperAdminsPorCPF(t *testing.T) {
+	e := newEnv(t)
+	cpfs := []string{cpfFor("lia@exemplo.com"), " ", cpf.Format(cpfFor("davi@exemplo.com"))}
+	e.runSeed(false, cpfs...)
+	e.runSeed(false, cpfs...) // idempotente
+
+	var n int
+	require.NoError(t, e.pool.QueryRow(context.Background(), `SELECT count(*) FROM admins a JOIN admin_users_roles ur ON ur.admin_id=a.id
+		JOIN admin_roles r ON r.id=ur.role_id WHERE r.code='super-admin'`).Scan(&n))
+	assert.Equal(t, 2, n)
+
+	// No primeiro acesso a pessoa assume o registro e já é Super Admin.
+	me := e.do("GET", "/admin/auth/me", nil, e.token("lia@exemplo.com"))
+	require.Equal(t, 200, me.Status)
+	assert.Equal(t, true, me.data()["isSuperAdmin"])
+	assert.Equal(t, "lia@exemplo.com", me.data()["email"])
+
+	// CPF inválido derruba o seed, sem expor o valor digitado.
+	err := seed.Run(context.Background(), seed.Deps{Pool: e.pool, Hasher: appPkg.Hasher(e.cfg), Engine: e.app.Authz, EndUsers: e.app.EndUsers,
+		Log: slog.New(slog.NewJSONHandler(io.Discard, nil)), SuperAdminCPFs: []string{"123.456.789-00"}})
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "123.456.789-00")
 }
 
 func TestEditorTemControleTotalSobreDocumentos(t *testing.T) {
@@ -394,7 +431,7 @@ func TestPermissaoDeCamposEFiltroNaLeitura(t *testing.T) {
 	e.mkRole("leitor-depto")
 	e.grant("leitor-depto", "admin::content.document.read", "", `["admin::same-department"]`)
 	both, bothID := e.newAdmin(boss, "ld@exemplo.com", "leitor-proprio")
-	require.Equal(t, 200, e.do("PUT", "/admin/users/"+bothID, map[string]any{"firstName": "L", "lastName": "D", "email": "ld@exemplo.com", "departmentId": fin}, boss).Status)
+	require.Equal(t, 200, e.do("PUT", "/admin/users/"+bothID, map[string]any{"departmentId": fin}, boss).Status)
 	require.Equal(t, 200, e.do("POST", "/admin/users/"+bothID+"/roles", map[string]any{"roleIds": []string{e.roleID("leitor-depto")}}, boss).Status)
 	l := e.do("GET", "/admin/content/documents?sort=titulo:asc", nil, both)
 	require.Equal(t, 200, l.Status, l.Body)

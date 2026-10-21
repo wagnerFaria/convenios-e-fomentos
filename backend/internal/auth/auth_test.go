@@ -65,7 +65,7 @@ func TestOpaqueToken(t *testing.T) {
 
 func TestJWT(t *testing.T) {
 	const secret = "segredo-de-teste-com-mais-de-32-caracteres"
-	admin := NewJWTIssuer(secret, AudienceAdmin, time.Minute)
+	admin := NewJWTIssuer(secret, AudienceAPI, time.Minute)
 	sub, sid := uuid.New(), uuid.New()
 
 	tok, err := admin.Issue(sub, sid)
@@ -77,16 +77,16 @@ func TestJWT(t *testing.T) {
 	assert.Equal(t, sub, got)
 
 	t.Run("audiência errada", func(t *testing.T) {
-		api := NewJWTIssuer(secret, AudienceAPI, time.Minute)
+		api := NewJWTIssuer(secret, "outra-audiencia", time.Minute)
 		_, err := api.Parse(tok)
 		assert.ErrorIs(t, err, ErrInvalidToken)
 	})
 	t.Run("segredo errado", func(t *testing.T) {
-		_, err := NewJWTIssuer("outro-segredo-de-teste-com-32-caracteres", AudienceAdmin, time.Minute).Parse(tok)
+		_, err := NewJWTIssuer("outro-segredo-de-teste-com-32-caracteres", AudienceAPI, time.Minute).Parse(tok)
 		assert.ErrorIs(t, err, ErrInvalidToken)
 	})
 	t.Run("expirado", func(t *testing.T) {
-		exp := NewJWTIssuer(secret, AudienceAdmin, time.Minute)
+		exp := NewJWTIssuer(secret, AudienceAPI, time.Minute)
 		exp.now = func() time.Time { return time.Now().Add(-time.Hour) }
 		old, _ := exp.Issue(sub, sid)
 		_, err := admin.Parse(old)
@@ -94,7 +94,7 @@ func TestJWT(t *testing.T) {
 	})
 	t.Run("algoritmo none", func(t *testing.T) {
 		none, _ := jwt.NewWithClaims(jwt.SigningMethodNone, Claims{RegisteredClaims: jwt.RegisteredClaims{
-			Issuer: issuer, Subject: sub.String(), Audience: jwt.ClaimStrings{AudienceAdmin}, ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			Issuer: issuer, Subject: sub.String(), Audience: jwt.ClaimStrings{AudienceAPI}, ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		}}).SignedString(jwt.UnsafeAllowNoneSignatureType)
 		_, err := admin.Parse(none)
 		assert.ErrorIs(t, err, ErrInvalidToken)

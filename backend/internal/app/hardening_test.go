@@ -7,21 +7,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/wagner/convenios-e-fomentos/backend/internal/config"
 )
-
-func TestRegistroInicialPorHTTPPodeSerDesabilitado(t *testing.T) {
-	off := false
-	e := newEnv(t, func(c *config.Config) { c.InitialRegistrationEnabled = &off })
-	r := e.do("POST", "/admin/auth/register-first", map[string]any{"firstName": "A", "lastName": "B", "email": "a@exemplo.com", "password": senha}, "")
-	assert.Equal(t, 403, r.Status)
-	assert.Equal(t, "setup_disabled", r.errCode())
-	var n int
-	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
-	assert.Zero(t, n)
-}
 
 func TestCabecalhosDeSeguranca(t *testing.T) {
 	e := newEnv(t)

@@ -30,8 +30,8 @@ func Hasher(cfg *config.Config) auth.Hasher {
 
 // AdminService cria o serviço de administradores sem motor de permissões
 // (uso da CLI, que não avalia permissões).
-func AdminService(cfg *config.Config, pool *pgxpool.Pool) *admin.Service {
-	return admin.NewService(pool, Hasher(cfg), admin.Config{InviteTTL: cfg.InviteTokenTTL, PublicURL: cfg.PublicURL}, nil)
+func AdminService(pool *pgxpool.Pool) *admin.Service {
+	return admin.NewService(pool, nil)
 }
 
 // App agrupa o roteador e as peças que precisam de ciclo de vida.
@@ -51,7 +51,7 @@ type App struct {
 }
 
 // New monta todo o grafo de dependências.
-func New(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool, mail mailer.Mailer) (*App, error) {
+func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool, mail mailer.Mailer) (*App, error) {
 	trusted, err := httpapi.ParseCIDRs(cfg.TrustedProxies)
 	if err != nil {
 		return nil, err
@@ -68,16 +68,18 @@ func New(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool, mail mailer.M
 	engine := authz.NewEngine(actions, conds, store, authz.PGBroadcaster{Pool: pool, Log: log}, log)
 	engine.SetEndUserStore(authz.EndUserStore{Q: q})
 
-	adminJWT := auth.NewJWTIssuer(cfg.JWTAdminSecret, auth.AudienceAdmin, cfg.AccessTokenTTL)
-	adminAuth, err := auth.NewAdminAuth(pool, Hasher(cfg), adminJWT, mail, auth.AdminAuthConfig{
-		RefreshMaxTTL: cfg.RefreshTokenMaxTTL, RefreshIdleTTL: cfg.RefreshTokenIdleTTL, ResetTokenTTL: cfg.ResetTokenTTL, PublicURL: cfg.PublicURL,
-	}, log)
-	if err != nil {
-		return nil, err
+	// Sem JWKS_URI (CLI) não há como validar tokens de administrador; o servidor da API exige a
+	// configuração antes de subir (Config.ValidateOIDC).
+	var oidc *auth.OIDCVerifier
+	if cfg.JWKSURI != "" {
+		oidc, err = auth.NewOIDCVerifier(ctx, auth.OIDCConfig{JWKSURI: cfg.JWKSURI, Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, CPFClaim: cfg.OIDCCPFClaim}, log)
+		if err != nil {
+			return nil, err
+		}
 	}
-	authHandler := auth.NewAdminHandler(adminAuth, cfg.RateLimitAuthPerMin)
-	adminSvc := admin.NewService(pool, Hasher(cfg), admin.Config{InviteTTL: cfg.InviteTokenTTL, PublicURL: cfg.PublicURL}, engine)
-	adminHandler := admin.NewHandler(adminSvc, adminAuth, engine, cfg.RateLimitAuthPerMin, cfg.InitialRegistrationAllowed())
+	adminAuth := auth.NewAdminAuth(pool, oidc, log)
+	adminSvc := admin.NewService(pool, engine)
+	adminHandler := admin.NewHandler(adminSvc, adminAuth, engine)
 
 	apiJWT := auth.NewJWTIssuer(cfg.JWTAPISecret, auth.AudienceAPI, cfg.AccessTokenTTL)
 	endUserSvc, err := enduser.NewService(pool, Hasher(cfg), apiJWT, mail, engine, enduser.Config{
@@ -100,7 +102,6 @@ func New(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool, mail mailer.M
 		Log: log, DB: pool, AllowedOrigins: cfg.CORSAllowedOrigins, MaxBodyBytes: cfg.MaxBodyBytes, GlobalRatePerMinute: cfg.RateLimitGlobalPerMin,
 		OpenAPISpec: api.OpenAPI, TrustedProxies: trusted,
 		Routes: func(r chi.Router) {
-			authHandler.Routes(r)
 			adminHandler.Routes(r)
 			audit.NewHandler(q).Routes(r, adminHandler.Guard)
 			endUserAdmin.Routes(r)

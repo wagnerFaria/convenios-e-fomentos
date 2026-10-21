@@ -37,77 +37,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /admin/auth/register-first:
-    post:
-      tags: [Autenticação de administradores]
-      summary: Registro inicial do primeiro Super Admin
-      description: Só funciona enquanto não existir nenhum administrador (403 `setup_completed` depois).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [firstName, lastName, email, password]
-              properties:
-                firstName: {type: string}
-                lastName: {type: string}
-                email: {type: string, format: email}
-                password: {type: string, minLength: 8}
-      responses:
-        "201": {description: Criado}
-        "403": {$ref: "#/components/responses/Error"}
-        "422": {$ref: "#/components/responses/Error"}
-  /admin/auth/login:
-    post:
-      tags: [Autenticação de administradores]
-      summary: Login com e-mail e senha
-      description: Limitado por IP + e-mail (429 `rate_limited`). Erro genérico `invalid_credentials`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email, password]
-              properties:
-                email: {type: string, format: email}
-                password: {type: string}
-      responses:
-        "200": {$ref: "#/components/responses/TokenPair"}
-        "401": {$ref: "#/components/responses/Error"}
-        "422": {$ref: "#/components/responses/Error"}
-        "429": {$ref: "#/components/responses/Error"}
-  /admin/auth/refresh:
-    post:
-      tags: [Autenticação de administradores]
-      summary: Troca o refresh token por um novo par (rotação)
-      description: Reapresentar um refresh token já usado revoga toda a sessão (família).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [refreshToken]
-              properties:
-                refreshToken: {type: string}
-      responses:
-        "200": {$ref: "#/components/responses/TokenPair"}
-        "401": {$ref: "#/components/responses/Error"}
-  /admin/auth/logout:
-    post:
-      tags: [Autenticação de administradores]
-      summary: Encerra a sessão atual
-      security: [{adminBearer: []}]
-      responses:
-        "204": {description: Sessão encerrada}
-        "401": {$ref: "#/components/responses/Error"}
   /admin/auth/me:
     get:
       tags: [Autenticação de administradores]
       summary: Administrador autenticado, roles e permissões efetivas
       description: |
+        Autenticação pelo access token do MT Login (Keycloak/OIDC). Na primeira requisição de um CPF ainda
+        desconhecido o administrador é criado, ativo e sem roles; nome e e-mail são atualizados a cada acesso.
+        Um administrador sem roles recebe `permissions: []`. Conta desativada ou bloqueada responde 403
+        `account_disabled`; token sem CPF válido, 403 `invalid_identity`.
         `permissions` é a união das permissões de todas as roles (Super Admin recebe todas as ações de admin).
         `fields: null` significa todos os campos; `conditions` vazio significa sem condição (várias condições combinam com OR).
         Serve para o front esconder botões; a autorização real é feita sempre no servidor.
@@ -124,6 +62,7 @@ paths:
                     type: object
                     properties:
                       id: {type: string, format: uuid}
+                      cpf: {type: string, description: "CPF completo e formatado do próprio usuário (123.456.789-09)"}
                       email: {type: string}
                       firstName: {type: string}
                       lastName: {type: string}
@@ -147,111 +86,7 @@ paths:
                             fields: {type: [array, "null"], items: {type: string}}
                             conditions: {type: array, items: {type: string}}
         "401": {$ref: "#/components/responses/Error"}
-  /admin/auth/sessions:
-    get:
-      tags: [Autenticação de administradores]
-      summary: Lista as sessões ativas do administrador
-      security: [{adminBearer: []}]
-      responses:
-        "200": {description: OK}
-        "401": {$ref: "#/components/responses/Error"}
-    delete:
-      tags: [Autenticação de administradores]
-      summary: Revoga todas as sessões
-      security: [{adminBearer: []}]
-      parameters:
-        - {name: keepCurrent, in: query, schema: {type: boolean}, description: Preserva a sessão atual}
-      responses:
-        "204": {description: Revogadas}
-        "401": {$ref: "#/components/responses/Error"}
-  /admin/auth/sessions/{id}:
-    delete:
-      tags: [Autenticação de administradores]
-      summary: Revoga uma sessão
-      security: [{adminBearer: []}]
-      parameters:
-        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
-      responses:
-        "204": {description: Revogada}
-        "404": {$ref: "#/components/responses/Error"}
-  /admin/auth/forgot-password:
-    post:
-      tags: [Autenticação de administradores]
-      summary: Solicita a redefinição de senha
-      description: Sempre responde 204, exista ou não o e-mail.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email]
-              properties:
-                email: {type: string, format: email}
-      responses:
-        "204": {description: Solicitação aceita}
-        "429": {$ref: "#/components/responses/Error"}
-  /admin/auth/reset-password:
-    post:
-      tags: [Autenticação de administradores]
-      summary: Redefine a senha com o token recebido (uso único) e revoga as sessões
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [token, password]
-              properties:
-                token: {type: string}
-                password: {type: string}
-      responses:
-        "204": {description: Senha redefinida}
-        "400": {$ref: "#/components/responses/Error"}
-        "422": {$ref: "#/components/responses/Error"}
-  /admin/auth/accept-invite:
-    post:
-      tags: [Autenticação de administradores]
-      summary: Aceita o convite, define a senha e ativa a conta
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [token, password]
-              properties:
-                token: {type: string}
-                password: {type: string}
-      responses:
-        "200": {$ref: "#/components/responses/TokenPair"}
-        "400": {$ref: "#/components/responses/Error"}
-        "422": {$ref: "#/components/responses/Error"}
-  /admin/users/invite:
-    post:
-      tags: [Administradores]
-      summary: Convida um administrador
-      description: Retorna a URL de convite (com o token, exibido só aqui). Exige a permissão `admin::settings.users.create` (Super Admin tem acesso total).
-      security: [{adminBearer: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [firstName, lastName, email, roleIds]
-              properties:
-                firstName: {type: string}
-                lastName: {type: string}
-                email: {type: string, format: email}
-                roleIds: {type: array, minItems: 1, items: {type: string, format: uuid}}
-                departmentId: {type: string, format: uuid}
-      responses:
-        "201": {description: Convite criado}
-        "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
-        "409": {$ref: "#/components/responses/Error"}
-        "422": {$ref: "#/components/responses/Error"}
   /admin/users:
     get:
       tags: [Administradores]
@@ -259,9 +94,9 @@ paths:
       description: "Permissão: `admin::settings.users.read`."
       security: [{adminBearer: []}]
       parameters:
-        - {name: q, in: query, schema: {type: string}, description: "Busca em nome, sobrenome e e-mail"}
+        - {name: q, in: query, schema: {type: string}, description: "Busca em nome, sobrenome, e-mail e CPF (a partir de 3 dígitos, com ou sem pontuação)"}
         - {name: roleId, in: query, schema: {type: string}, description: Filtra por role (UUID)}
-        - {name: status, in: query, schema: {type: string}, description: "active, inactive, pending ou blocked"}
+        - {name: status, in: query, schema: {type: string}, description: "active, inactive, pending (ainda sem primeiro acesso) ou blocked"}
         - {name: sort, in: query, schema: {type: string}, description: "Campo:direção. Campos: firstName, lastName, email, createdAt. Ex.: email:asc"}
         - {name: page, in: query, schema: {type: integer}}
         - {name: pageSize, in: query, schema: {type: integer}, description: "Padrão 25, máximo 100"}
@@ -269,6 +104,31 @@ paths:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Administradores]
+      summary: Pré-cadastra um administrador pelo CPF
+      description: |
+        Cria o administrador (ativo, com as roles) antes do primeiro acesso; nome e e-mail vêm do MT Login quando
+        a pessoa entrar. O status fica `pending` até lá. Só um Super Admin concede a role Super Admin.
+        Exige a permissão `admin::settings.users.create`.
+      security: [{adminBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cpf, roleIds]
+              properties:
+                cpf: {type: string, description: "Com ou sem pontuação; validado", examples: ["529.982.247-25"]}
+                roleIds: {type: array, minItems: 1, items: {type: string, format: uuid}}
+                departmentId: {type: string, format: uuid}
+      responses:
+        "201": {description: Administrador criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {description: "CPF já cadastrado (`cpf_taken`)", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "422": {$ref: "#/components/responses/Error"}
   /admin/users/batch-delete:
     post:
       tags: [Administradores]
@@ -306,8 +166,8 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
     put:
       tags: [Administradores]
-      summary: Edita dados do administrador
-      description: "Permissão: `admin::settings.users.update`."
+      summary: Edita dados do administrador (departamento)
+      description: "Nome, CPF e e-mail vêm do MT Login e não são editáveis. Permissão: `admin::settings.users.update`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -317,11 +177,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [firstName, lastName, email]
               properties:
-                firstName: {type: string}
-                lastName: {type: string}
-                email: {type: string, format: email}
                 departmentId: {type: [string, "null"], format: uuid}
       responses:
         "200": {description: OK}
@@ -1370,7 +1226,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Access token JWT com audience `admin`.
+      description: Access token do MT Login (Keycloak/OIDC), assinado com RS256 e emitido para o client desta aplicação. O frontend conduz o login (Authorization Code + PKCE); a API só valida o token.
   responses:
     Error:
       description: Erro padronizado
@@ -1378,20 +1234,6 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
-    TokenPair:
-      description: Par de tokens
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              data:
-                type: object
-                properties:
-                  accessToken: {type: string}
-                  refreshToken: {type: string}
-                  tokenType: {type: string, examples: [Bearer]}
-                  expiresIn: {type: integer, description: Segundos}
   schemas:
     StatusResponse:
       type: object

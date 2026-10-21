@@ -9,11 +9,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Audiências dos JWTs: um token de um domínio é rejeitado no outro.
-const (
-	AudienceAdmin = "admin"
-	AudienceAPI   = "api"
-)
+// AudienceAPI é a audiência dos JWTs dos usuários finais. Os administradores se autenticam
+// com tokens do MT Login (veja OIDCVerifier).
+const AudienceAPI = "api"
 
 const issuer = "convenios-e-fomentos"
 
@@ -29,7 +27,7 @@ type Claims struct {
 // SubjectID devolve o sujeito (admin ou usuário final) do token.
 func (c Claims) SubjectID() (uuid.UUID, error) { return uuid.Parse(c.Subject) }
 
-// JWTIssuer emite e valida access tokens HS256 de uma audiência.
+// JWTIssuer emite e valida access tokens HS256 dos usuários finais.
 type JWTIssuer struct {
 	secret   []byte
 	audience string

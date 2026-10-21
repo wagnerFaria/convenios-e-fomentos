@@ -4,27 +4,31 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/wagner/convenios-e-fomentos/backend/internal/admin"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/app"
-	"github.com/wagner/convenios-e-fomentos/backend/internal/auth"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/authz"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/config"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/testutil"
 )
-
-const senha = "senha-super-forte-1"
 
 type env struct {
 	t     *testing.T
@@ -34,6 +38,7 @@ type env struct {
 	cfg   *config.Config
 	authz *authz.Engine
 	app   *app.App
+	oidc  *testutil.FakeOIDC
 }
 
 type resp struct {
@@ -55,12 +60,13 @@ func (r resp) errCode() string {
 func newEnv(t *testing.T, mutate ...func(*config.Config)) *env {
 	t.Helper()
 	pool := testutil.NewPool(t)
+	oidc := testutil.NewFakeOIDC(t)
 	cfg := &config.Config{
 		AppEnv: "test", HTTPPort: 8080,
-		JWTAdminSecret: "admin-secret-de-teste-com-32-caracteres!", JWTAPISecret: "api-secret-de-teste-com-32-caracteres!!!",
-		APITokenSalt:   "salt-de-teste-com-32-caracteres-ok-123",
+		JWKSURI: oidc.JWKSURI(), OIDCIssuer: oidc.Issuer, OIDCClientID: oidc.ClientID, OIDCCPFClaim: oidc.CPFClaim,
+		JWTAPISecret: "api-secret-de-teste-com-32-caracteres!!!", APITokenSalt: "salt-de-teste-com-32-caracteres-ok-123",
 		AccessTokenTTL: 15 * time.Minute, RefreshTokenMaxTTL: time.Hour, RefreshTokenIdleTTL: 30 * time.Minute,
-		InviteTokenTTL: time.Hour, ResetTokenTTL: 10 * time.Minute, EmailConfirmationTTL: time.Hour,
+		ResetTokenTTL: 10 * time.Minute, EmailConfirmationTTL: time.Hour,
 		RateLimitAuthPerMin: 1000, MaxBodyBytes: 1 << 20, PasswordMinLength: 8,
 		Argon2MemoryKiB: 64, Argon2Iterations: 1, Argon2Parallel: 1,
 		PublicURL: "http://app.test", CORSAllowedOrigins: []string{"http://localhost:3000"},
@@ -69,12 +75,12 @@ func newEnv(t *testing.T, mutate ...func(*config.Config)) *env {
 		m(cfg)
 	}
 	mail := &testutil.CaptureMailer{}
-	a, err := app.New(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), pool, mail)
-	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	a, err := app.New(ctx, cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), pool, mail)
+	require.NoError(t, err)
 	require.NoError(t, a.Start(ctx))
-	return &env{t: t, h: a.Handler, pool: pool, mail: mail, cfg: cfg, authz: a.Authz, app: a}
+	return &env{t: t, h: a.Handler, pool: pool, mail: mail, cfg: cfg, authz: a.Authz, app: a, oidc: oidc}
 }
 
 func (e *env) do(method, path string, body any, token string) resp {
@@ -98,314 +104,292 @@ func (e *env) do(method, path string, body any, token string) resp {
 	return out
 }
 
+// cpfFor deriva, do e-mail, um CPF válido e estável: os testes identificam os administradores
+// pelo e-mail, e o MT Login os identifica pelo CPF.
+func cpfFor(email string) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(email))
+	base := fmt.Sprintf("%09d", h.Sum64()%1_000_000_000)
+	if strings.Count(base, string(base[0])) == len(base) {
+		base = "123456789"
+	}
+	for range 2 {
+		sum := 0
+		for i := range len(base) {
+			sum += int(base[i]-'0') * (len(base) + 1 - i)
+		}
+		d := (sum * 10) % 11 % 10
+		base += fmt.Sprint(d)
+	}
+	return base
+}
+
+// identity é o usuário do MT Login de um e-mail.
+func identity(email string) testutil.Identity {
+	name, _, _ := strings.Cut(email, "@")
+	return testutil.Identity{CPF: cpf.Format(cpfFor(email)), Email: email, Given: strings.ToUpper(name[:1]) + name[1:], Family: "Teste"}
+}
+
+// token é o access token do MT Login do e-mail. O primeiro uso cria o administrador.
+func (e *env) token(email string) string { return e.oidc.Token(identity(email)) }
+
+// login usa o token do e-mail numa requisição autenticada (que cria ou atualiza o administrador).
+func (e *env) login(email string) string {
+	e.t.Helper()
+	tok := e.token(email)
+	require.Equal(e.t, 200, e.do("GET", "/admin/auth/me", nil, tok).Status)
+	return tok
+}
+
+// registerFirst cria o primeiro Super Admin (ana@exemplo.com) como a CLI faz.
 func (e *env) registerFirst() {
 	e.t.Helper()
-	r := e.do("POST", "/admin/auth/register-first", map[string]any{"firstName": "Ana", "lastName": "Admin", "email": "ana@exemplo.com", "password": senha}, "")
-	require.Equal(e.t, 201, r.Status, r.Body)
+	_, err := app.AdminService(e.pool).EnsureSuperAdmin(context.Background(), adminInput("ana@exemplo.com"), "")
+	require.NoError(e.t, err)
 }
 
-func (e *env) login(email, password string) resp {
-	return e.do("POST", "/admin/auth/login", map[string]any{"email": email, "password": password}, "")
+func adminInput(email string) admin.EnsureSuperAdminInput {
+	return admin.EnsureSuperAdminInput{CPF: cpfFor(email)}
 }
 
-func (e *env) loginOK(email, password string) (access, refresh string) {
-	e.t.Helper()
-	r := e.login(email, password)
-	require.Equal(e.t, 200, r.Status, r.Body)
-	return r.data()["accessToken"].(string), r.data()["refreshToken"].(string)
-}
-
-func TestRegistroInicialELogin(t *testing.T) {
+func TestPrimeiroAcessoCriaAdministradorSemRoles(t *testing.T) {
 	e := newEnv(t)
-	e.registerFirst()
-
-	r := e.do("POST", "/admin/auth/register-first", map[string]any{"firstName": "B", "lastName": "B", "email": "b@exemplo.com", "password": senha}, "")
-	assert.Equal(t, 403, r.Status)
-	assert.Equal(t, "setup_completed", r.errCode())
-
-	access, _ := e.loginOK("ANA@exemplo.com", senha) // e-mail sem diferenciar maiúsculas
-	me := e.do("GET", "/admin/auth/me", nil, access)
-	require.Equal(t, 200, me.Status)
-	assert.Equal(t, "ana@exemplo.com", me.data()["email"])
-	roles := me.data()["roles"].([]any)
-	require.Len(t, roles, 1)
-	assert.Equal(t, "super-admin", roles[0].(map[string]any)["code"])
-
-	// Credenciais inválidas: mesma resposta para senha errada e e-mail inexistente.
-	wrong := e.login("ana@exemplo.com", "errada-errada")
-	ghost := e.login("ninguem@exemplo.com", "errada-errada")
-	assert.Equal(t, 401, wrong.Status)
-	assert.Equal(t, wrong.Body, ghost.Body)
-
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, "").Status)
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, "lixo").Status)
-	assert.Equal(t, 422, e.login("nao-e-email", "x").Status)
-}
-
-func TestJWTDeOutraAudienciaERejeitado(t *testing.T) {
-	e := newEnv(t)
-	e.registerFirst()
-	a, err := db.New(e.pool).GetAdminByEmail(context.Background(), "ana@exemplo.com")
-	require.NoError(t, err)
-
-	apiTok, err := auth.NewJWTIssuer(e.cfg.JWTAPISecret, auth.AudienceAPI, time.Minute).Issue(a.ID, uuid.New())
-	require.NoError(t, err)
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, apiTok).Status)
-
-	// Mesmo com o segredo de admin, a audiência "api" é rejeitada.
-	wrongAud, _ := auth.NewJWTIssuer(e.cfg.JWTAdminSecret, auth.AudienceAPI, time.Minute).Issue(a.ID, uuid.New())
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, wrongAud).Status)
-
-	// Token válido, porém com sessão inexistente.
-	noSession, _ := auth.NewJWTIssuer(e.cfg.JWTAdminSecret, auth.AudienceAdmin, time.Minute).Issue(a.ID, uuid.New())
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, noSession).Status)
-}
-
-func TestRefreshComRotacaoEDeteccaoDeReuso(t *testing.T) {
-	e := newEnv(t)
-	e.registerFirst()
-	access1, refresh1 := e.loginOK("ana@exemplo.com", senha)
-
-	r := e.do("POST", "/admin/auth/refresh", map[string]any{"refreshToken": refresh1}, "")
-	require.Equal(t, 200, r.Status, r.Body)
-	access2, refresh2 := r.data()["accessToken"].(string), r.data()["refreshToken"].(string)
-	assert.NotEqual(t, refresh1, refresh2)
-	// A sessão (família) é a mesma: o access token antigo segue válido até expirar.
-	assert.Equal(t, 200, e.do("GET", "/admin/auth/me", nil, access1).Status)
-	assert.Equal(t, 200, e.do("GET", "/admin/auth/me", nil, access2).Status)
-
-	// Reuso do refresh token antigo: nega e revoga toda a família.
-	reuse := e.do("POST", "/admin/auth/refresh", map[string]any{"refreshToken": refresh1}, "")
-	assert.Equal(t, 401, reuse.Status)
-	assert.Equal(t, "invalid_refresh_token", reuse.errCode())
-	assert.Equal(t, 401, e.do("POST", "/admin/auth/refresh", map[string]any{"refreshToken": refresh2}, "").Status, "o token novo também deve ter sido revogado")
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, access2).Status, "o access token da família revogada deixa de valer")
-
-	// Token desconhecido.
-	assert.Equal(t, 401, e.do("POST", "/admin/auth/refresh", map[string]any{"refreshToken": "inexistente"}, "").Status)
-
-	// Reuso de uma sessão não afeta as outras sessões do usuário.
-	_, other := e.loginOK("ana@exemplo.com", senha)
-	assert.Equal(t, 200, e.do("POST", "/admin/auth/refresh", map[string]any{"refreshToken": other}, "").Status)
-}
-
-func TestRefreshExpiradoPorInatividade(t *testing.T) {
-	e := newEnv(t)
-	e.registerFirst()
-	_, refresh := e.loginOK("ana@exemplo.com", senha)
-	_, err := e.pool.Exec(context.Background(), "UPDATE admin_sessions SET expires_at = now() - interval '1 second'")
-	require.NoError(t, err)
-	assert.Equal(t, 401, e.do("POST", "/admin/auth/refresh", map[string]any{"refreshToken": refresh}, "").Status)
-}
-
-func TestRefreshRespeitaSessaoMaxima(t *testing.T) {
-	e := newEnv(t)
-	e.registerFirst()
-	_, refresh := e.loginOK("ana@exemplo.com", senha)
-	// A família começou antes do tempo máximo de sessão.
-	_, err := e.pool.Exec(context.Background(), "UPDATE admin_sessions SET family_started_at = now() - interval '2 hours'")
-	require.NoError(t, err)
-	assert.Equal(t, 401, e.do("POST", "/admin/auth/refresh", map[string]any{"refreshToken": refresh}, "").Status)
-}
-
-func TestSessoes(t *testing.T) {
-	e := newEnv(t)
-	e.registerFirst()
-	a1, _ := e.loginOK("ana@exemplo.com", senha)
-	a2, _ := e.loginOK("ana@exemplo.com", senha)
-
-	list := e.do("GET", "/admin/auth/sessions", nil, a1)
-	require.Equal(t, 200, list.Status)
-	items := list.Body["data"].([]any)
-	require.Len(t, items, 2)
-	var otherID string
-	for _, it := range items {
-		m := it.(map[string]any)
-		if m["current"] == false {
-			otherID = m["id"].(string)
-		}
-	}
-	require.NotEmpty(t, otherID)
-
-	assert.Equal(t, 204, e.do("DELETE", "/admin/auth/sessions/"+otherID, nil, a1).Status)
-	assert.Equal(t, 404, e.do("DELETE", "/admin/auth/sessions/"+otherID, nil, a1).Status)
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, a2).Status)
-	assert.Equal(t, 200, e.do("GET", "/admin/auth/me", nil, a1).Status)
-
-	// Revogar todas, preservando a atual.
-	e.loginOK("ana@exemplo.com", senha)
-	assert.Equal(t, 204, e.do("DELETE", "/admin/auth/sessions?keepCurrent=true", nil, a1).Status)
-	assert.Len(t, e.do("GET", "/admin/auth/sessions", nil, a1).Body["data"], 1)
-
-	// Logout invalida a sessão atual.
-	assert.Equal(t, 204, e.do("POST", "/admin/auth/logout", nil, a1).Status)
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, a1).Status)
-}
-
-func TestSessaoDeOutroAdminNaoPodeSerRevogada(t *testing.T) {
-	e := newEnv(t)
-	e.registerFirst()
-	_, err := db.New(e.pool).UpsertAdminRole(context.Background(), db.UpsertAdminRoleParams{Code: "editor", Name: "Editor"})
-	require.NoError(t, err)
-	a1, _ := e.loginOK("ana@exemplo.com", senha)
-	sess := e.do("GET", "/admin/auth/sessions", nil, a1).Body["data"].([]any)[0].(map[string]any)["id"].(string)
-
-	other := inviteAndAccept(t, e, a1, "beto@exemplo.com", "editor")
-	assert.Equal(t, 404, e.do("DELETE", "/admin/auth/sessions/"+sess, nil, other).Status)
-	assert.Equal(t, 200, e.do("GET", "/admin/auth/me", nil, a1).Status)
-}
-
-// inviteAndAccept convida um administrador com a role (por code) e devolve seu access token.
-func inviteAndAccept(t *testing.T, e *env, inviterToken, email, roleCode string) string {
-	t.Helper()
-	var roleID uuid.UUID
-	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT id FROM admin_roles WHERE code=$1", roleCode).Scan(&roleID))
-	inv := e.do("POST", "/admin/users/invite", map[string]any{"firstName": "Novo", "lastName": "Admin", "email": email, "roleIds": []string{roleID.String()}}, inviterToken)
-	require.Equal(t, 201, inv.Status, inv.Body)
-	url := inv.data()["inviteUrl"].(string)
-	token := url[len("http://app.test/admin/accept-invite?token="):]
-	acc := e.do("POST", "/admin/auth/accept-invite", map[string]any{"token": token, "password": senha}, "")
-	require.Equal(t, 200, acc.Status, acc.Body)
-	return acc.data()["accessToken"].(string)
-}
-
-func TestConvite(t *testing.T) {
-	e := newEnv(t)
-	e.registerFirst()
-	_, err := db.New(e.pool).UpsertAdminRole(context.Background(), db.UpsertAdminRoleParams{Code: "author", Name: "Author"})
-	require.NoError(t, err)
-	boss, _ := e.loginOK("ana@exemplo.com", senha)
-
-	var roleID uuid.UUID
-	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT id FROM admin_roles WHERE code='author'").Scan(&roleID))
-	body := map[string]any{"firstName": "Beto", "lastName": "Autor", "email": "beto@exemplo.com", "roleIds": []string{roleID.String()}}
-
-	assert.Equal(t, 401, e.do("POST", "/admin/users/invite", body, "").Status)
-
-	inv := e.do("POST", "/admin/users/invite", body, boss)
-	require.Equal(t, 201, inv.Status, inv.Body)
-	assert.Equal(t, false, inv.data()["admin"].(map[string]any)["isActive"])
-	url := inv.data()["inviteUrl"].(string)
-	token := url[len("http://app.test/admin/accept-invite?token="):]
-
-	// A conta fica inativa até o aceite.
-	assert.Equal(t, 401, e.login("beto@exemplo.com", senha).Status)
-
-	// Duplicado e role inexistente.
-	assert.Equal(t, 409, e.do("POST", "/admin/users/invite", body, boss).Status)
-	bad := map[string]any{"firstName": "C", "lastName": "C", "email": "c@exemplo.com", "roleIds": []string{uuid.NewString()}}
-	assert.Equal(t, 422, e.do("POST", "/admin/users/invite", bad, boss).Status)
 	var n int
-	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins WHERE email='c@exemplo.com'").Scan(&n))
-	assert.Zero(t, n, "convite com role inválida não pode deixar o admin criado")
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
+	require.Zero(t, n)
 
-	// Aceite: senha fraca, token errado, sucesso, reuso.
-	assert.Equal(t, 422, e.do("POST", "/admin/auth/accept-invite", map[string]any{"token": token, "password": "curta"}, "").Status)
-	assert.Equal(t, 400, e.do("POST", "/admin/auth/accept-invite", map[string]any{"token": "errado", "password": senha}, "").Status)
-	acc := e.do("POST", "/admin/auth/accept-invite", map[string]any{"token": token, "password": senha}, "")
-	require.Equal(t, 200, acc.Status, acc.Body)
-	assert.Equal(t, 400, e.do("POST", "/admin/auth/accept-invite", map[string]any{"token": token, "password": senha}, "").Status)
+	tok := e.token("maria@exemplo.com")
+	me := e.do("GET", "/admin/auth/me", nil, tok)
+	require.Equal(t, 200, me.Status, me.Body)
+	assert.Equal(t, "maria@exemplo.com", me.data()["email"])
+	assert.Equal(t, cpf.Format(cpfFor("maria@exemplo.com")), me.data()["cpf"], "o próprio usuário vê o CPF completo")
+	assert.Equal(t, false, me.data()["isSuperAdmin"])
+	assert.Empty(t, me.data()["roles"])
+	assert.Empty(t, me.data()["permissions"])
 
-	me := e.do("GET", "/admin/auth/me", nil, acc.data()["accessToken"].(string))
-	assert.Equal(t, "author", me.data()["roles"].([]any)[0].(map[string]any)["code"])
-	assert.Equal(t, 200, e.login("beto@exemplo.com", senha).Status)
+	var active bool
+	var cpfDB, first string
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT is_active, cpf, first_name FROM admins").Scan(&active, &cpfDB, &first))
+	assert.True(t, active)
+	assert.Equal(t, cpfFor("maria@exemplo.com"), cpfDB, "CPF gravado só com dígitos")
+	assert.Equal(t, "Maria", first)
 
-	// Sem permissão: quem não é Super Admin não convida (substituído pelo motor na Fase 3).
-	assert.Equal(t, 403, e.do("POST", "/admin/users/invite", map[string]any{"firstName": "D", "lastName": "D", "email": "d@exemplo.com", "roleIds": []string{roleID.String()}}, acc.data()["accessToken"].(string)).Status)
+	// Sem permissões, nada do painel abre.
+	assert.Equal(t, 403, e.do("GET", "/admin/users", nil, tok).Status)
+	assert.Equal(t, 403, e.do("GET", "/admin/roles", nil, tok).Status)
 
-	// Convite expirado.
-	inv2 := e.do("POST", "/admin/users/invite", map[string]any{"firstName": "E", "lastName": "E", "email": "e@exemplo.com", "roleIds": []string{roleID.String()}}, boss)
-	tok2 := inv2.data()["inviteUrl"].(string)[len("http://app.test/admin/accept-invite?token="):]
-	_, err = e.pool.Exec(context.Background(), "UPDATE one_time_tokens SET expires_at = now() - interval '1 minute'")
-	require.NoError(t, err)
-	assert.Equal(t, 400, e.do("POST", "/admin/auth/accept-invite", map[string]any{"token": tok2, "password": senha}, "").Status)
+	// Novos acessos reaproveitam o registro.
+	e.do("GET", "/admin/auth/me", nil, tok)
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
+	assert.Equal(t, 1, n)
 }
 
-func TestRedefinicaoDeSenha(t *testing.T) {
+func TestPrimeiroAcessoRegistraAuditoriaComCPFMascarado(t *testing.T) {
 	e := newEnv(t)
-	e.registerFirst()
-	access, _ := e.loginOK("ana@exemplo.com", senha)
+	e.login("maria@exemplo.com")
+	var payload []byte
+	var actor string
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT payload, actor_type FROM audit_logs WHERE action='admin.auto-provisioned'").Scan(&payload, &actor))
+	assert.Equal(t, "system", actor)
+	assert.Contains(t, string(payload), cpf.Mask(cpfFor("maria@exemplo.com")))
+	assert.NotContains(t, string(payload), cpfFor("maria@exemplo.com"), "o CPF completo não vai para a auditoria")
+}
 
-	// E-mail inexistente: mesma resposta e nenhum e-mail enviado.
-	assert.Equal(t, 204, e.do("POST", "/admin/auth/forgot-password", map[string]any{"email": "ghost@exemplo.com"}, "").Status)
-	assert.Zero(t, e.mail.Count())
+func TestPrimeiroAcessoConcorrenteCriaUmSoRegistro(t *testing.T) {
+	e := newEnv(t)
+	tok := e.token("maria@exemplo.com")
+	var wg sync.WaitGroup
+	statuses := make(chan int, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			statuses <- e.do("GET", "/admin/auth/me", nil, tok).Status
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	for s := range statuses {
+		assert.Equal(t, 200, s)
+	}
+	var n, logs int
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM audit_logs WHERE action='admin.auto-provisioned'").Scan(&logs))
+	assert.Equal(t, 1, n)
+	assert.Equal(t, 1, logs)
+}
 
-	assert.Equal(t, 204, e.do("POST", "/admin/auth/forgot-password", map[string]any{"email": "ana@exemplo.com"}, "").Status)
-	require.Equal(t, 1, e.mail.Count())
-	token := e.mail.LastToken()
-	require.NotEmpty(t, token)
+func TestLoginAtualizaNomeEEmailDoMTLogin(t *testing.T) {
+	e := newEnv(t)
+	id := identity("maria@exemplo.com")
+	e.do("GET", "/admin/auth/me", nil, e.oidc.Token(id))
 
-	assert.Equal(t, 422, e.do("POST", "/admin/auth/reset-password", map[string]any{"token": token, "password": "curta"}, "").Status)
-	assert.Equal(t, 400, e.do("POST", "/admin/auth/reset-password", map[string]any{"token": "x", "password": "nova-senha-123"}, "").Status)
-	assert.Equal(t, 204, e.do("POST", "/admin/auth/reset-password", map[string]any{"token": token, "password": "nova-senha-123"}, "").Status)
-	assert.Equal(t, 400, e.do("POST", "/admin/auth/reset-password", map[string]any{"token": token, "password": "outra-senha-123"}, "").Status, "uso único")
+	id.Email, id.Given, id.Family = "maria.nova@exemplo.com", "Maria José", "Souza"
+	me := e.do("GET", "/admin/auth/me", nil, e.oidc.Token(id))
+	require.Equal(t, 200, me.Status)
+	assert.Equal(t, "maria.nova@exemplo.com", me.data()["email"])
+	assert.Equal(t, "Maria José", me.data()["firstName"])
+	assert.Equal(t, "Souza", me.data()["lastName"])
 
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, access).Status, "sessões antigas são revogadas")
-	assert.Equal(t, 401, e.login("ana@exemplo.com", senha).Status)
-	assert.Equal(t, 200, e.login("ana@exemplo.com", "nova-senha-123").Status)
+	var n int
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
+	assert.Equal(t, 1, n, "o CPF é a identidade: mudar o e-mail não cria outra conta")
 
-	// Um novo pedido invalida o token anterior.
-	e.do("POST", "/admin/auth/forgot-password", map[string]any{"email": "ana@exemplo.com"}, "")
-	first := e.mail.LastToken()
-	e.do("POST", "/admin/auth/forgot-password", map[string]any{"email": "ana@exemplo.com"}, "")
-	assert.Equal(t, 400, e.do("POST", "/admin/auth/reset-password", map[string]any{"token": first, "password": "mais-uma-senha-1"}, "").Status)
+	// O e-mail pode se repetir entre contas (a identidade é o CPF).
+	other := identity("outra@exemplo.com")
+	other.Email = "maria.nova@exemplo.com"
+	assert.Equal(t, 200, e.do("GET", "/admin/auth/me", nil, e.oidc.Token(other)).Status)
+}
+
+func TestTokensRejeitados(t *testing.T) {
+	e := newEnv(t)
+	user := identity("maria@exemplo.com")
+	tests := []struct {
+		nome   string
+		token  string
+		status int
+		code   string
+	}{
+		{"sem token", "", 401, "unauthorized"},
+		{"lixo", "abc.def.ghi", 401, "unauthorized"},
+		{"assinatura de outra chave", e.oidc.TokenSignedByOther(t, user), 401, "unauthorized"},
+		{"expirado", e.oidc.TokenWith(user, func(c jwt.MapClaims) { c["exp"] = time.Now().Add(-time.Hour).Unix() }), 401, "unauthorized"},
+		{"emissor errado", e.oidc.TokenWith(user, func(c jwt.MapClaims) { c["iss"] = "https://outro/realms/x" }), 401, "unauthorized"},
+		{"outro client", e.oidc.TokenWith(user, func(c jwt.MapClaims) { c["azp"] = "outro-app" }), 401, "unauthorized"},
+		{"token de ID", e.oidc.TokenWith(user, func(c jwt.MapClaims) { c["typ"] = "ID" }), 401, "unauthorized"},
+		{"sem CPF", e.oidc.TokenWith(user, func(c jwt.MapClaims) { delete(c, e.oidc.CPFClaim) }), 403, "invalid_identity"},
+		{"CPF inválido", e.oidc.TokenWith(testutil.Identity{CPF: "111.111.111-11"}, nil), 403, "invalid_identity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.nome, func(t *testing.T) {
+			r := e.do("GET", "/admin/auth/me", nil, tt.token)
+			assert.Equal(t, tt.status, r.Status)
+			assert.Equal(t, tt.code, r.errCode())
+		})
+	}
+	var n int
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
+	assert.Zero(t, n, "token recusado nunca cria administrador")
+}
+
+func TestTokenDeUsuarioFinalNaoAbreOPainel(t *testing.T) {
+	e := newEnv(t)
+	access, _, _ := e.userToken("joao", "j@exemplo.com")
+	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, access).Status)
+}
+
+func TestRotasDeSenhaESessaoLocaisNaoExistem(t *testing.T) {
+	e := newEnv(t)
+	for _, rt := range []struct{ method, path string }{
+		{"POST", "/admin/auth/login"}, {"POST", "/admin/auth/refresh"}, {"POST", "/admin/auth/logout"},
+		{"POST", "/admin/auth/forgot-password"}, {"POST", "/admin/auth/reset-password"}, {"POST", "/admin/auth/accept-invite"},
+		{"POST", "/admin/auth/register-first"}, {"GET", "/admin/auth/sessions"}, {"POST", "/admin/users/invite"},
+	} {
+		assert.Contains(t, []int{404, 405}, e.do(rt.method, rt.path, map[string]any{}, e.token("ana@exemplo.com")).Status, rt.path)
+	}
 }
 
 func TestAdminBloqueadoOuInativoPerdeAcessoImediatamente(t *testing.T) {
 	e := newEnv(t)
 	e.registerFirst()
-	access, refresh := e.loginOK("ana@exemplo.com", senha)
+	tok := e.login("ana@exemplo.com")
 
 	_, err := e.pool.Exec(context.Background(), "UPDATE admins SET blocked = true")
 	require.NoError(t, err)
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, access).Status)
-	assert.Equal(t, 401, e.do("POST", "/admin/auth/refresh", map[string]any{"refreshToken": refresh}, "").Status)
-	assert.Equal(t, 401, e.login("ana@exemplo.com", senha).Status)
-	assert.Zero(t, e.mailAfterForgot("ana@exemplo.com"), "bloqueado não recebe e-mail de redefinição")
+	r := e.do("GET", "/admin/auth/me", nil, tok)
+	assert.Equal(t, 403, r.Status)
+	assert.Equal(t, "account_disabled", r.errCode())
+
+	_, err = e.pool.Exec(context.Background(), "UPDATE admins SET blocked = false, is_active = false")
+	require.NoError(t, err)
+	assert.Equal(t, "account_disabled", e.do("GET", "/admin/auth/me", nil, tok).errCode())
+
+	_, err = e.pool.Exec(context.Background(), "UPDATE admins SET is_active = true")
+	require.NoError(t, err)
+	assert.Equal(t, 200, e.do("GET", "/admin/auth/me", nil, tok).Status, "reativar devolve o acesso sem novo login")
 }
 
-func (e *env) mailAfterForgot(email string) int {
-	e.do("POST", "/admin/auth/forgot-password", map[string]any{"email": email}, "")
-	return e.mail.Count()
-}
-
-func TestLimiteDeRequisicoes(t *testing.T) {
-	e := newEnv(t, func(c *config.Config) { c.RateLimitAuthPerMin = 3 })
-	e.registerFirst()
-	for range 3 {
-		assert.Equal(t, 401, e.login("ana@exemplo.com", "errada-errada").Status)
-	}
-	r := e.login("ana@exemplo.com", "errada-errada")
-	assert.Equal(t, 429, r.Status)
-	assert.Equal(t, "rate_limited", r.errCode())
-	// Outro identificador do mesmo IP tem contagem própria.
-	assert.Equal(t, 401, e.login("outro@exemplo.com", "errada-errada").Status)
-}
-
-func TestAuditoriaDoConviteERegistroInicial(t *testing.T) {
+func TestSuperAdminPorCPFEIdempotente(t *testing.T) {
 	e := newEnv(t)
-	e.registerFirst()
+	svc := app.AdminService(e.pool)
+	ctx := context.Background()
+	in := adminInput("ana@exemplo.com")
+	first, err := svc.EnsureSuperAdmin(ctx, in, "")
+	require.NoError(t, err)
+	again, err := svc.EnsureSuperAdmin(ctx, in, "")
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, again.ID)
+
+	_, err = svc.EnsureSuperAdmin(ctx, admin.EnsureSuperAdminInput{CPF: "123"}, "")
+	assert.Error(t, err)
+
+	// Quem já entrou como usuário comum é promovido, sem duplicar.
+	e.login("beto@exemplo.com")
+	promoted, err := svc.EnsureSuperAdmin(ctx, adminInput("beto@exemplo.com"), "")
+	require.NoError(t, err)
+	assert.Equal(t, true, e.do("GET", "/admin/auth/me", nil, e.token("beto@exemplo.com")).data()["isSuperAdmin"])
 	var n int
-	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM audit_logs WHERE action='admin.create-super-admin'").Scan(&n))
+	require.NoError(t, e.pool.QueryRow(ctx, "SELECT count(*) FROM admins WHERE id=$1", promoted.ID).Scan(&n))
 	assert.Equal(t, 1, n)
 }
 
-func TestRegistroInicialConcorrente(t *testing.T) {
+func TestPreCadastroPorCPFECompletadoNoPrimeiroAcesso(t *testing.T) {
 	e := newEnv(t)
-	results := make(chan int, 5)
-	for i := range 5 {
-		go func() {
-			r := e.do("POST", "/admin/auth/register-first", map[string]any{"firstName": "A", "lastName": "B", "email": "x" + string(rune('a'+i)) + "@exemplo.com", "password": senha}, "")
-			results <- r.Status
-		}()
-	}
-	created := 0
-	for range 5 {
-		if <-results == 201 {
-			created++
-		}
-	}
-	assert.Equal(t, 1, created, "apenas um registro inicial pode vencer a corrida")
+	e.registerFirst()
+	boss := e.login("ana@exemplo.com")
+	e.mkRole("redator")
+
+	body := map[string]any{"cpf": cpf.Format(cpfFor("bia@exemplo.com")), "roleIds": []string{e.roleID("redator")}}
+	assert.Equal(t, 401, e.do("POST", "/admin/users", body, "").Status)
+
+	r := e.do("POST", "/admin/users", body, boss)
+	require.Equal(t, 201, r.Status, r.Body)
+	assert.Equal(t, "pending", r.data()["status"], "ainda não fez o primeiro acesso")
+	assert.Equal(t, cpf.Mask(cpfFor("bia@exemplo.com")), r.data()["cpf"], "a API devolve o CPF mascarado")
+	assert.Len(t, r.data()["roles"], 1)
+
+	// Mesmo CPF, em qualquer formatação, não cadastra de novo.
+	body["cpf"] = cpfFor("bia@exemplo.com")
+	rep := e.do("POST", "/admin/users", body, boss)
+	assert.Equal(t, 409, rep.Status)
+	assert.Equal(t, "cpf_taken", rep.errCode())
+
+	// No primeiro acesso, o registro existente é completado e já vem com a role.
+	me := e.do("GET", "/admin/auth/me", nil, e.token("bia@exemplo.com"))
+	require.Equal(t, 200, me.Status)
+	assert.Equal(t, "bia@exemplo.com", me.data()["email"])
+	assert.Equal(t, "Bia", me.data()["firstName"])
+	roles := me.data()["roles"].([]any)
+	require.Len(t, roles, 1)
+	assert.Equal(t, "redator", roles[0].(map[string]any)["code"])
+
+	var n int
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
+	assert.Equal(t, 2, n)
+	got := e.do("GET", "/admin/users/"+e.adminID("bia@exemplo.com"), nil, boss)
+	assert.Equal(t, "active", got.data()["status"])
+
+	logs := e.do("GET", "/admin/audit-logs?action=admin.register", nil, boss)
+	require.Len(t, logs.list(), 1)
+	assert.NotContains(t, fmt.Sprint(logs.list()[0]), cpfFor("bia@exemplo.com"), "auditoria sem o CPF completo")
+}
+
+func TestPreCadastroValidaEntrada(t *testing.T) {
+	e := newEnv(t)
+	e.registerFirst()
+	boss := e.login("ana@exemplo.com")
+	e.mkRole("redator")
+	role := []string{e.roleID("redator")}
+	valid := cpfFor("bia@exemplo.com")
+
+	assert.Equal(t, 422, e.do("POST", "/admin/users", map[string]any{"cpf": "111.111.111-11", "roleIds": role}, boss).Status, "CPF inválido")
+	assert.Equal(t, 422, e.do("POST", "/admin/users", map[string]any{"cpf": valid, "roleIds": []string{}}, boss).Status, "sem roles")
+	assert.Equal(t, 422, e.do("POST", "/admin/users", map[string]any{"cpf": valid, "roleIds": []string{uuid.NewString()}}, boss).Status, "role inexistente")
+	assert.Equal(t, 422, e.do("POST", "/admin/users", map[string]any{"cpf": valid, "roleIds": role, "departmentId": uuid.NewString()}, boss).Status, "departamento inexistente")
+	assert.Equal(t, 400, e.do("POST", "/admin/users", map[string]any{"cpf": valid, "roleIds": role, "email": "x@y.com"}, boss).Status, "e-mail vem do MT Login")
+	var n int
+	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
+	assert.Equal(t, 1, n, "pré-cadastro recusado não deixa rastro")
 }
 
 // grant dá à role (por code) a permissão e invalida o cache do motor.
@@ -423,29 +407,35 @@ func (e *env) grant(roleCode, action string, fields, conds string) {
 	require.NoError(e.t, e.authz.Invalidate(ctx, roleID))
 }
 
-func TestPermissaoParaConvidarViaMotor(t *testing.T) {
+// registerAndLogin cadastra o administrador pelo CPF com a role (por code), faz o primeiro acesso
+// dele e devolve seu access token.
+func registerAndLogin(t *testing.T, e *env, registrarToken, email, roleCode string) string {
+	t.Helper()
+	r := e.do("POST", "/admin/users", map[string]any{"cpf": cpfFor(email), "roleIds": []string{e.roleID(roleCode)}}, registrarToken)
+	require.Equal(t, 201, r.Status, r.Body)
+	return e.login(email)
+}
+
+func TestPermissaoParaCadastrarViaMotor(t *testing.T) {
 	e := newEnv(t)
 	e.registerFirst()
-	boss, _ := e.loginOK("ana@exemplo.com", senha)
+	boss := e.login("ana@exemplo.com")
 	_, err := db.New(e.pool).UpsertAdminRole(context.Background(), db.UpsertAdminRoleParams{Code: "rh", Name: "RH"})
 	require.NoError(t, err)
-	rh := inviteAndAccept(t, e, boss, "rh@exemplo.com", "rh")
+	rh := registerAndLogin(t, e, boss, "rh@exemplo.com", "rh")
 
-	var roleID uuid.UUID
-	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT id FROM admin_roles WHERE code='rh'").Scan(&roleID))
-	body := map[string]any{"firstName": "N", "lastName": "N", "email": "novo@exemplo.com", "roleIds": []string{roleID.String()}}
-
-	assert.Equal(t, 403, e.do("POST", "/admin/users/invite", body, rh).Status)
-	assert.Equal(t, 401, e.do("POST", "/admin/users/invite", body, "").Status)
+	body := map[string]any{"cpf": cpfFor("novo@exemplo.com"), "roleIds": []string{e.roleID("rh")}}
+	assert.Equal(t, 403, e.do("POST", "/admin/users", body, rh).Status)
+	assert.Equal(t, 401, e.do("POST", "/admin/users", body, "").Status)
 
 	e.grant("rh", "admin::settings.users.create", "", "[]")
-	assert.Equal(t, 201, e.do("POST", "/admin/users/invite", body, rh).Status, "a mudança vale logo após a invalidação")
+	assert.Equal(t, 201, e.do("POST", "/admin/users", body, rh).Status, "a mudança vale logo após a invalidação")
 }
 
 func TestMeComPermissoesEfetivas(t *testing.T) {
 	e := newEnv(t)
 	e.registerFirst()
-	boss, _ := e.loginOK("ana@exemplo.com", senha)
+	boss := e.login("ana@exemplo.com")
 
 	me := e.do("GET", "/admin/auth/me", nil, boss)
 	assert.Equal(t, true, me.data()["isSuperAdmin"])
@@ -455,7 +445,7 @@ func TestMeComPermissoesEfetivas(t *testing.T) {
 	require.NoError(t, err)
 	e.grant("leitor", "admin::settings.users.read", `["email"]`, `["admin::is-creator"]`)
 	e.grant("leitor", "admin::acao.fantasma.read", "", "[]") // ignorada: não registrada
-	leitor := inviteAndAccept(t, e, boss, "leitor@exemplo.com", "leitor")
+	leitor := registerAndLogin(t, e, boss, "leitor@exemplo.com", "leitor")
 
 	me = e.do("GET", "/admin/auth/me", nil, leitor)
 	assert.Equal(t, false, me.data()["isSuperAdmin"])
@@ -477,7 +467,7 @@ func TestStartRemovePermissoesDeAcoesInexistentes(t *testing.T) {
 	e.grant("x", "admin::settings.users.read", "", "[]")
 	e.grant("x", "admin::acao.antiga.read", "", "[]")
 
-	a, err := app.New(e.cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), e.pool, e.mail)
+	a, err := app.New(ctx, e.cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), e.pool, e.mail)
 	require.NoError(t, err)
 	require.NoError(t, a.Start(ctx))
 

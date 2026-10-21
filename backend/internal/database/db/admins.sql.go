@@ -11,15 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const activateAdmin = `-- name: ActivateAdmin :exec
-UPDATE admins SET is_active = true, updated_at = now() WHERE id = $1
-`
-
-func (q *Queries) ActivateAdmin(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, activateAdmin, id)
-	return err
-}
-
 const assignAdminRole = `-- name: AssignAdminRole :exec
 INSERT INTO admin_users_roles (admin_id, role_id) VALUES ($1, $2)
 ON CONFLICT DO NOTHING
@@ -61,38 +52,28 @@ func (q *Queries) CountAdminRoles(ctx context.Context, adminID uuid.UUID) (int64
 	return count, err
 }
 
-const countAdmins = `-- name: CountAdmins :one
-SELECT count(*) FROM admins
-`
-
-func (q *Queries) CountAdmins(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countAdmins)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createAdmin = `-- name: CreateAdmin :one
-INSERT INTO admins (first_name, last_name, email, password_hash, is_active, department_id)
+INSERT INTO admins (cpf, first_name, last_name, email, is_active, department_id)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at
+RETURNING id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at, cpf, last_login_at
 `
 
 type CreateAdminParams struct {
+	Cpf          *string    `json:"cpf"`
 	FirstName    string     `json:"first_name"`
 	LastName     string     `json:"last_name"`
 	Email        string     `json:"email"`
-	PasswordHash *string    `json:"password_hash"`
 	IsActive     bool       `json:"is_active"`
 	DepartmentID *uuid.UUID `json:"department_id"`
 }
 
+// Pré-cadastro por um administrador: falha com violação de unicidade se o CPF já existe.
 func (q *Queries) CreateAdmin(ctx context.Context, arg CreateAdminParams) (Admin, error) {
 	row := q.db.QueryRow(ctx, createAdmin,
+		arg.Cpf,
 		arg.FirstName,
 		arg.LastName,
 		arg.Email,
-		arg.PasswordHash,
 		arg.IsActive,
 		arg.DepartmentID,
 	)
@@ -109,6 +90,8 @@ func (q *Queries) CreateAdmin(ctx context.Context, arg CreateAdminParams) (Admin
 		&i.DepartmentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Cpf,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
@@ -125,12 +108,12 @@ func (q *Queries) DeleteAdminsByIDs(ctx context.Context, dollar_1 []uuid.UUID) (
 	return result.RowsAffected(), nil
 }
 
-const getAdminByEmail = `-- name: GetAdminByEmail :one
-SELECT id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at FROM admins WHERE email = $1
+const getAdminByCPF = `-- name: GetAdminByCPF :one
+SELECT id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at, cpf, last_login_at FROM admins WHERE cpf = $1
 `
 
-func (q *Queries) GetAdminByEmail(ctx context.Context, email string) (Admin, error) {
-	row := q.db.QueryRow(ctx, getAdminByEmail, email)
+func (q *Queries) GetAdminByCPF(ctx context.Context, cpf *string) (Admin, error) {
+	row := q.db.QueryRow(ctx, getAdminByCPF, cpf)
 	var i Admin
 	err := row.Scan(
 		&i.ID,
@@ -144,12 +127,14 @@ func (q *Queries) GetAdminByEmail(ctx context.Context, email string) (Admin, err
 		&i.DepartmentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Cpf,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const getAdminByID = `-- name: GetAdminByID :one
-SELECT id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at FROM admins WHERE id = $1
+SELECT id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at, cpf, last_login_at FROM admins WHERE id = $1
 `
 
 func (q *Queries) GetAdminByID(ctx context.Context, id uuid.UUID) (Admin, error) {
@@ -167,6 +152,8 @@ func (q *Queries) GetAdminByID(ctx context.Context, id uuid.UUID) (Admin, error)
 		&i.DepartmentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Cpf,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
@@ -204,7 +191,7 @@ func (q *Queries) GetAdminRolesByIDs(ctx context.Context, dollar_1 []uuid.UUID) 
 }
 
 const getAdminsByIDs = `-- name: GetAdminsByIDs :many
-SELECT id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at FROM admins WHERE id = ANY($1::uuid[])
+SELECT id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at, cpf, last_login_at FROM admins WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) GetAdminsByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]Admin, error) {
@@ -228,6 +215,8 @@ func (q *Queries) GetAdminsByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]A
 			&i.DepartmentID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Cpf,
+			&i.LastLoginAt,
 		); err != nil {
 			return nil, err
 		}
@@ -274,15 +263,6 @@ func (q *Queries) ListRolesForAdmin(ctx context.Context, adminID uuid.UUID) ([]A
 	return items, nil
 }
 
-const lockAdminSetup = `-- name: LockAdminSetup :exec
-SELECT pg_advisory_xact_lock(7001)
-`
-
-func (q *Queries) LockAdminSetup(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, lockAdminSetup)
-	return err
-}
-
 const lockSuperAdmins = `-- name: LockSuperAdmins :exec
 SELECT pg_advisory_xact_lock(7002)
 `
@@ -291,6 +271,47 @@ SELECT pg_advisory_xact_lock(7002)
 func (q *Queries) LockSuperAdmins(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, lockSuperAdmins)
 	return err
+}
+
+const provisionAdminFromLogin = `-- name: ProvisionAdminFromLogin :one
+INSERT INTO admins (cpf, first_name, last_name, email, is_active, last_login_at)
+VALUES ($1, $2, $3, $4, true, now())
+ON CONFLICT (cpf) DO NOTHING
+RETURNING id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at, cpf, last_login_at
+`
+
+type ProvisionAdminFromLoginParams struct {
+	Cpf       *string `json:"cpf"`
+	FirstName string  `json:"first_name"`
+	LastName  string  `json:"last_name"`
+	Email     string  `json:"email"`
+}
+
+// Primeiro acesso: cria o registro; se outra requisição criou antes, não devolve linha.
+func (q *Queries) ProvisionAdminFromLogin(ctx context.Context, arg ProvisionAdminFromLoginParams) (Admin, error) {
+	row := q.db.QueryRow(ctx, provisionAdminFromLogin,
+		arg.Cpf,
+		arg.FirstName,
+		arg.LastName,
+		arg.Email,
+	)
+	var i Admin
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Username,
+		&i.PasswordHash,
+		&i.IsActive,
+		&i.Blocked,
+		&i.DepartmentID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Cpf,
+		&i.LastLoginAt,
+	)
+	return i, err
 }
 
 const removeAdminRole = `-- name: RemoveAdminRole :execrows
@@ -324,42 +345,42 @@ func (q *Queries) SetAdminActive(ctx context.Context, arg SetAdminActiveParams) 
 	return err
 }
 
-const setAdminPassword = `-- name: SetAdminPassword :exec
-UPDATE admins SET password_hash = $2, updated_at = now() WHERE id = $1
-`
-
-type SetAdminPasswordParams struct {
-	ID           uuid.UUID `json:"id"`
-	PasswordHash *string   `json:"password_hash"`
-}
-
-func (q *Queries) SetAdminPassword(ctx context.Context, arg SetAdminPasswordParams) error {
-	_, err := q.db.Exec(ctx, setAdminPassword, arg.ID, arg.PasswordHash)
-	return err
-}
-
-const updateAdmin = `-- name: UpdateAdmin :one
-UPDATE admins SET first_name = $2, last_name = $3, email = $4, department_id = $5, updated_at = now()
+const syncAdminFromLogin = `-- name: SyncAdminFromLogin :exec
+UPDATE admins SET first_name = $2, last_name = $3, email = $4, last_login_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at
 `
 
-type UpdateAdminParams struct {
-	ID           uuid.UUID  `json:"id"`
-	FirstName    string     `json:"first_name"`
-	LastName     string     `json:"last_name"`
-	Email        string     `json:"email"`
-	DepartmentID *uuid.UUID `json:"department_id"`
+type SyncAdminFromLoginParams struct {
+	ID        uuid.UUID `json:"id"`
+	FirstName string    `json:"first_name"`
+	LastName  string    `json:"last_name"`
+	Email     string    `json:"email"`
 }
 
-func (q *Queries) UpdateAdmin(ctx context.Context, arg UpdateAdminParams) (Admin, error) {
-	row := q.db.QueryRow(ctx, updateAdmin,
+// Atualiza os dados vindos do MT Login e registra o acesso.
+func (q *Queries) SyncAdminFromLogin(ctx context.Context, arg SyncAdminFromLoginParams) error {
+	_, err := q.db.Exec(ctx, syncAdminFromLogin,
 		arg.ID,
 		arg.FirstName,
 		arg.LastName,
 		arg.Email,
-		arg.DepartmentID,
 	)
+	return err
+}
+
+const updateAdmin = `-- name: UpdateAdmin :one
+UPDATE admins SET department_id = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, first_name, last_name, email, username, password_hash, is_active, blocked, department_id, created_at, updated_at, cpf, last_login_at
+`
+
+type UpdateAdminParams struct {
+	ID           uuid.UUID  `json:"id"`
+	DepartmentID *uuid.UUID `json:"department_id"`
+}
+
+func (q *Queries) UpdateAdmin(ctx context.Context, arg UpdateAdminParams) (Admin, error) {
+	row := q.db.QueryRow(ctx, updateAdmin, arg.ID, arg.DepartmentID)
 	var i Admin
 	err := row.Scan(
 		&i.ID,
@@ -373,6 +394,8 @@ func (q *Queries) UpdateAdmin(ctx context.Context, arg UpdateAdminParams) (Admin
 		&i.DepartmentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Cpf,
+		&i.LastLoginAt,
 	)
 	return i, err
 }

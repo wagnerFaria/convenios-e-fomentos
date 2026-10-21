@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 )
 
@@ -38,10 +39,10 @@ func (e *env) mkRole(code string, actions ...string) {
 	}
 }
 
-// newAdmin convida e ativa um administrador com a role e devolve (token, id).
+// newAdmin cadastra o administrador pelo CPF com a role, faz o primeiro acesso dele e devolve (token, id).
 func (e *env) newAdmin(boss, email, roleCode string) (string, string) {
 	e.t.Helper()
-	tok := inviteAndAccept(e.t, e, boss, email, roleCode)
+	tok := registerAndLogin(e.t, e, boss, email, roleCode)
 	return tok, e.adminID(email)
 }
 
@@ -60,7 +61,7 @@ var usersAll = []string{"admin::settings.users.read", "admin::settings.users.cre
 func setup(t *testing.T) (*env, string) {
 	e := newEnv(t)
 	e.registerFirst()
-	boss, _ := e.loginOK("ana@exemplo.com", senha)
+	boss := e.login("ana@exemplo.com")
 	return e, boss
 }
 
@@ -94,8 +95,8 @@ func TestListagemDeAdministradores(t *testing.T) {
 		e.newAdmin(boss, n+"@exemplo.com", "redator")
 	}
 	e.newAdmin(boss, "eva.revisora@exemplo.com", "revisor")
-	// Convite pendente.
-	inv := e.do("POST", "/admin/users/invite", map[string]any{"firstName": "Pendente", "lastName": "Da Silva", "email": "pend@exemplo.com", "roleIds": []string{e.roleID("redator")}}, boss)
+	// Pré-cadastro que ainda não fez o primeiro acesso.
+	inv := e.do("POST", "/admin/users", map[string]any{"cpf": cpfFor("pend@exemplo.com"), "roleIds": []string{e.roleID("redator")}}, boss)
 	require.Equal(t, 201, inv.Status)
 	// Um desativado.
 	e.do("POST", "/admin/users/"+e.adminID("dora@exemplo.com")+"/deactivate", nil, boss)
@@ -108,7 +109,10 @@ func TestListagemDeAdministradores(t *testing.T) {
 
 	count := func(query string) int { return len(e.do("GET", "/admin/users?"+query, nil, boss).list()) }
 	assert.Equal(t, 1, count("q=revisora"), "busca no e-mail")
-	assert.Equal(t, 1, count("q="+url.QueryEscape("Pendente Da")), "busca no nome completo")
+	assert.Equal(t, 1, count("q="+url.QueryEscape("Bia Teste")), "busca no nome completo")
+	assert.Equal(t, 1, count("q="+url.QueryEscape(cpf.Format(cpfFor("caio@exemplo.com")))), "busca por CPF com pontuação")
+	assert.Equal(t, 1, count("q="+cpfFor("dora@exemplo.com")), "busca por CPF só com dígitos")
+	assert.Equal(t, 0, count("q=00"), "menos de 3 dígitos não busca por CPF")
 	assert.Equal(t, 0, count("q=%25"), "% é literal, não curinga")
 	assert.Equal(t, 4, count("roleId="+e.roleID("redator")), "dora desativada e o convite pendente também têm a role")
 	assert.Equal(t, 4, count("status=active"))
@@ -121,9 +125,9 @@ func TestListagemDeAdministradores(t *testing.T) {
 	asc := e.do("GET", "/admin/users?sort=email:asc&pageSize=2&page=2", nil, boss)
 	require.Equal(t, 200, asc.Status)
 	assert.EqualValues(t, 3, asc.meta()["pageCount"])
-	assert.Equal(t, "caio@exemplo.com", asc.list()[0].(map[string]any)["email"])
+	assert.Equal(t, "bia@exemplo.com", asc.list()[0].(map[string]any)["email"], "o pré-cadastro, sem e-mail ainda, vem primeiro")
 	desc := e.do("GET", "/admin/users?sort=email:desc", nil, boss)
-	assert.Equal(t, "pend@exemplo.com", desc.list()[0].(map[string]any)["email"])
+	assert.Equal(t, "eva.revisora@exemplo.com", desc.list()[0].(map[string]any)["email"])
 
 	// Limite máximo de pageSize e entradas inválidas.
 	assert.EqualValues(t, 100, e.do("GET", "/admin/users?pageSize=5000", nil, boss).meta()["pageSize"])
@@ -134,9 +138,12 @@ func TestListagemDeAdministradores(t *testing.T) {
 	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
 	assert.Equal(t, 6, n)
 
-	item := all.list()[0].(map[string]any)
-	assert.Contains(t, item, "roles")
-	assert.NotContains(t, item, "passwordHash")
+	for _, raw := range all.list() {
+		item := raw.(map[string]any)
+		assert.Contains(t, item, "roles")
+		assert.NotContains(t, item, "passwordHash")
+		assert.Regexp(t, `^\*\*\*\.\d{3}\.\d{3}-\*\*$`, item["cpf"], "CPF sempre mascarado nas listagens")
+	}
 }
 
 func TestEdicaoDeAdministrador(t *testing.T) {
@@ -147,28 +154,32 @@ func TestEdicaoDeAdministrador(t *testing.T) {
 	dept, err := db.New(e.pool).UpsertDepartment(context.Background(), "Financeiro")
 	require.NoError(t, err)
 
-	body := map[string]any{"firstName": "Beatriz", "lastName": "Souza", "email": "beatriz@exemplo.com", "departmentId": dept.ID.String()}
-	r := e.do("PUT", "/admin/users/"+bia, body, boss)
+	r := e.do("PUT", "/admin/users/"+bia, map[string]any{"departmentId": dept.ID.String()}, boss)
 	require.Equal(t, 200, r.Status, r.Body)
-	assert.Equal(t, "beatriz@exemplo.com", r.data()["email"])
 	assert.Equal(t, dept.ID.String(), r.data()["departmentId"])
+	assert.Equal(t, "bia@exemplo.com", r.data()["email"], "e-mail e nome continuam os do MT Login")
 
-	body["email"] = "caio@exemplo.com"
-	assert.Equal(t, 409, e.do("PUT", "/admin/users/"+bia, body, boss).Status)
-	body["email"] = "ok@exemplo.com"
-	body["departmentId"] = uuid.NewString()
-	assert.Equal(t, 422, e.do("PUT", "/admin/users/"+bia, body, boss).Status)
-	assert.Equal(t, 422, e.do("PUT", "/admin/users/"+bia, map[string]any{"firstName": "", "lastName": "x", "email": "x"}, boss).Status)
-	assert.Equal(t, 404, e.do("PUT", "/admin/users/"+uuid.NewString(), body, boss).Status)
+	// Nome, CPF e e-mail não são editáveis: vêm do MT Login.
+	for _, field := range []map[string]any{{"firstName": "X"}, {"email": "x@y.com"}, {"cpf": cpfFor("x@y.com")}} {
+		assert.Equal(t, 400, e.do("PUT", "/admin/users/"+bia, field, boss).Status, "campo desconhecido: %v", field)
+	}
+	assert.Equal(t, 422, e.do("PUT", "/admin/users/"+bia, map[string]any{"departmentId": uuid.NewString()}, boss).Status)
+	assert.Equal(t, 404, e.do("PUT", "/admin/users/"+uuid.NewString(), map[string]any{}, boss).Status)
 	assert.Equal(t, 404, e.do("GET", "/admin/users/nao-uuid", nil, boss).Status)
 	assert.Equal(t, 200, e.do("GET", "/admin/users/"+caio, nil, boss).Status)
 
+	// Remover o departamento.
+	r = e.do("PUT", "/admin/users/"+bia, map[string]any{"departmentId": nil}, boss)
+	require.Equal(t, 200, r.Status)
+	assert.Nil(t, r.data()["departmentId"])
+
 	// Auditoria com estado anterior e novo.
 	logs := e.do("GET", "/admin/audit-logs?action=admin.update&entityId="+bia, nil, boss)
-	require.Len(t, logs.list(), 1)
-	payload := logs.list()[0].(map[string]any)["payload"].(map[string]any)
-	assert.Equal(t, "bia@exemplo.com", payload["before"].(map[string]any)["email"])
-	assert.Equal(t, "beatriz@exemplo.com", payload["after"].(map[string]any)["email"])
+	require.Len(t, logs.list(), 2)
+	payload := logs.list()[1].(map[string]any)["payload"].(map[string]any)
+	assert.Nil(t, payload["before"].(map[string]any)["departmentId"])
+	assert.Equal(t, dept.ID.String(), payload["after"].(map[string]any)["departmentId"])
+	assert.Equal(t, cpf.Mask(cpfFor("bia@exemplo.com")), payload["after"].(map[string]any)["cpf"])
 	assert.Equal(t, e.adminID("ana@exemplo.com"), logs.list()[0].(map[string]any)["actorId"])
 }
 
@@ -192,23 +203,18 @@ func TestAtivarDesativarEProtecaoDoUltimoSuperAdmin(t *testing.T) {
 	// Auto-desativação é proibida.
 	assert.Equal(t, "cannot_modify_self", e.do("POST", "/admin/users/"+gestorID+"/deactivate", nil, gestor).errCode())
 
-	// Desativar a Ana revoga as sessões dela imediatamente.
+	// Desativar a Ana tira o acesso dela na requisição seguinte, mesmo com o token ainda válido.
 	r = e.do("POST", "/admin/users/"+ana+"/deactivate", nil, gestor)
 	require.Equal(t, 200, r.Status, r.Body)
 	assert.Equal(t, "inactive", r.data()["status"])
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, boss).Status)
-	assert.Equal(t, 401, e.login("ana@exemplo.com", senha).Status)
+	me := e.do("GET", "/admin/auth/me", nil, boss)
+	assert.Equal(t, 403, me.Status)
+	assert.Equal(t, "account_disabled", me.errCode())
 
-	// Reativar.
+	// Reativar devolve o acesso.
 	r = e.do("POST", "/admin/users/"+ana+"/activate", nil, gestor)
 	assert.Equal(t, "active", r.data()["status"])
-	assert.Equal(t, 200, e.login("ana@exemplo.com", senha).Status)
-
-	// Convite pendente não pode ser ativado manualmente.
-	inv := e.do("POST", "/admin/users/invite", map[string]any{"firstName": "P", "lastName": "P", "email": "p@exemplo.com", "roleIds": []string{e.roleID("gestor")}}, gestor)
-	require.Equal(t, 201, inv.Status)
-	pend := inv.data()["admin"].(map[string]any)["id"].(string)
-	assert.Equal(t, "invitation_pending", e.do("POST", "/admin/users/"+pend+"/activate", nil, gestor).errCode())
+	assert.Equal(t, 200, e.do("GET", "/admin/auth/me", nil, boss).Status)
 }
 
 func TestExclusaoIndividualEmLoteEUltimoSuperAdmin(t *testing.T) {
@@ -276,13 +282,13 @@ func TestRemoverSuperAdminDoUltimoESerUnicoAdmin(t *testing.T) {
 	assert.Equal(t, 422, e.do("POST", "/admin/users/"+ana+"/roles", map[string]any{"roleIds": []string{uuid.NewString()}}, gtok).Status)
 }
 
-func TestConviteComSuperAdminSoPorSuperAdmin(t *testing.T) {
+func TestCadastroComSuperAdminSoPorSuperAdmin(t *testing.T) {
 	e, boss := setup(t)
 	e.mkRole("gestor", usersAll...)
 	gestor, _ := e.newAdmin(boss, "gestor@exemplo.com", "gestor")
-	body := map[string]any{"firstName": "X", "lastName": "X", "email": "x@exemplo.com", "roleIds": []string{e.roleID("super-admin")}}
-	assert.Equal(t, 403, e.do("POST", "/admin/users/invite", body, gestor).Status)
-	assert.Equal(t, 201, e.do("POST", "/admin/users/invite", body, boss).Status)
+	body := map[string]any{"cpf": cpfFor("x@exemplo.com"), "roleIds": []string{e.roleID("super-admin")}}
+	assert.Equal(t, 403, e.do("POST", "/admin/users", body, gestor).Status)
+	assert.Equal(t, 201, e.do("POST", "/admin/users", body, boss).Status)
 }
 
 func TestDesativacoesConcorrentesNaoRemovemTodosOsSuperAdmins(t *testing.T) {

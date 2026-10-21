@@ -19,9 +19,19 @@ type Config struct {
 
 	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://app:app@localhost:5432/app?sslmode=disable"`
 
-	JWTAdminSecret string `env:"JWT_ADMIN_SECRET" envDefault:"dev-only-admin-secret-change-me-0000000000"`
-	JWTAPISecret   string `env:"JWT_API_SECRET" envDefault:"dev-only-api-secret-change-me-000000000000"`
-	APITokenSalt   string `env:"API_TOKEN_SALT" envDefault:"dev-only-api-token-salt-change-me-0000000"`
+	// Autenticação dos administradores via MT Login (Keycloak/OIDC). O frontend conduz o login e a API
+	// só valida os access tokens, com as chaves públicas do JWKS.
+	JWKSURI      string `env:"JWKS_URI"`
+	OIDCIssuer   string `env:"OIDC_ISSUER"`
+	OIDCClientID string `env:"OIDC_CLIENT_ID"`
+	// Claim do access token que traz o CPF do usuário.
+	OIDCCPFClaim string `env:"OIDC_CPF_CLAIM" envDefault:"preferred_username"`
+	// CPFs que o seed (e o cadastro inicial) torna Super Admin, separados por vírgula.
+	SeedSuperAdminCPFs []string `env:"SEED_SUPER_ADMIN_CPF" envSeparator:","`
+
+	// Segredo dos JWTs dos usuários finais (/api/*).
+	JWTAPISecret string `env:"JWT_API_SECRET" envDefault:"dev-only-api-secret-change-me-000000000000"`
+	APITokenSalt string `env:"API_TOKEN_SALT" envDefault:"dev-only-api-token-salt-change-me-0000000"`
 
 	AccessTokenTTL      time.Duration `env:"ACCESS_TOKEN_TTL" envDefault:"15m"`
 	RefreshTokenMaxTTL  time.Duration `env:"REFRESH_TOKEN_MAX_TTL" envDefault:"720h"`
@@ -30,11 +40,9 @@ type Config struct {
 	CORSAllowedOrigins  []string `env:"CORS_ALLOWED_ORIGINS" envSeparator:"," envDefault:"http://localhost:3000"`
 	RateLimitAuthPerMin int      `env:"RATE_LIMIT_AUTH_PER_MINUTE" envDefault:"10"`
 	// Limite geral por IP em todas as rotas (0 desliga). Protege o banco de requisições em massa.
-	RateLimitGlobalPerMin int `env:"RATE_LIMIT_GLOBAL_PER_MINUTE" envDefault:"600"`
-	// Registro inicial do primeiro Super Admin por HTTP. Sem valor: habilitado fora de produção.
-	InitialRegistrationEnabled *bool `env:"INITIAL_REGISTRATION_ENABLED"`
-	MaxBodyBytes               int64 `env:"MAX_BODY_BYTES" envDefault:"1048576"`
-	PasswordMinLength          int   `env:"PASSWORD_MIN_LENGTH" envDefault:"8"`
+	RateLimitGlobalPerMin int   `env:"RATE_LIMIT_GLOBAL_PER_MINUTE" envDefault:"600"`
+	MaxBodyBytes          int64 `env:"MAX_BODY_BYTES" envDefault:"1048576"`
+	PasswordMinLength     int   `env:"PASSWORD_MIN_LENGTH" envDefault:"8"`
 
 	SMTPHost     string `env:"SMTP_HOST"`
 	SMTPPort     int    `env:"SMTP_PORT" envDefault:"587"`
@@ -42,9 +50,8 @@ type Config struct {
 	SMTPPassword string `env:"SMTP_PASSWORD"`
 	SMTPFrom     string `env:"SMTP_FROM" envDefault:"no-reply@localhost"`
 
-	// Validade dos tokens de uso único.
-	InviteTokenTTL time.Duration `env:"INVITE_TOKEN_TTL" envDefault:"168h"`
-	ResetTokenTTL  time.Duration `env:"RESET_TOKEN_TTL" envDefault:"30m"`
+	// Validade do link de redefinição de senha dos usuários finais.
+	ResetTokenTTL time.Duration `env:"RESET_TOKEN_TTL" envDefault:"30m"`
 	// Validade do link de confirmação de e-mail dos usuários finais.
 	EmailConfirmationTTL time.Duration `env:"EMAIL_CONFIRMATION_TTL" envDefault:"72h"`
 
@@ -83,15 +90,6 @@ func getAppEnv() string {
 	return c.AppEnv
 }
 
-// InitialRegistrationAllowed informa se POST /admin/auth/register-first está habilitado.
-// Em produção só com INITIAL_REGISTRATION_ENABLED=true explícito; prefira a CLI (admin:create).
-func (c *Config) InitialRegistrationAllowed() bool {
-	if c.InitialRegistrationEnabled != nil {
-		return *c.InitialRegistrationEnabled
-	}
-	return !c.IsProduction()
-}
-
 // IsProduction indica se a aplicação roda em produção.
 func (c *Config) IsProduction() bool { return c.AppEnv == "production" }
 
@@ -115,8 +113,8 @@ func (c *Config) Validate() error {
 	if c.AccessTokenTTL <= 0 || c.RefreshTokenMaxTTL <= 0 || c.RefreshTokenIdleTTL <= 0 {
 		errs = append(errs, errors.New("as durações de token devem ser positivas"))
 	}
-	if c.InviteTokenTTL <= 0 || c.ResetTokenTTL <= 0 || c.EmailConfirmationTTL <= 0 {
-		errs = append(errs, errors.New("INVITE_TOKEN_TTL, RESET_TOKEN_TTL e EMAIL_CONFIRMATION_TTL devem ser positivos"))
+	if c.ResetTokenTTL <= 0 || c.EmailConfirmationTTL <= 0 {
+		errs = append(errs, errors.New("RESET_TOKEN_TTL e EMAIL_CONFIRMATION_TTL devem ser positivos"))
 	}
 	if c.PasswordMinLength < 1 {
 		errs = append(errs, errors.New("PASSWORD_MIN_LENGTH deve ser >= 1"))
@@ -132,17 +130,31 @@ func (c *Config) Validate() error {
 	}
 	if c.IsProduction() {
 		secrets := map[string]string{
-			"JWT_ADMIN_SECRET": c.JWTAdminSecret,
-			"JWT_API_SECRET":   c.JWTAPISecret,
-			"API_TOKEN_SALT":   c.APITokenSalt,
+			"JWT_API_SECRET": c.JWTAPISecret,
+			"API_TOKEN_SALT": c.APITokenSalt,
 		}
 		for name, v := range secrets {
 			if len(v) < minSecretLen || strings.HasPrefix(v, "dev-only-") {
 				errs = append(errs, fmt.Errorf("%s ausente ou fraco: em produção use um valor aleatório com ao menos %d caracteres", name, minSecretLen))
 			}
 		}
-		if c.JWTAdminSecret == c.JWTAPISecret {
-			errs = append(errs, errors.New("JWT_ADMIN_SECRET e JWT_API_SECRET devem ser diferentes"))
+	}
+	return errors.Join(errs...)
+}
+
+// ValidateOIDC exige o provedor de identidade dos administradores configurado. Só o servidor da
+// API precisa dele; a CLI (migrações, seed, administradores) funciona sem.
+func (c *Config) ValidateOIDC() error {
+	var errs []error
+	for name, v := range map[string]string{"JWKS_URI": c.JWKSURI, "OIDC_ISSUER": c.OIDCIssuer, "OIDC_CLIENT_ID": c.OIDCClientID, "OIDC_CPF_CLAIM": c.OIDCCPFClaim} {
+		if strings.TrimSpace(v) == "" {
+			errs = append(errs, fmt.Errorf("%s é obrigatório (login dos administradores pelo MT Login)", name))
+		}
+	}
+	for name, v := range map[string]string{"JWKS_URI": c.JWKSURI, "OIDC_ISSUER": c.OIDCIssuer} {
+		httpAllowed := !c.IsProduction() && strings.HasPrefix(v, "http://")
+		if v != "" && !strings.HasPrefix(v, "https://") && !httpAllowed {
+			errs = append(errs, fmt.Errorf("%s deve ser uma URL https", name))
 		}
 	}
 	return errors.Join(errs...)

@@ -15,11 +15,10 @@ func TestValidateProducao(t *testing.T) {
 		return &Config{
 			AppEnv: "production", HTTPPort: 8080, PasswordMinLength: 8,
 			AccessTokenTTL: 1, RefreshTokenMaxTTL: 1, RefreshTokenIdleTTL: 1,
-			InviteTokenTTL: 1, ResetTokenTTL: 1, EmailConfirmationTTL: 1, RateLimitAuthPerMin: 10,
+			ResetTokenTTL: 1, EmailConfirmationTTL: 1, RateLimitAuthPerMin: 10,
 			Argon2MemoryKiB: 19456, Argon2Iterations: 2, Argon2Parallel: 1,
-			JWTAdminSecret: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			JWTAPISecret:   "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-			APITokenSalt:   "cccccccccccccccccccccccccccccccccccc",
+			JWTAPISecret: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			APITokenSalt: "cccccccccccccccccccccccccccccccccccc",
 		}
 	}
 	tests := []struct {
@@ -28,9 +27,8 @@ func TestValidateProducao(t *testing.T) {
 		quebrou bool
 	}{
 		{"segredos fortes", func(*Config) {}, false},
-		{"segredo curto", func(c *Config) { c.JWTAdminSecret = "curto" }, true},
+		{"segredo curto", func(c *Config) { c.JWTAPISecret = "curto" }, true},
 		{"segredo de desenvolvimento", func(c *Config) { c.APITokenSalt = "dev-only-api-token-salt-change-me-0000000" }, true},
-		{"segredos jwt iguais", func(c *Config) { c.JWTAPISecret = c.JWTAdminSecret }, true},
 		{"ambiente inválido", func(c *Config) { c.AppEnv = "x" }, true},
 		{"argon2 fraco em produção", func(c *Config) { c.Argon2MemoryKiB = 1024 }, true},
 		{"argon2 sem iterações", func(c *Config) { c.Argon2Iterations = 0 }, true},
@@ -57,20 +55,33 @@ func TestSegredosDeDesenvolvimentoSoForaDeProducao(t *testing.T) {
 	assert.Equal(t, 8080, c.HTTPPort)
 }
 
-func TestRegistroInicialPorAmbiente(t *testing.T) {
-	yes, no := true, false
+func TestValidateOIDC(t *testing.T) {
+	ok := func() *Config {
+		return &Config{AppEnv: "production", JWKSURI: "https://login.exemplo/certs", OIDCIssuer: "https://login.exemplo/realms/mt", OIDCClientID: "app", OIDCCPFClaim: "cpf"}
+	}
 	tests := []struct {
-		nome string
-		c    Config
-		want bool
+		nome    string
+		mutar   func(*Config)
+		quebrou bool
 	}{
-		{"desenvolvimento: habilitado por padrão", Config{AppEnv: "development"}, true},
-		{"produção: desabilitado por padrão", Config{AppEnv: "production"}, false},
-		{"produção: habilitado explicitamente", Config{AppEnv: "production", InitialRegistrationEnabled: &yes}, true},
-		{"desenvolvimento: desabilitado explicitamente", Config{AppEnv: "development", InitialRegistrationEnabled: &no}, false},
+		{"completo", func(*Config) {}, false},
+		{"sem JWKS", func(c *Config) { c.JWKSURI = "" }, true},
+		{"sem issuer", func(c *Config) { c.OIDCIssuer = "" }, true},
+		{"sem client", func(c *Config) { c.OIDCClientID = " " }, true},
+		{"sem claim do CPF", func(c *Config) { c.OIDCCPFClaim = "" }, true},
+		{"http em produção", func(c *Config) { c.JWKSURI = "http://login.exemplo/certs" }, true},
+		{"http em desenvolvimento", func(c *Config) { c.AppEnv = "development"; c.JWKSURI = "http://localhost:8180/certs" }, false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.nome, func(t *testing.T) { assert.Equal(t, tt.want, tt.c.InitialRegistrationAllowed()) })
+		t.Run(tt.nome, func(t *testing.T) {
+			c := ok()
+			tt.mutar(c)
+			if tt.quebrou {
+				assert.Error(t, c.ValidateOIDC())
+			} else {
+				assert.NoError(t, c.ValidateOIDC())
+			}
+		})
 	}
 }
 

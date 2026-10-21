@@ -120,16 +120,13 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		FirstName    string     `json:"firstName" validate:"required,max=100"`
-		LastName     string     `json:"lastName" validate:"required,max=100"`
-		Email        string     `json:"email" validate:"required,email"`
 		DepartmentID *uuid.UUID `json:"departmentId"`
 	}
 	if err := httpapi.Decode(r, &in); err != nil {
 		httpapi.Error(w, r, err)
 		return
 	}
-	v, err := h.svc.UpdateUser(r.Context(), h.actor(r), id, UpdateUserInput{FirstName: in.FirstName, LastName: in.LastName, Email: in.Email, DepartmentID: in.DepartmentID})
+	v, err := h.svc.UpdateUser(r.Context(), h.actor(r), id, UpdateUserInput{DepartmentID: in.DepartmentID})
 	if err != nil {
 		httpapi.Error(w, r, err)
 		return

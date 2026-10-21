@@ -30,7 +30,7 @@ Três tipos de sujeito, cada um com seu domínio de permissões:
 
 | Sujeito | Entra por | Autenticação | Permissões |
 |---|---|---|---|
-| **Administrador** | `/admin/...` | JWT de curta duração, `aud=admin` + refresh token opaco com rotação | RBAC completo: **ação + recurso + campos + condições**, união de várias roles |
+| **Administrador** | `/admin/...` | Access token do **MT Login** (Keycloak/OIDC, RS256, validado pelo JWKS); identidade = **CPF** | RBAC completo: **ação + recurso + campos + condições**, união de várias roles |
 | **Usuário final** | `/api/...` | JWT `aud=api` + refresh token; sem token = anônimo (role **Public**) | Por **ação** (`api::recurso.acao`), uma única role; propriedade via **policies** |
 | **Token de API** | `/api/...` | `Authorization: Bearer gat_...` | Tipo `read-only`, `full-access` ou `custom` (lista de ações) |
 
@@ -38,7 +38,7 @@ Três tipos de sujeito, cada um com seu domínio de permissões:
 Requisição
  └─ httpapi: ID da requisição → IP real (proxies confiáveis) → limite por IP → logs → recover
              → cabeçalhos de segurança → limite de corpo → CORS
-     ├─ /admin/*  auth.RequireAdmin  (JWT aud=admin + sessão ativa no banco)
+     ├─ /admin/*  auth.RequireAdmin  (token do MT Login + administrador ativo no banco)
      │            admin.RequirePermission  → authz.Engine.Can(ação) → Decision no contexto
      │            handler fino → service (regra de negócio, aplica filtro/campos) → sqlc
      └─ /api/*    enduser.Identifier.Identify  (anônimo/Public | JWT aud=api | gat_...)
@@ -105,30 +105,32 @@ Idempotente e **não destrutivo**: rodar de novo não duplica nada nem desfaz o 
 - Roles de usuário final **Public** (`find`, `findOne`) e **Authenticated** (também `create`, `update`, `delete`), aplicadas uma
   única vez (marcador `seed.enduser-permissions`). Configurações avançadas e templates de e-mail padrão em português.
 - Departamentos de exemplo: Financeiro e Jurídico.
-- **Somente com `APP_ENV=development`**: um usuário por role (`super@`, `editor@`, `author@`, `revisor@dev.local` e
-  `usuario@dev.local`), com senha aleatória **exibida no log só na primeira execução**.
+- Os Super Admins listados em `SEED_SUPER_ADMIN_CPF` (qualquer ambiente).
+- **Somente com `APP_ENV=development`**: um administrador de exemplo por role (`super@`, `editor@`, `author@`, `revisor@dev.local`)
+  com **CPFs fictícios** (não entram pelo MT Login; `seed.DevUsers`) e o usuário final `usuario@dev.local`, com senha aleatória
+  **exibida no log só na primeira execução**.
 - Avisa as instâncias em execução (LISTEN/NOTIFY) para recarregarem as permissões.
 
 ---
 
 ## 3. Criando o primeiro Super Admin
 
+Os administradores entram pelo **MT Login**; não há senha local. A identidade é o **CPF** do access token (claim
+`OIDC_CPF_CLAIM`). Quem entra sem registro é criado no primeiro acesso, ativo e **sem roles**, então o primeiro Super Admin
+precisa ser garantido por fora:
+
 ```bash
-go run ./cmd/cli admin:create --email voce@exemplo.com --password 'uma-senha-forte'
-# sem expor a senha no histórico do shell:
-ADMIN_PASSWORD='uma-senha-forte' go run ./cmd/cli admin:create --email voce@exemplo.com
+go run ./cmd/cli admin:create --cpf 000.000.000-00
 # no Docker:
-docker compose run --rm --entrypoint /cli api admin:create --email voce@exemplo.com --password '...'
+docker compose run --rm --entrypoint /cli api admin:create --cpf 000.000.000-00
+# ou pelo seed (lista separada por vírgulas): SEED_SUPER_ADMIN_CPF=000.000.000-00 go run ./cmd/cli seed
 ```
 
-Outros comandos: `admin:reset-password --email ... --password ...` (revoga as sessões), `migrate:up|down|status`, `seed`, `cleanup`.
+O comando é idempotente: cria o registro (nome e e-mail ficam vazios até o primeiro acesso) ou concede a role a quem já existe.
+Outros comandos: `migrate:up|down|status`, `seed`, `cleanup`.
 
-Alternativa por HTTP: `POST /admin/auth/register-first`, que só funciona **enquanto não existir nenhum administrador**
-(protegido por lock consultivo contra corridas). **Em produção ele vem desabilitado** (`INITIAL_REGISTRATION_ENABLED` vazio ou
-`false` → 403 `setup_disabled`), para que ninguém "chegue primeiro" a uma instalação nova exposta; use a CLI.
-
-Depois: `POST /admin/auth/login` → `accessToken` (15 min) e `refreshToken`; `POST /admin/users/invite` convida os demais
-(devolve a URL de convite, sem depender de e-mail).
+Os demais: `POST /admin/users` pré-cadastra por **CPF + roles** (a pessoa completa o registro no primeiro acesso), ou basta a pessoa
+entrar e um administrador atribuir as roles depois. Nome, CPF e e-mail vêm do MT Login e são atualizados a cada acesso.
 
 ---
 
@@ -190,11 +192,19 @@ escuta reconecta sozinha e invalida tudo a cada reconexão. Em instância única
 
 ### Autenticação (administradores e usuários finais)
 
-Access token JWT HS256 de 15 min com `aud` distinto por domínio (`admin`/`api`, segredos distintos, rejeitados no domínio errado)
-que carrega o ID da sessão; **a cada requisição o banco confirma que a sessão segue ativa e a conta não foi bloqueada/desativada**
-(revogação imediata, sem cache). Refresh token opaco de 32 bytes (guardado como hash SHA-256) com **rotação** e **detecção de
-reutilização** (token já usado → revoga toda a família). Expiração por ociosidade e por tempo máximo. Senhas em Argon2id com
-comparação em tempo constante e login com mensagem genérica (e verificação feita mesmo quando o e-mail não existe).
+**Administradores.** O frontend conduz o login no MT Login (Authorization Code + PKCE) e envia o access token no `Authorization:
+Bearer`. A API **só valida**: assinatura RS256 pelas chaves do `JWKS_URI` (cache com releitura ao aparecer um `kid` novo), emissor
+(`OIDC_ISSUER`), expiração, tipo `Bearer` (recusa token de ID/refresh) e client (`azp`/`aud` = `OIDC_CLIENT_ID`). Em seguida o CPF
+identifica o administrador: se não existe, é criado (ativo, sem roles, com auditoria `admin.auto-provisioned`); se existe, nome e
+e-mail são atualizados. **A cada requisição o banco confirma que a conta segue ativa e não foi bloqueada** (efeito imediato; 403
+`account_disabled`). Token válido sem CPF válido: 403 `invalid_identity`. A API não guarda sessão de administrador: renovação e
+encerramento são do MT Login. O CPF só aparece completo no `/admin/auth/me` do próprio usuário; listagens e auditoria o mascaram.
+
+**Usuários finais.** Access token JWT HS256 de 15 min com `aud=api` que carrega o ID da sessão; o banco confirma a cada requisição que
+a sessão segue ativa e a conta não foi bloqueada (revogação imediata, sem cache). Refresh token opaco de 32 bytes (guardado como hash
+SHA-256) com **rotação** e **detecção de reutilização** (token já usado → revoga toda a família). Expiração por ociosidade e por tempo
+máximo. Senhas em Argon2id com comparação em tempo constante e login com mensagem genérica (e verificação feita mesmo quando o e-mail
+não existe).
 
 ---
 
@@ -292,7 +302,8 @@ da policy em `details.policy`. Em `internal/document/public_handler.go` há o us
 
 Documentadas em [`.env.example`](.env.example) (um teste garante que todas as variáveis lidas estão lá, e vice-versa).
 Em produção (`APP_ENV=production`) a aplicação **não sobe** com segredos ausentes, com menos de 32 caracteres, com o valor de
-desenvolvimento ou com `JWT_ADMIN_SECRET == JWT_API_SECRET`, nem com Argon2 abaixo do mínimo da OWASP.
+desenvolvimento, nem com Argon2 abaixo do mínimo da OWASP. A API também não sobe sem `JWKS_URI`, `OIDC_ISSUER`,
+`OIDC_CLIENT_ID` e `OIDC_CPF_CLAIM` (a CLI não exige).
 
 | Variável | Padrão | Descrição |
 |---|---|---|
@@ -301,14 +312,17 @@ desenvolvimento ou com `JWT_ADMIN_SECRET == JWT_API_SECRET`, nem com Argon2 abai
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` ou `error`. Logs em JSON com `request_id`. |
 | `PUBLIC_URL` | `http://localhost:8080` | URL pública do servidor (links de convite, confirmação e redefinição). |
 | `DATABASE_URL` | `postgres://app:app@localhost:5432/app?sslmode=disable` | Conexão PostgreSQL 16+. |
-| `JWT_ADMIN_SECRET` | *(dev)* | Segredo do JWT de administrador. **Obrigatório e forte em produção.** |
-| `JWT_API_SECRET` | *(dev)* | Segredo do JWT de usuário final. Diferente do anterior. |
+| `JWKS_URI` | *(obrigatório)* | URL do JWKS do MT Login (chaves que assinam os tokens dos administradores). |
+| `OIDC_ISSUER` | *(obrigatório)* | Emissor (`iss`) esperado nos tokens. |
+| `OIDC_CLIENT_ID` | *(obrigatório)* | Client do Keycloak; o token precisa ter sido emitido para ele. |
+| `OIDC_CPF_CLAIM` | `preferred_username` | Claim do access token que traz o CPF. |
+| `SEED_SUPER_ADMIN_CPF` | *(vazio)* | CPFs (vírgula) que o `seed` torna Super Admin. |
+| `JWT_API_SECRET` | *(dev)* | Segredo do JWT de usuário final. **Obrigatório e forte em produção.** |
 | `API_TOKEN_SALT` | *(dev)* | Chave do HMAC dos tokens de API. Trocar invalida todos os tokens. |
 | `ACCESS_TOKEN_TTL` | `15m` | Validade do access token. |
-| `REFRESH_TOKEN_MAX_TTL` | `720h` | Tempo máximo de uma sessão, desde o login. |
-| `REFRESH_TOKEN_IDLE_TTL` | `168h` | Inatividade máxima entre renovações. |
-| `INVITE_TOKEN_TTL` | `168h` | Validade do convite de administrador. |
-| `RESET_TOKEN_TTL` | `30m` | Validade do link de redefinição de senha (admin e usuário final). |
+| `REFRESH_TOKEN_MAX_TTL` | `720h` | Tempo máximo de uma sessão de usuário final, desde o login. |
+| `REFRESH_TOKEN_IDLE_TTL` | `168h` | Inatividade máxima entre renovações (usuário final). |
+| `RESET_TOKEN_TTL` | `30m` | Validade do link de redefinição de senha do usuário final. |
 | `EMAIL_CONFIRMATION_TTL` | `72h` | Validade do link de confirmação de e-mail. |
 | `PASSWORD_MIN_LENGTH` | `8` | Tamanho mínimo das senhas (máximo fixo de 128). |
 | `ARGON2_MEMORY_KIB` | `19456` | Memória do Argon2id (padrão OWASP: 19 MiB). |
@@ -338,7 +352,8 @@ Nenhuma biblioteca fora desta lista foi adicionada.
 | `go-chi/httprate` | Rate limiting (por IP e por IP + identificador). |
 | `jackc/pgx/v5` | Driver e pool PostgreSQL; LISTEN/NOTIFY. |
 | `pressly/goose/v3` | Migrações SQL versionadas, embutidas no binário. |
-| `golang-jwt/jwt/v5` | Access tokens JWT (HS256, validação de `aud`, `iss` e `exp`). |
+| `golang-jwt/jwt/v5` | JWTs: HS256 dos usuários finais e validação RS256 dos tokens do MT Login. |
+| `MicahParks/keyfunc/v3` | Leitura e cache do JWKS do MT Login (releitura ao aparecer um `kid` desconhecido). |
 | `golang.org/x/crypto` | Argon2id. |
 | `go-playground/validator/v10` | Validação de entrada (mensagens em português). |
 | `caarlos0/env/v11`, `joho/godotenv` | Configuração por ambiente; `.env` só fora de produção. |
@@ -355,12 +370,13 @@ Ferramentas: `sqlc` (código tipado a partir de SQL), `goose` (CLI de migraçõe
 
 ```
 cmd/api            servidor HTTP
-cmd/cli            migrate:*, seed, admin:create, admin:reset-password, cleanup
+cmd/cli            migrate:*, seed, admin:create --cpf, cleanup
 api/openapi.yaml   especificação OpenAPI 3.1 (servida em /docs)
 internal/config    leitura e validação das variáveis de ambiente
 internal/database  pool pgx, transações, migrações (migrations/), queries sqlc (queries/ → db/)
 internal/httpapi   roteador (o pacote se chama httpapi para não colidir com net/http), middlewares, respostas, validação
-internal/auth      senha (Argon2id), JWT, tokens opacos, login/sessões/convite/redefinição de administradores
+internal/auth      senha (Argon2id), JWT, tokens opacos, validação OIDC e resolução do administrador por CPF
+internal/cpf       normalização, validação e máscara de CPF
 internal/authz     motor de permissões: ações, condições, Engine.Can, filtros, Schema, cache, LISTEN/NOTIFY
 internal/admin     administradores, roles de admin, permissões, catálogo
 internal/enduser   usuários finais, roles, configurações avançadas, templates de e-mail, identificação na API pública
@@ -370,7 +386,7 @@ internal/audit     registro e consulta da auditoria
 internal/mailer    interface Mailer + SMTP, log (dev) e descarte
 internal/document  recurso de exemplo "documentos"
 internal/seed      dados iniciais (idempotente)
-internal/maintenance  limpeza de sessões e tokens vencidos
+internal/maintenance  limpeza de sessões de usuário final e tokens vencidos
 internal/app       injeção manual de dependências
 internal/slug, internal/logging, internal/testutil
 ```
@@ -386,8 +402,8 @@ make cover-authz   # falha se a cobertura do pacote authz ficar abaixo de 80%
 make lint          # golangci-lint
 ```
 
-O pacote `authz` fica acima de 90% de cobertura (unitários + integração). A suíte de integração cobre, entre outros: login,
-refresh e reutilização de refresh token; convite; Author editando documento próprio × alheio; revisor de departamento com campo
+O pacote `authz` fica acima de 90% de cobertura (unitários + integração). A suíte de integração cobre, entre outros: validação dos tokens do MT Login (provedor OIDC falso em `testutil`),
+primeiro acesso e criação por CPF, pré-cadastro; refresh de usuário final; Author editando documento próprio × alheio; revisor de departamento com campo
 permitido e proibido; API pública anônima × autenticada; exclusão de role de usuário final movendo usuários para Public;
 impedimento de excluir role em uso e de remover o último Super Admin; token de API somente leitura tentando escrever; seed
 idempotente; e a coerência entre `openapi.yaml` e as rotas.
@@ -397,7 +413,7 @@ idempotente; e a coerência entre `openapi.yaml` e as rotas.
 ## 10. Operação
 
 - **Migrações** rodam por `cli migrate:up` (o Compose faz isso antes de subir a API). **Rollback** é manual (`migrate:down`).
-- **`cleanup`** (`make cleanup`) remove sessões e tokens de uso único vencidos há mais de N dias (`--days`, padrão 7). Agende,
+- **`cleanup`** (`make cleanup`) remove sessões de usuário final e tokens de uso único vencidos há mais de N dias (`--days`, padrão 7). Agende,
   por exemplo, uma vez por dia. A carência preserva a detecção de reutilização de refresh token.
 - **Proxy reverso**: configure `TRUSTED_PROXIES` com o CIDR do proxy; sem isso o IP considerado é o da conexão.
 - **Encerramento**: SIGINT/SIGTERM param de aceitar conexões, concluem as requisições (15 s) e gravações pendentes de `last_used_at`.
@@ -411,10 +427,11 @@ idempotente; e a coerência entre `openapi.yaml` e as rotas.
 - **`internal/app`**: concentra a fiação manual de dependências para o servidor, a CLI e os testes não a duplicarem.
 - **Sem cache de sessão/token**: cada requisição autenticada consulta o banco (chave primária / hash). Revogar, bloquear, desativar,
   regenerar ou editar valem na hora, sem protocolo de invalidação. Se o volume pedir, um cache curto entra depois.
-- **Convite via `one_time_tokens`**: a coluna `admins.registration_token_hash` da especificação foi omitida; um único mecanismo
-  (com validade e uso único) atende convite, redefinição e confirmação.
+- **Administradores sem senha nem sessão local**: a identidade é o CPF do MT Login. `admins.password_hash` e `admin_sessions`
+  ficaram no esquema, sem uso, até uma migração remover depois de validado o novo login. `one_time_tokens` segue para os
+  usuários finais (redefinição e confirmação).
+- **E-mail de administrador não é único**: é atributo sincronizado do MT Login; a unicidade é do CPF.
 - **E-mail de usuário final não é único no banco**: "uma conta por e-mail" é configuração, aplicada pela aplicação com lock por e-mail.
-- **Sessões de admin e de usuário final são código paralelo**, não genérico: as tabelas e as regras (bloqueio, confirmação) diferem.
 - **Duas colunas de autoria em `documents`**: `created_by_id` (administrador, usado pelas condições) e `owner_user_id`
   (usuário final, usado pela policy `is-owner`).
 - **Mudar `status` exige a ação `publish`** mesmo que o campo esteja liberado no `update`; senão um papel com o campo "publicaria" sem poder.

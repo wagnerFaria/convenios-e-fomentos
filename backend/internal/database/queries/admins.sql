@@ -1,25 +1,26 @@
--- name: CountAdmins :one
-SELECT count(*) FROM admins;
-
--- name: LockAdminSetup :exec
-SELECT pg_advisory_xact_lock(7001);
-
 -- name: GetAdminByID :one
 SELECT * FROM admins WHERE id = $1;
 
--- name: GetAdminByEmail :one
-SELECT * FROM admins WHERE email = $1;
+-- name: GetAdminByCPF :one
+SELECT * FROM admins WHERE cpf = $1;
 
+-- Pré-cadastro por um administrador: falha com violação de unicidade se o CPF já existe.
 -- name: CreateAdmin :one
-INSERT INTO admins (first_name, last_name, email, password_hash, is_active, department_id)
+INSERT INTO admins (cpf, first_name, last_name, email, is_active, department_id)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
--- name: SetAdminPassword :exec
-UPDATE admins SET password_hash = $2, updated_at = now() WHERE id = $1;
+-- Primeiro acesso: cria o registro; se outra requisição criou antes, não devolve linha.
+-- name: ProvisionAdminFromLogin :one
+INSERT INTO admins (cpf, first_name, last_name, email, is_active, last_login_at)
+VALUES ($1, $2, $3, $4, true, now())
+ON CONFLICT (cpf) DO NOTHING
+RETURNING *;
 
--- name: ActivateAdmin :exec
-UPDATE admins SET is_active = true, updated_at = now() WHERE id = $1;
+-- Atualiza os dados vindos do MT Login e registra o acesso.
+-- name: SyncAdminFromLogin :exec
+UPDATE admins SET first_name = $2, last_name = $3, email = $4, last_login_at = now(), updated_at = now()
+WHERE id = $1;
 
 -- name: UpsertAdminRole :one
 INSERT INTO admin_roles (code, name, description, is_system)
@@ -41,7 +42,7 @@ WHERE ur.admin_id = $1
 ORDER BY r.name;
 
 -- name: UpdateAdmin :one
-UPDATE admins SET first_name = $2, last_name = $3, email = $4, department_id = $5, updated_at = now()
+UPDATE admins SET department_id = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

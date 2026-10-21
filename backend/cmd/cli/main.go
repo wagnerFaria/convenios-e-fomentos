@@ -11,6 +11,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/admin"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/app"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/config"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/logging"
@@ -25,17 +26,14 @@ Comandos:
   migrate:up         aplica as migrações pendentes
   migrate:down       desfaz a última migração
   migrate:status     mostra o estado das migrações
-  admin:create       cria um Super Admin
-                     --email E --password P [--first-name N] [--last-name S]
-                     (a senha também pode vir da variável ADMIN_PASSWORD)
+  admin:create       cria (ou promove) um Super Admin pelo CPF; o login é pelo MT Login e
+                     o nome e o e-mail são preenchidos no primeiro acesso
+                     --cpf 000.000.000-00 [--first-name N] [--last-name S] [--email E]
   seed               cria os dados iniciais (idempotente): roles e permissões padrão,
-                     departamentos de exemplo, e, em desenvolvimento, um usuário de cada role
-                     (as senhas aparecem no log somente na primeira execução)
-  cleanup            remove sessões e tokens de uso único vencidos há mais de N dias
-                     [--days 7] (agende, por exemplo, uma vez por dia)
-  admin:reset-password
-                     redefine a senha de um administrador e revoga as sessões
-                     --email E --password P
+                     departamentos de exemplo, os Super Admins de SEED_SUPER_ADMIN_CPF e,
+                     em desenvolvimento, um administrador de exemplo por role
+  cleanup            remove sessões de usuário final e tokens de uso único vencidos há mais
+                     de N dias [--days 7] (agende, por exemplo, uma vez por dia)
 `
 
 func main() {
@@ -74,28 +72,28 @@ func run(ctx context.Context, cmd string, args []string) error {
 		}
 	case "admin:create":
 		fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-		email := fs.String("email", "", "e-mail do administrador")
-		password := fs.String("password", os.Getenv("ADMIN_PASSWORD"), "senha")
-		first := fs.String("first-name", "Super", "nome")
-		last := fs.String("last-name", "Admin", "sobrenome")
+		cpfFlag := fs.String("cpf", "", "CPF do administrador")
+		first := fs.String("first-name", "", "nome (opcional; o MT Login preenche no primeiro acesso)")
+		last := fs.String("last-name", "", "sobrenome (opcional)")
+		email := fs.String("email", "", "e-mail (opcional)")
 		if err := fs.Parse(args); err != nil {
 			return err
 		}
-		if *email == "" || *password == "" {
-			return errors.New("--email e --password são obrigatórios")
+		if *cpfFlag == "" {
+			return errors.New("--cpf é obrigatório")
 		}
-		a, err := app.AdminService(cfg, pool).CreateSuperAdmin(ctx, admin.CreateSuperAdminInput{FirstName: *first, LastName: *last, Email: *email, Password: *password}, false, "")
+		a, err := app.AdminService(pool).EnsureSuperAdmin(ctx, admin.EnsureSuperAdminInput{CPF: *cpfFlag, FirstName: *first, LastName: *last, Email: *email}, "")
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Super Admin criado: %s (%s)\n", a.Email, a.ID)
+		fmt.Printf("Super Admin garantido: %s (%s)\n", cpf.Mask(*a.Cpf), a.ID)
 		return nil
 	case "seed":
-		a, err := app.New(cfg, logging.New(os.Stdout, cfg.LogLevel), pool, mailer.NopMailer{Log: logging.New(os.Stdout, cfg.LogLevel)})
+		a, err := app.New(ctx, cfg, logging.New(os.Stdout, cfg.LogLevel), pool, mailer.NopMailer{Log: logging.New(os.Stdout, cfg.LogLevel)})
 		if err != nil {
 			return err
 		}
-		return seed.Run(ctx, seed.Deps{Pool: pool, Hasher: app.Hasher(cfg), Engine: a.Authz, EndUsers: a.EndUsers, Log: logging.New(os.Stdout, cfg.LogLevel), Development: cfg.AppEnv == "development"})
+		return seed.Run(ctx, seed.Deps{Pool: pool, Hasher: app.Hasher(cfg), Engine: a.Authz, EndUsers: a.EndUsers, Log: logging.New(os.Stdout, cfg.LogLevel), Development: cfg.AppEnv == "development", SuperAdminCPFs: cfg.SeedSuperAdminCPFs})
 	case "cleanup":
 		fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 		days := fs.Int("days", 7, "carência, em dias, após o vencimento")
@@ -106,22 +104,7 @@ func run(ctx context.Context, cmd string, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Removidos: %d sessões de administrador, %d sessões de usuário final, %d tokens de uso único.\n", res.AdminSessions, res.EndUserSessions, res.OneTimeTokens)
-		return nil
-	case "admin:reset-password":
-		fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-		email := fs.String("email", "", "e-mail do administrador")
-		password := fs.String("password", os.Getenv("ADMIN_PASSWORD"), "nova senha")
-		if err := fs.Parse(args); err != nil {
-			return err
-		}
-		if *email == "" || *password == "" {
-			return errors.New("--email e --password são obrigatórios")
-		}
-		if err := app.AdminService(cfg, pool).ResetPasswordByEmail(ctx, *email, *password); err != nil {
-			return err
-		}
-		fmt.Println("Senha redefinida e sessões revogadas.")
+		fmt.Printf("Removidos: %d sessões de usuário final, %d tokens de uso único.\n", res.EndUserSessions, res.OneTimeTokens)
 		return nil
 	default:
 		return fmt.Errorf("comando desconhecido %q\n\n%s", cmd, uso)

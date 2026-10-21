@@ -10,7 +10,6 @@ import (
 
 // Result informa quantas linhas cada rotina removeu.
 type Result struct {
-	AdminSessions   int64
 	EndUserSessions int64
 	OneTimeTokens   int64
 }
@@ -24,9 +23,6 @@ func Cleanup(ctx context.Context, q *db.Queries, graceDays int) (Result, error) 
 	days := int32(graceDays) //nolint:gosec // validado acima; valores absurdos só deixam a limpeza mais conservadora
 	var r Result
 	var err error
-	if r.AdminSessions, err = q.DeleteExpiredAdminSessions(ctx, days); err != nil {
-		return r, fmt.Errorf("sessões de administrador: %w", err)
-	}
 	if r.EndUserSessions, err = q.DeleteExpiredEndUserSessions(ctx, days); err != nil {
 		return r, fmt.Errorf("sessões de usuário final: %w", err)
 	}

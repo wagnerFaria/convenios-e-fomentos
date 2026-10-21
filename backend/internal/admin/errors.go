@@ -13,7 +13,6 @@ var (
 	errSuperAdminImmutable = httpapi.ErrConflict("super_admin_immutable", "A role Super Admin não pode ter permissões alteradas, ser duplicada nem ser excluída.")
 	errLastSuperAdmin      = httpapi.ErrConflict("last_super_admin", "É necessário manter ao menos um administrador ativo com a role Super Admin.")
 	errCannotModifySelf    = httpapi.ErrConflict("cannot_modify_self", "Você não pode executar esta ação sobre a sua própria conta.")
-	errInvitationPending   = httpapi.ErrConflict("invitation_pending", "O convite ainda não foi aceito; a conta será ativada quando o administrador definir a senha.")
 )
 
 func errRoleInUse(n int64) error {

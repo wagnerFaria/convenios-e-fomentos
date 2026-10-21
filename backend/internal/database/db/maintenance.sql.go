@@ -9,24 +9,12 @@ import (
 	"context"
 )
 
-const deleteExpiredAdminSessions = `-- name: DeleteExpiredAdminSessions :execrows
-DELETE FROM admin_sessions WHERE expires_at < now() - make_interval(days => $1::int)
-`
-
-// Sessões (admin e usuário final) expiradas há mais de N dias. Revogadas ou rotacionadas só
-// saem depois de expirar + N dias, preservando a detecção de reutilização de refresh token.
-func (q *Queries) DeleteExpiredAdminSessions(ctx context.Context, graceDays int32) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteExpiredAdminSessions, graceDays)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteExpiredEndUserSessions = `-- name: DeleteExpiredEndUserSessions :execrows
 DELETE FROM end_user_sessions WHERE expires_at < now() - make_interval(days => $1::int)
 `
 
+// Sessões de usuário final expiradas há mais de N dias. Revogadas ou rotacionadas só saem depois de
+// expirar + N dias, preservando a detecção de reutilização de refresh token.
 func (q *Queries) DeleteExpiredEndUserSessions(ctx context.Context, graceDays int32) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredEndUserSessions, graceDays)
 	if err != nil {

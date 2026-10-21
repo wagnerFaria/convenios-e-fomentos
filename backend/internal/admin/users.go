@@ -11,13 +11,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
 )
 
-// Status do administrador, na ordem de precedência: blocked, pending (convite
-// não aceito), inactive, active.
+// Status do administrador, na ordem de precedência: blocked, inactive, pending
+// (ainda não fez o primeiro acesso com o MT Login) e active.
 const (
 	StatusActive   = "active"
 	StatusInactive = "inactive"
@@ -27,15 +28,18 @@ const (
 
 // UserView é o administrador exposto pela API.
 type UserView struct {
-	ID           uuid.UUID  `json:"id"`
-	FirstName    string     `json:"firstName"`
-	LastName     string     `json:"lastName"`
+	ID        uuid.UUID `json:"id"`
+	FirstName string    `json:"firstName"`
+	LastName  string    `json:"lastName"`
+	// CPF sempre mascarado (***.456.789-**); o completo só é devolvido ao próprio usuário em /me.
+	CPF          string     `json:"cpf"`
 	Email        string     `json:"email"`
 	Status       string     `json:"status"`
 	IsActive     bool       `json:"isActive"`
 	Blocked      bool       `json:"blocked"`
 	DepartmentID *uuid.UUID `json:"departmentId"`
 	Roles        []RoleView `json:"roles"`
+	LastLoginAt  *time.Time `json:"lastLoginAt"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
@@ -44,12 +48,19 @@ func statusOf(a db.Admin) string {
 	switch {
 	case a.Blocked:
 		return StatusBlocked
-	case a.PasswordHash == nil:
+	case !a.IsActive:
+		return StatusInactive
+	case a.LastLoginAt == nil:
 		return StatusPending
-	case a.IsActive:
-		return StatusActive
 	}
-	return StatusInactive
+	return StatusActive
+}
+
+func maskedCPF(cpfDigits *string) string {
+	if cpfDigits == nil {
+		return ""
+	}
+	return cpf.Mask(*cpfDigits)
 }
 
 func viewOf(a db.Admin, roles []db.AdminRole) UserView {
@@ -57,8 +68,8 @@ func viewOf(a db.Admin, roles []db.AdminRole) UserView {
 	for _, r := range roles {
 		rv = append(rv, RoleView{ID: r.ID, Code: r.Code, Name: r.Name})
 	}
-	return UserView{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, Email: a.Email, Status: statusOf(a), IsActive: a.IsActive,
-		Blocked: a.Blocked, DepartmentID: a.DepartmentID, Roles: rv, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt}
+	return UserView{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, CPF: maskedCPF(a.Cpf), Email: a.Email, Status: statusOf(a), IsActive: a.IsActive,
+		Blocked: a.Blocked, DepartmentID: a.DepartmentID, Roles: rv, LastLoginAt: a.LastLoginAt, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt}
 }
 
 // GetUser devolve um administrador com suas roles.
@@ -81,7 +92,7 @@ func (s *Service) userView(ctx context.Context, q *db.Queries, id uuid.UUID) (*U
 
 // ListUsersFilter são os filtros da listagem.
 type ListUsersFilter struct {
-	Q      string // busca em nome, sobrenome e e-mail
+	Q      string // busca em nome, sobrenome, e-mail e CPF
 	RoleID *uuid.UUID
 	Status string
 	Sort   httpapi.Sort
@@ -114,7 +125,13 @@ func (s *Service) ListUsers(ctx context.Context, f ListUsersFilter) ([]UserView,
 	if f.Q != "" {
 		args = append(args, "%"+escapeLike(f.Q)+"%")
 		n := len(args)
-		where = append(where, fmt.Sprintf(`(a.first_name ILIKE $%[1]d OR a.last_name ILIKE $%[1]d OR a.email::text ILIKE $%[1]d OR (a.first_name || ' ' || a.last_name) ILIKE $%[1]d)`, n))
+		cond := fmt.Sprintf(`a.first_name ILIKE $%[1]d OR a.last_name ILIKE $%[1]d OR a.email::text ILIKE $%[1]d OR (a.first_name || ' ' || a.last_name) ILIKE $%[1]d`, n)
+		// Busca por CPF com ou sem pontuação (a partir de 3 dígitos, para não casar tudo).
+		if digits := onlyDigits(f.Q); len(digits) >= 3 {
+			args = append(args, "%"+digits+"%")
+			cond += fmt.Sprintf(` OR a.cpf LIKE $%d`, len(args))
+		}
+		where = append(where, "("+cond+")")
 	}
 	if f.RoleID != nil {
 		add(`EXISTS (SELECT 1 FROM admin_users_roles ur WHERE ur.admin_id = a.id AND ur.role_id = ?)`, *f.RoleID)
@@ -123,11 +140,11 @@ func (s *Service) ListUsers(ctx context.Context, f ListUsersFilter) ([]UserView,
 	case StatusBlocked:
 		where = append(where, `a.blocked`)
 	case StatusPending:
-		where = append(where, `NOT a.blocked AND a.password_hash IS NULL`)
+		where = append(where, `NOT a.blocked AND a.is_active AND a.last_login_at IS NULL`)
 	case StatusInactive:
-		where = append(where, `NOT a.blocked AND a.password_hash IS NOT NULL AND NOT a.is_active`)
+		where = append(where, `NOT a.blocked AND NOT a.is_active`)
 	case StatusActive:
-		where = append(where, `NOT a.blocked AND a.is_active`)
+		where = append(where, `NOT a.blocked AND a.is_active AND a.last_login_at IS NOT NULL`)
 	}
 	clause := ""
 	if len(where) > 0 {
@@ -137,7 +154,7 @@ func (s *Service) ListUsers(ctx context.Context, f ListUsersFilter) ([]UserView,
 	if err := s.pool.QueryRow(ctx, "SELECT count(*) FROM admins a"+clause, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	query := `SELECT a.id, a.first_name, a.last_name, a.email, a.is_active, a.blocked, a.password_hash IS NOT NULL,
+	query := `SELECT a.id, a.first_name, a.last_name, a.cpf, a.email, a.is_active, a.blocked, a.last_login_at,
 		a.department_id, a.created_at, a.updated_at,
 		COALESCE((SELECT jsonb_agg(jsonb_build_object('id', r.id, 'code', r.code, 'name', r.name) ORDER BY r.name)
 		          FROM admin_roles r JOIN admin_users_roles ur ON ur.role_id = r.id WHERE ur.admin_id = a.id), '[]'::jsonb)
@@ -151,39 +168,40 @@ func (s *Service) ListUsers(ctx context.Context, f ListUsersFilter) ([]UserView,
 	out := []UserView{}
 	for rows.Next() {
 		var v UserView
-		var hasPassword bool
+		var cpfDigits *string
 		var rolesJSON []byte
-		if err := rows.Scan(&v.ID, &v.FirstName, &v.LastName, &v.Email, &v.IsActive, &v.Blocked, &hasPassword, &v.DepartmentID, &v.CreatedAt, &v.UpdatedAt, &rolesJSON); err != nil {
+		if err := rows.Scan(&v.ID, &v.FirstName, &v.LastName, &cpfDigits, &v.Email, &v.IsActive, &v.Blocked, &v.LastLoginAt, &v.DepartmentID, &v.CreatedAt, &v.UpdatedAt, &rolesJSON); err != nil {
 			return nil, 0, err
 		}
+		v.CPF = maskedCPF(cpfDigits)
 		if err := json.Unmarshal(rolesJSON, &v.Roles); err != nil {
 			return nil, 0, err
 		}
-		v.Status = statusOf(db.Admin{Blocked: v.Blocked, IsActive: v.IsActive, PasswordHash: passwordMarker(hasPassword)})
+		v.Status = statusOf(db.Admin{Blocked: v.Blocked, IsActive: v.IsActive, LastLoginAt: v.LastLoginAt})
 		out = append(out, v)
 	}
 	return out, total, rows.Err()
 }
 
-func passwordMarker(has bool) *string {
-	if !has {
-		return nil
-	}
-	s := ""
-	return &s
+func onlyDigits(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, s)
 }
 
-// UpdateUserInput são os dados editáveis de um administrador.
+// UpdateUserInput são os dados editáveis de um administrador. Nome, CPF e e-mail vêm do MT Login
+// e são atualizados a cada acesso, então não são editáveis aqui.
 type UpdateUserInput struct {
-	FirstName    string
-	LastName     string
-	Email        string
 	DepartmentID *uuid.UUID
 }
 
 type userSnapshot struct {
 	FirstName    string     `json:"firstName"`
 	LastName     string     `json:"lastName"`
+	CPF          string     `json:"cpf"`
 	Email        string     `json:"email"`
 	DepartmentID *uuid.UUID `json:"departmentId"`
 	IsActive     bool       `json:"isActive"`
@@ -191,7 +209,7 @@ type userSnapshot struct {
 }
 
 func snapshotOf(a db.Admin) userSnapshot {
-	return userSnapshot{FirstName: a.FirstName, LastName: a.LastName, Email: a.Email, DepartmentID: a.DepartmentID, IsActive: a.IsActive}
+	return userSnapshot{FirstName: a.FirstName, LastName: a.LastName, CPF: maskedCPF(a.Cpf), Email: a.Email, DepartmentID: a.DepartmentID, IsActive: a.IsActive}
 }
 
 // UpdateUser edita os dados do administrador.
@@ -203,10 +221,8 @@ func (s *Service) UpdateUser(ctx context.Context, actor Actor, id uuid.UUID, in 
 		if err != nil {
 			return notFound(err)
 		}
-		after, err := q.UpdateAdmin(ctx, db.UpdateAdminParams{ID: id, FirstName: in.FirstName, LastName: in.LastName, Email: strings.TrimSpace(in.Email), DepartmentID: in.DepartmentID})
+		after, err := q.UpdateAdmin(ctx, db.UpdateAdminParams{ID: id, DepartmentID: in.DepartmentID})
 		switch {
-		case database.IsUniqueViolation(err):
-			return errEmailTaken
 		case database.IsForeignKeyViolation(err):
 			return fieldIssue("departmentId", "Departamento inexistente.")
 		case err != nil:
@@ -248,8 +264,8 @@ func (s *Service) withSuperGuard(ctx context.Context, fn func(q *db.Queries) err
 	})
 }
 
-// SetActive ativa ou desativa o administrador. Desativar revoga as sessões e
-// não é permitido sobre si mesmo nem sobre o último Super Admin ativo.
+// SetActive ativa ou desativa o administrador. Desativar bloqueia o acesso na próxima
+// requisição e não é permitido sobre si mesmo nem sobre o último Super Admin ativo.
 func (s *Service) SetActive(ctx context.Context, actor Actor, id uuid.UUID, active bool) (*UserView, error) {
 	if !active && actor.ID == id {
 		return nil, errCannotModifySelf
@@ -260,16 +276,8 @@ func (s *Service) SetActive(ctx context.Context, actor Actor, id uuid.UUID, acti
 		if err != nil {
 			return notFound(err)
 		}
-		if active && before.PasswordHash == nil {
-			return errInvitationPending
-		}
 		if err := q.SetAdminActive(ctx, db.SetAdminActiveParams{ID: id, IsActive: active}); err != nil {
 			return err
-		}
-		if !active {
-			if err := q.RevokeAllAdminSessions(ctx, id); err != nil {
-				return err
-			}
 		}
 		action := "admin.deactivate"
 		if active {

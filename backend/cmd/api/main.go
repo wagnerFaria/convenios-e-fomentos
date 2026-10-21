@@ -31,6 +31,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.ValidateOIDC(); err != nil {
+		return err
+	}
 	log := logging.New(os.Stdout, cfg.LogLevel)
 	slog.SetDefault(log)
 
@@ -50,7 +53,7 @@ func run() error {
 	case !cfg.IsProduction():
 		mail = mailer.LogMailer{Log: log}
 	}
-	application, err := app.New(cfg, log, pool, mail)
+	application, err := app.New(ctx, cfg, log, pool, mail)
 	if err != nil {
 		return err
 	}

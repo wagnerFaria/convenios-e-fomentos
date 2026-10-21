@@ -22,6 +22,8 @@ type Admin struct {
 	DepartmentID *uuid.UUID `json:"department_id"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+	Cpf          *string    `json:"cpf"`
+	LastLoginAt  *time.Time `json:"last_login_at"`
 }
 
 type AdminPermission struct {

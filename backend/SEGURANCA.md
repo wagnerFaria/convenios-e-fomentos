@@ -14,20 +14,33 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
 ## 2. Resultado por área
 
 ### Autenticação
+**Administradores (MT Login / OIDC):**
+- ✅ Sem senha local: a API só valida o access token do MT Login (RS256 pelas chaves do JWKS, `iss` e `exp` obrigatórios, tipo `Bearer`,
+  client conferido por `azp`/`aud`). Algoritmo `none`/HS256, tokens de ID ou refresh, de outro emissor, de outro client, expirados ou
+  assinados por outra chave são rejeitados (testes em `auth/oidc_test.go` e `app/admin_auth_test.go`).
+- ✅ Identidade = CPF validado (dígitos verificadores) vindo do token assinado; não há vínculo por e-mail, então não há tomada de conta por
+  e-mail não verificado.
+- ✅ Primeiro acesso cria o administrador **sem nenhuma role** (nada é liberado automaticamente), de forma atômica (`ON CONFLICT`) e auditada.
+- ✅ Bloqueio e desativação valem na hora: cada requisição confere a conta no banco (sem cache).
+- ✅ CPF é dado pessoal: mascarado em listagens e na auditoria, completo apenas para o próprio usuário em `/admin/auth/me`; não vai para logs.
+- ⚠️ **Qualquer pessoa que autentique no client do MT Login ganha uma conta de administrador sem permissões.** Se o realm for aberto a
+  cidadãos, a tabela `admins` acumula contas sem perfil; restrinja o client no Keycloak (role/grupo) ou exija um claim para criar o registro.
+- ⚠️ Encerrar a sessão no MT Login não derruba, na hora, o access token já emitido (até a expiração dele, curta). Desativar a conta aqui
+  tem efeito imediato.
+- ⚠️ MFA, bloqueio por tentativas e política de senha são do MT Login (Keycloak), não desta aplicação.
+
+**Usuários finais e tokens de API:**
 - ✅ Senhas em Argon2id (parâmetros gravados no hash, comparação em tempo constante); política de 8–128 caracteres.
 - ✅ Login com mensagem genérica; a senha é verificada mesmo quando a conta não existe (tempo equalizado).
-- ✅ JWT HS256 com `iss`, `aud` e `exp` obrigatórios; audiências distintas (`admin`/`api`) com segredos distintos; algoritmo `none` e
-  tokens de outra audiência rejeitados.
+- ✅ JWT HS256 com `iss`, `aud=api` e `exp` obrigatórios; algoritmo `none` e tokens de outra audiência rejeitados.
 - ✅ Refresh token opaco (32 bytes, só o SHA-256 no banco), rotação atômica, reutilização revoga a família, expiração por ociosidade e máxima.
 - ✅ Bloqueio, desativação e revogação valem na hora: cada requisição confere a sessão no banco (sem cache).
-- ✅ Tokens de convite, redefinição e confirmação: uso único consumido atomicamente, com validade; token de outro tipo/sujeito é recusado.
+- ✅ Tokens de confirmação e redefinição: uso único consumido atomicamente, com validade; token de outro tipo/sujeito é recusado.
 - ✅ Tokens de API: 256 bits, só o HMAC-SHA256 no banco, exibidos uma vez, `Cache-Control: no-store`, revogação/expiração imediatas.
-- 🔧 O registro inicial por HTTP agora vem **desabilitado em produção** (`INITIAL_REGISTRATION_ENABLED`); antes, uma instalação nova
-  exposta podia ser "tomada" por quem chegasse primeiro. Em produção use `cli admin:create`.
 - 🔧 Parâmetros do Argon2 passaram a ser validados (e, em produção, não podem ficar abaixo do mínimo da OWASP).
-- ⚠️ Não há MFA/2FA nem bloqueio de conta por tentativas: só rate limit por IP + identificador (`RATE_LIMIT_AUTH_PER_MINUTE`).
-  Ataques distribuídos (credential stuffing) exigem proteção adicional no proxy/WAF.
-- ⚠️ JWT simétrico (HS256), sem `kid`: trocar um segredo invalida todos os access tokens (até 15 min) e não há rotação gradual.
+- ⚠️ Usuários finais: não há MFA/2FA nem bloqueio de conta por tentativas, só rate limit por IP + identificador
+  (`RATE_LIMIT_AUTH_PER_MINUTE`). Ataques distribuídos (credential stuffing) exigem proteção adicional no proxy/WAF.
+- ⚠️ JWT simétrico (HS256) dos usuários finais, sem `kid`: trocar o segredo invalida todos os access tokens (até 15 min).
 
 ### Autorização
 - ✅ Ação não registrada sempre nega; Super Admin também.
@@ -95,21 +108,19 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
 | Enumeração de contas | O cadastro de usuário final responde 409 `already_taken` para e-mail/usuário existentes; em "esqueci a senha" há diferença de latência (grava token e envia e-mail só quando a conta existe). As respostas HTTP são idênticas. | Rate limit. Para eliminar o canal de tempo, enfileirar o envio de e-mails. |
 | E-mail síncrono | O envio SMTP acontece dentro da requisição; falha de envio é registrada no log, mas não chega ao cliente. | Fila/worker de e-mail quando o volume pedir. |
 | Confirmação de e-mail ligada depois | Usuários já logados sem confirmar só são barrados no próximo refresh/login. | Aceitável; revogar sessões ao ligar a opção se necessário. |
-| Convite expirado | Não há endpoint de reenvio: é preciso excluir o administrador pendente e convidar de novo. | ⏳ Ver pendências. |
 | Auditoria | Sem retenção/rotação, sem assinatura de integridade; conteúdo (documentos) não é auditado. | Política de retenção e arquivamento conforme a necessidade. |
 | Rate limit por instância | Ver "Disponibilidade". | Redis ou proxy quando houver várias instâncias. |
-| Sem MFA | Ver "Autenticação". | Planejar TOTP/WebAuthn para administradores. |
+| Sem MFA (usuário final) | Ver "Autenticação". | Planejar TOTP/WebAuthn; para administradores, é do MT Login. |
 
 ## 4. Checklist de pendências
 
 **Funcionalidades fora do escopo definido** (decisões já documentadas no README):
-- ⏳ OAuth/OIDC: estrutura pronta (`end_users.provider`, `enduser.Provider`); nenhum provedor implementado.
+- ⏳ OAuth/OIDC para **usuários finais**: estrutura pronta (`end_users.provider`, `enduser.Provider`); nenhum provedor implementado (os administradores já usam o MT Login).
 - ⏳ i18n/locales: preparado (`SupportsLocales`, `properties`), sem conteúdo localizado.
 - ⏳ Frontend administrativo.
 
 **Melhorias identificadas (nenhuma bloqueia o uso):**
-- ⏳ Reenvio de convite de administrador expirado (`POST /admin/users/{id}/resend-invite`).
-- ⏳ Troca de senha do administrador logado (hoje: redefinição por e-mail/CLI).
+- ⏳ Remover `admins.password_hash` e a tabela `admin_sessions` (sem uso desde o login pelo MT Login) numa migração, depois de validado o novo fluxo.
 - ⏳ Bloquear/desbloquear administradores por endpoint (a coluna `blocked` existe e é respeitada; a API cobre ativar/desativar).
 - ⏳ Opção para desabilitar ou servir localmente o `/docs`.
 - ⏳ Fila de e-mails; retenção da auditoria; MFA para administradores.
@@ -119,11 +130,13 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
 
 ## 5. Checklist para colocar em produção
 
-1. `APP_ENV=production` e `JWT_ADMIN_SECRET`, `JWT_API_SECRET`, `API_TOKEN_SALT` aleatórios (`openssl rand -hex 32`), distintos entre si.
+1. `APP_ENV=production` e `JWT_API_SECRET`, `API_TOKEN_SALT` aleatórios (`openssl rand -hex 32`), distintos entre si.
+   `JWKS_URI`, `OIDC_ISSUER`, `OIDC_CLIENT_ID` e `OIDC_CPF_CLAIM` do MT Login de **produção** (a API não sobe sem eles); no frontend, as `MTLOGIN_*`
+   de produção, com a URL de retorno e a de pós-logout cadastradas no client.
 2. `DATABASE_URL` com `sslmode=verify-full`; usuário do banco com o mínimo de privilégios; backups agendados.
 3. TLS no proxy reverso, `TRUSTED_PROXIES` com o CIDR dele e `CORS_ALLOWED_ORIGINS` só com o(s) domínio(s) do front.
 4. `PUBLIC_URL` correto e SMTP configurado (`SMTP_*`); sem SMTP os e-mails são descartados.
-5. Criar o primeiro Super Admin pela CLI; manter `INITIAL_REGISTRATION_ENABLED` vazio/`false`.
+5. Criar o primeiro Super Admin pela CLI (`cli admin:create --cpf ...`) ou `SEED_SUPER_ADMIN_CPF`.
 6. Rodar `cli migrate:up` antes de subir a nova versão; **não** rodar o `seed` em produção, a menos que se queira criar as roles de exemplo
    (os usuários de exemplo só existem com `APP_ENV=development`).
 7. Agendar `cli cleanup` (diário) e acompanhar `GET /ready`.

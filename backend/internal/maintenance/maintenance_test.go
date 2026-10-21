@@ -34,7 +34,6 @@ func TestCleanupRemoveSoOQueVenceuHaMaisDeNDias(t *testing.T) {
 	for i, c := range []struct{ expires, revoked string }{
 		{"now() + interval '1 day'", "null"}, {"now() - interval '2 days'", "null"}, {"now() - interval '30 days'", "null"}, {"now() - interval '30 days'", "now() - interval '31 days'"},
 	} {
-		exec("INSERT INTO admin_sessions (admin_id, family_id, refresh_token_hash, expires_at, revoked_at) VALUES ($1, gen_random_uuid(), $2, "+c.expires+", "+c.revoked+")", admin.ID, "a"+string(rune('0'+i)))
 		exec("INSERT INTO end_user_sessions (end_user_id, family_id, refresh_token_hash, expires_at, revoked_at) VALUES ($1, gen_random_uuid(), $2, "+c.expires+", "+c.revoked+")", user.ID, "u"+string(rune('0'+i)))
 	}
 	// Tokens de uso único: pendente válido, expirado recente, expirado antigo, usado antigo.
@@ -46,14 +45,13 @@ func TestCleanupRemoveSoOQueVenceuHaMaisDeNDias(t *testing.T) {
 
 	res, err := maintenance.Cleanup(ctx, q, 7)
 	require.NoError(t, err)
-	assert.Equal(t, maintenance.Result{AdminSessions: 2, EndUserSessions: 2, OneTimeTokens: 2}, res)
+	assert.Equal(t, maintenance.Result{EndUserSessions: 2, OneTimeTokens: 2}, res)
 
 	count := func(table string) int {
 		var n int
 		require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&n))
 		return n
 	}
-	assert.Equal(t, 2, count("admin_sessions"))
 	assert.Equal(t, 2, count("end_user_sessions"))
 	assert.Equal(t, 2, count("one_time_tokens"))
 
@@ -64,7 +62,7 @@ func TestCleanupRemoveSoOQueVenceuHaMaisDeNDias(t *testing.T) {
 	// Com carência zero, a sessão expirada há 2 dias e o token expirado há 1 dia também saem.
 	res, err = maintenance.Cleanup(ctx, q, 0)
 	require.NoError(t, err)
-	assert.Equal(t, maintenance.Result{AdminSessions: 1, EndUserSessions: 1, OneTimeTokens: 1}, res)
+	assert.Equal(t, maintenance.Result{EndUserSessions: 1, OneTimeTokens: 1}, res)
 
 	_, err = maintenance.Cleanup(ctx, q, -1)
 	assert.Error(t, err)

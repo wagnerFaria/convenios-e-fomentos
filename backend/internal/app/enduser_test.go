@@ -295,10 +295,8 @@ func TestRedefinicaoETrocaDeSenhaDeUsuario(t *testing.T) {
 	tk := e.userLogin("maria", "nova-senha-123")
 	require.Equal(t, 200, tk.Status)
 
-	// Token de redefinição de administrador não vale para usuário final (e vice-versa).
-	e.do("POST", "/admin/auth/forgot-password", map[string]any{"email": "ana@exemplo.com"}, "")
-	adminToken := e.mail.LastToken()
-	assert.Equal(t, 400, e.do("POST", "/api/auth/reset-password", map[string]any{"token": adminToken, "password": "nova-senha-456"}, "").Status)
+	// Token de redefinição que não é de usuário final (aqui, um token de outro tipo) é recusado.
+	assert.Equal(t, 400, e.do("POST", "/api/auth/reset-password", map[string]any{"token": "token-de-outro-tipo", "password": "nova-senha-456"}, "").Status)
 
 	// Trocar a senha logado.
 	a1 := tk.data()["tokens"].(map[string]any)["accessToken"].(string)
@@ -312,15 +310,15 @@ func TestRedefinicaoETrocaDeSenhaDeUsuario(t *testing.T) {
 	assert.Equal(t, 200, e.userLogin("maria", "terceira-senha-1").Status)
 }
 
-func TestAudienciasDistintasEntreAdminEUsuario(t *testing.T) {
+func TestTokensDeAdminEUsuarioFinalNaoSeMisturam(t *testing.T) {
 	e, boss := setup(t)
 	userAccess, _, _ := e.userToken("maria", "maria@exemplo.com")
-	assert.Equal(t, 401, e.do("GET", "/api/users/me", nil, boss).Status, "JWT de admin na API pública")
+	assert.Equal(t, 401, e.do("GET", "/api/users/me", nil, boss).Status, "token do MT Login na API pública")
 	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, userAccess).Status, "JWT de usuário final na API admin")
 	assert.Equal(t, 401, e.do("GET", "/admin/roles", nil, userAccess).Status)
-	// Mesmo forjado com o segredo da API e a audiência admin (ou vice-versa).
+	// Mesmo forjado com o segredo da API: o painel só aceita RS256 do MT Login.
 	id := uuid.New()
-	forged, _ := auth.NewJWTIssuer(e.cfg.JWTAPISecret, auth.AudienceAdmin, 60e9).Issue(id, uuid.New())
+	forged, _ := auth.NewJWTIssuer(e.cfg.JWTAPISecret, "admin", 60e9).Issue(id, uuid.New())
 	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, forged).Status)
 }
 

@@ -4,7 +4,9 @@
 //   - Roles de admin faltantes são criadas, com as permissões padrão aplicadas somente na criação.
 //   - As permissões padrão de usuário final (Public/Authenticated) são aplicadas uma única vez
 //     (controlado pela configuração "seed.enduser-permissions").
-//   - Em desenvolvimento, cria um usuário de cada role; a senha só aparece no log na criação.
+//   - Os CPFs de SuperAdminCPFs viram Super Admin (login pelo MT Login), em qualquer ambiente.
+//   - Em desenvolvimento, cria um administrador de exemplo por role, com CPFs fictícios (DevUsers):
+//     servem para ver as listagens e para os testes, mas não conseguem entrar pelo MT Login.
 package seed
 
 import (
@@ -15,13 +17,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wagner/convenios-e-fomentos/backend/internal/admin"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/auth"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/authz"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/document"
@@ -36,6 +41,8 @@ type Deps struct {
 	EndUsers    *enduser.Service
 	Log         *slog.Logger
 	Development bool
+	// SuperAdminCPFs são os CPFs que recebem a role Super Admin (ver SEED_SUPER_ADMIN_CPF).
+	SuperAdminCPFs []string
 }
 
 // Códigos das roles de administrador criadas pelo seed.
@@ -109,6 +116,9 @@ func Run(ctx context.Context, d Deps) error {
 		}
 	}
 	if err := d.ensureEndUserPermissions(ctx, q); err != nil {
+		return err
+	}
+	if err := d.ensureSuperAdmins(ctx); err != nil {
 		return err
 	}
 	if d.Development {
@@ -192,23 +202,57 @@ func (d Deps) ensureEndUserPermissions(ctx context.Context, q *db.Queries) error
 	})
 }
 
-type devUser struct {
-	email, first, last, role, department string
+// DevUser é um administrador de exemplo do ambiente de desenvolvimento. O CPF é fictício (válido,
+// mas de ninguém): ninguém consegue autenticar com ele no MT Login.
+type DevUser struct {
+	CPF, Email, First, Last, Role, Department string
+}
+
+// DevUsers são os administradores criados pelo seed em desenvolvimento, um por role.
+var DevUsers = []DevUser{
+	{"11144477735", "super@dev.local", "Super", "Admin", RoleSuperAdmin, ""},
+	{"22233344405", "editor@dev.local", "Eda", "Editora", RoleEditor, ""},
+	{"33322211169", "author@dev.local", "Augusto", "Autor", RoleAuthor, "Financeiro"},
+	{"44455566619", "revisor@dev.local", "Regina", "Revisora", RoleReviewer, "Financeiro"},
 }
 
 func (d Deps) devUsers(ctx context.Context, q *db.Queries) error {
-	users := []devUser{
-		{"super@dev.local", "Super", "Admin", RoleSuperAdmin, ""},
-		{"editor@dev.local", "Eda", "Editora", RoleEditor, ""},
-		{"author@dev.local", "Augusto", "Autor", RoleAuthor, "Financeiro"},
-		{"revisor@dev.local", "Regina", "Revisora", RoleReviewer, "Financeiro"},
-	}
-	for _, u := range users {
+	for _, u := range DevUsers {
 		if err := d.devAdmin(ctx, q, u); err != nil {
-			return fmt.Errorf("usuário de desenvolvimento %s: %w", u.email, err)
+			return fmt.Errorf("usuário de desenvolvimento %s: %w", u.Email, err)
 		}
 	}
 	return d.devEndUser(ctx, q)
+}
+
+func (d Deps) ensureSuperAdmins(ctx context.Context) error {
+	svc := admin.NewService(d.Pool, nil)
+	for _, c := range d.SuperAdminCPFs {
+		if strings.TrimSpace(c) == "" {
+			continue
+		}
+		a, err := svc.EnsureSuperAdmin(ctx, admin.EnsureSuperAdminInput{CPF: c}, "")
+		if err != nil {
+			return fmt.Errorf("super admin %s: %w", maskInput(c), err)
+		}
+		d.Log.Info("Super Admin garantido; o nome e o e-mail são preenchidos no primeiro acesso", "id", a.ID, "cpf", maskedCPF(a.Cpf))
+	}
+	return nil
+}
+
+func maskedCPF(c *string) string {
+	if c == nil {
+		return ""
+	}
+	return cpf.Mask(*c)
+}
+
+// maskInput esconde um CPF digitado (possivelmente inválido) para mensagens de erro.
+func maskInput(s string) string {
+	if digits, err := cpf.Normalize(s); err == nil {
+		return cpf.Mask(digits)
+	}
+	return "(CPF inválido)"
 }
 
 func randomPassword() (string, error) {
@@ -219,35 +263,27 @@ func randomPassword() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-func (d Deps) devAdmin(ctx context.Context, q *db.Queries, u devUser) error {
-	if _, err := q.GetAdminByEmail(ctx, u.email); err == nil {
+func (d Deps) devAdmin(ctx context.Context, q *db.Queries, u DevUser) error {
+	if _, err := q.GetAdminByCPF(ctx, &u.CPF); err == nil {
 		return nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	role, err := q.UpsertAdminRole(ctx, db.UpsertAdminRoleParams{Code: u.role})
+	role, err := q.UpsertAdminRole(ctx, db.UpsertAdminRoleParams{Code: u.Role})
 	if err != nil {
 		return err
 	}
 	var dept *uuid.UUID
-	if u.department != "" {
-		rows, err := q.ListDepartmentsByName(ctx, []string{u.department})
+	if u.Department != "" {
+		rows, err := q.ListDepartmentsByName(ctx, []string{u.Department})
 		if err != nil || len(rows) != 1 {
-			return fmt.Errorf("departamento %q: %w", u.department, err)
+			return fmt.Errorf("departamento %q: %w", u.Department, err)
 		}
 		dept = &rows[0].ID
 	}
-	password, err := randomPassword()
-	if err != nil {
-		return err
-	}
-	hash, err := d.Hasher.Hash(password)
-	if err != nil {
-		return err
-	}
 	err = database.WithTx(ctx, d.Pool, func(tx pgx.Tx) error {
 		tq := q.WithTx(tx)
-		a, err := tq.CreateAdmin(ctx, db.CreateAdminParams{FirstName: u.first, LastName: u.last, Email: u.email, PasswordHash: &hash, IsActive: true, DepartmentID: dept})
+		a, err := tq.CreateAdmin(ctx, db.CreateAdminParams{Cpf: &u.CPF, FirstName: u.First, LastName: u.Last, Email: u.Email, IsActive: true, DepartmentID: dept})
 		if err != nil {
 			return err
 		}
@@ -256,7 +292,7 @@ func (d Deps) devAdmin(ctx context.Context, q *db.Queries, u devUser) error {
 	if err != nil {
 		return err
 	}
-	d.Log.Info("usuário de desenvolvimento criado (a senha não será exibida novamente)", "tipo", "admin", "role", u.role, "email", u.email, "senha", password)
+	d.Log.Info("administrador de desenvolvimento criado (CPF fictício, sem login pelo MT Login)", "role", u.Role, "email", u.Email, "cpf", cpf.Mask(u.CPF))
 	return nil
 }
 
