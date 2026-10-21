@@ -62,8 +62,12 @@ Opcional, só para rodar fora do Docker ou executar os testes do backend:
 Da raiz do repositório:
 
 ```bash
+cp .env.example .env     # opcional: sem .env valem os padrões de desenvolvimento
 docker compose -f docker-compose.dev.yml up --build
 ```
+
+Toda a configuração do compose vem de variáveis (portas, credenciais do banco, URLs, segredos, SMTP...). Elas ficam no
+`.env` da raiz, que o git ignora; o [`.env.example`](.env.example) lista todas, com comentários.
 
 Na primeira vez isso constrói as imagens e instala as dependências (alguns minutos). Quando os logs mostrarem
 `servidor iniciado` (API) e `Ready` (Next), acesse:
@@ -131,7 +135,7 @@ O arquivo [`docker-compose.dev.yml`](docker-compose.dev.yml) define quatro servi
 
 | Serviço | Imagem / build | O que faz |
 |---|---|---|
-| `db` | `postgres:16-alpine` | Banco `app` (usuário/senha `app`), dados no volume `pgdata`. Porta publicada em `${DB_PORT:-5432}`. |
+| `db` | `postgres:16-alpine` | Banco `app` (usuário/senha `app`), dados no volume `pgdata`. Credenciais por `POSTGRES_*`; porta publicada em `DB_PORT` (padrão 5432). |
 | `migrate` | [`backend/Dockerfile.dev`](backend/Dockerfile.dev) | Aplica as migrações (`migrate:up`) e termina. A API só sobe depois que ele conclui. |
 | `api` | [`backend/Dockerfile.dev`](backend/Dockerfile.dev) | Go com [air](https://github.com/air-verse/air): recompila e reinicia a cada alteração em `.go`, `.sql` ou `.yaml`. |
 | `web` | [`frontend/Dockerfile.dev`](frontend/Dockerfile.dev) | `bun install` + `next dev` (Turbopack) com HMR. |
@@ -147,14 +151,18 @@ cache do Next, mantidos dentro do Docker para não misturar com o host).
 `backend/tmp`, `frontend/.next` e alterações em `go.sum` ficam com o seu usuário. Se o seu for outro (`id -u`, `id -g`), crie um
 `.env` na raiz com `UID=1001` e `GID=1001` (o Compose o lê sozinho; o Bash não deixa sobrescrever `UID` na linha de comando).
 
-**Configuração já pronta para desenvolvimento** (definida no compose; não precisa de `.env`):
+**Configuração.** Tudo é parametrizável por variáveis (`.env` na raiz ou shell; o shell tem precedência) e tem um padrão de
+desenvolvimento no compose, então nada é obrigatório. Os padrões que importam:
 
-- `PUBLIC_URL=http://localhost:3000`: os links dos e-mails (convite, redefinição de senha) abrem o frontend. O Next redireciona
-  `/admin/reset-password` e `/admin/accept-invite` para as telas `/auth/...`.
-- `CORS_ALLOWED_ORIGINS=http://localhost:3000`.
+- `PUBLIC_URL` e `CORS_ALLOWED_ORIGINS` (`http://localhost:${WEB_EXTERNAL_PORT}`): os links dos e-mails (convite, redefinição de
+  senha) abrem o frontend. O Next redireciona `/admin/reset-password` e `/admin/accept-invite` para as telas `/auth/...`.
 - `TRUSTED_PROXIES=172.16.0.0/12`: o backend confia no `X-Forwarded-For` enviado pelo Next (rede padrão do Docker), para que
   o rate limit de login considere o IP do usuário e não o do servidor Next.
+- `DATABASE_URL`: montada a partir de `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` (host `db`, na rede do Docker).
+  Defina-a explicitamente apenas para usar outro banco. **Atenção:** uma `DATABASE_URL` exportada no seu shell (modo sem Docker,
+  apontando para `localhost`) sobrescreve a do `.env` e quebra os contêineres.
 - `API_URL=http://api:8080` no frontend: o servidor do Next fala com a API pela rede do Docker.
+- Segredos (`JWT_*`, `API_TOKEN_SALT`): valores fixos de desenvolvimento, **nunca** use em produção.
 
 ## 6. Rotina de trabalho
 
@@ -209,7 +217,7 @@ docker compose down -v                                # recomeçar do zero (apag
 
 ```bash
 # 1. Banco
-docker compose -f docker-compose.dev.yml up -d db     # use DB_PORT=5433 se a 5432 estiver ocupada
+docker compose -f docker-compose.dev.yml up -d db     # DB_PORT=5433 no .env se a 5432 estiver ocupada
 
 # 2. API (em backend/)
 cd backend
@@ -256,7 +264,15 @@ abram o frontend. Comandos do `Makefile` do backend: `run`, `dev`, `build`, `tes
 | `INITIAL_REGISTRATION_ENABLED` | Habilita `register-first` por HTTP; sem valor, só fora de produção. |
 | `SMTP_*` | Envio de e-mail; sem `SMTP_HOST` os e-mails são apenas registrados no log. |
 
-Variáveis do `docker-compose.dev.yml` (shell ou `.env` na raiz): `DB_PORT`, `UID`, `GID`, `WATCHPACK_POLLING`.
+**Compose de desenvolvimento** (`.env` na raiz; modelo em [`.env.example`](.env.example)):
+
+| Grupo | Variáveis |
+|---|---|
+| Portas no host | `WEB_EXTERNAL_PORT` (3000), `API_EXTERNAL_PORT` (8080), `DB_PORT` (5432) |
+| Usuário do host | `UID`, `GID` (1000) |
+| PostgreSQL | `POSTGRES_IMAGE`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` (opcional) |
+| Backend | `APP_ENV`, `LOG_LEVEL`, `PUBLIC_URL`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, `JWT_ADMIN_SECRET`, `JWT_API_SECRET`, `API_TOKEN_SALT`, `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_MAX_TTL`, `REFRESH_TOKEN_IDLE_TTL`, `RATE_LIMIT_AUTH_PER_MINUTE`, `RATE_LIMIT_GLOBAL_PER_MINUTE`, `SMTP_*` |
+| Frontend | `API_URL`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SENTRY_DISABLED`, `NEXT_TELEMETRY_DISABLED`, `WATCHPACK_POLLING` |
 
 ## 9. Autenticação e e-mails em desenvolvimento
 
@@ -314,8 +330,8 @@ O frontend ainda não tem suíte de testes automatizados; a verificação de pon
 
 | Sintoma | Causa / solução |
 |---|---|
-| `port is already allocated` / `address already in use` na **5432** | Há um PostgreSQL local. Use `DB_PORT=5433 docker compose up` (a API e o `web` falam com o `db` pela rede interna, então nada mais muda). |
-| `3000` ou `8080` ocupadas | Pare o processo que as usa (`ss -ltnp \| grep -E ':(3000\|8080)'`). Elas são fixas no compose por causa de CORS e `PUBLIC_URL`. |
+| `port is already allocated` / `address already in use` na **5432** | Há um PostgreSQL local. Defina `DB_PORT=5433` no `.env` (a API e o `web` falam com o `db` pela rede interna, então nada mais muda). |
+| `3000` ou `8080` ocupadas | Pare o processo que as usa (`ss -ltnp \| grep -E ':(3000\|8080)'`). Ou mude `WEB_EXTERNAL_PORT` / `API_EXTERNAL_PORT` no `.env` (`PUBLIC_URL` e CORS acompanham a porta do frontend). |
 | Alterações em arquivos não recarregam (macOS/Windows) | `WATCHPACK_POLLING=true` para o frontend; para a API, defina `poll = true` em `[build]` do `backend/.air.toml`. |
 | `permission denied` em `tmp/`, `.next/` ou `go.sum` | Arquivos criados como root por uma execução anterior. `sudo chown -R $USER backend/tmp frontend/.next` e confira `UID`/`GID`. |
 | Tela de setup devolve "registro inicial já concluído" | Já existe administrador (talvez criado pelo seed). Entre pelo login, ou recomece com `docker compose down -v`. |
