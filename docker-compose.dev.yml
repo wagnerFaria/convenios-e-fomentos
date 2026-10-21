@@ -51,9 +51,9 @@ services:
   db:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
-      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-sedec}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adminadmin}
+      POSTGRES_DB: ${POSTGRES_DB:-convenios_e_fomento}
     ports:
       # Mude DB_PORT se a 5432 do host estiver ocupada.
       - "${DB_PORT:-5432}:5432"
