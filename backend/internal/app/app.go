@@ -21,6 +21,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/enduser"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/storage"
 )
 
 // Hasher cria o hasher de senhas a partir da configuração.
@@ -45,13 +46,42 @@ type App struct {
 	Identifier *enduser.Identifier
 	EndUsers   *enduser.Service
 	APITokens  *apitoken.Service
+	Documents  *document.Service
 
 	log  *slog.Logger
 	pool *pgxpool.Pool
 }
 
+// Option ajusta a montagem do grafo (usada principalmente pelos testes).
+type Option func(*options)
+
+type options struct{ store storage.Store }
+
+// WithStore usa o armazenamento dado em vez de criar o S3 a partir da configuração.
+func WithStore(s storage.Store) Option { return func(o *options) { o.store = s } }
+
+// NewStore cria o armazenamento S3 da configuração; devolve nil quando STORAGE_ENDPOINT não está definido.
+func NewStore(cfg *config.Config) (storage.Store, error) {
+	if cfg.StorageEndpoint == "" {
+		return nil, nil
+	}
+	return storage.NewS3(storage.S3Config{Endpoint: cfg.StorageEndpoint, UseSSL: cfg.StorageUseSSL, PublicURL: cfg.StoragePublicURL,
+		AccessKey: cfg.StorageAccessKey, SecretKey: cfg.StorageSecretKey, Bucket: cfg.StorageBucket, Region: cfg.StorageRegion})
+}
+
 // New monta todo o grafo de dependências.
-func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool, mail mailer.Mailer) (*App, error) {
+func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool, mail mailer.Mailer, opts ...Option) (*App, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.store == nil {
+		s, err := NewStore(cfg)
+		if err != nil {
+			return nil, err
+		}
+		o.store = s
+	}
 	trusted, err := httpapi.ParseCIDRs(cfg.TrustedProxies)
 	if err != nil {
 		return nil, err
@@ -95,6 +125,9 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 	endUserAdmin := enduser.NewAdminHandler(endUserSvc, adminHandler.Guard)
 	tokenAdmin := apitoken.NewHandler(tokenSvc, adminHandler.Guard)
 	documentSvc := document.NewService(pool, engine)
+	if o.store != nil {
+		documentSvc.SetStorage(o.store, cfg.StorageUploadTTL, cfg.StorageDownloadTTL, log)
+	}
 	documentAdmin := document.NewAdminHandler(documentSvc, engine, adminHandler.Guard)
 	documentPublic := document.NewPublicHandler(documentSvc, identifier)
 
@@ -112,7 +145,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 		},
 	})
 	mux := r.(*chi.Mux)
-	return &App{Handler: mux, Router: mux, Authz: engine, Actions: actions, Identifier: identifier, EndUsers: endUserSvc, APITokens: tokenSvc, log: log, pool: pool}, nil
+	return &App{Handler: mux, Router: mux, Authz: engine, Actions: actions, Identifier: identifier, EndUsers: endUserSvc, APITokens: tokenSvc, Documents: documentSvc, log: log, pool: pool}, nil
 }
 
 // Start sincroniza o registro de ações com o banco e passa a escutar as

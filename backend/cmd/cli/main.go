@@ -33,7 +33,8 @@ Comandos:
                      departamentos de exemplo, os Super Admins de SEED_SUPER_ADMIN_CPF e,
                      em desenvolvimento, um administrador de exemplo por role
   cleanup            remove sessões de usuário final e tokens de uso único vencidos há mais
-                     de N dias [--days 7] (agende, por exemplo, uma vez por dia)
+                     de N dias [--days 7] e envios de arquivo nunca confirmados há mais de 24 h
+                     (agende, por exemplo, uma vez por dia)
 `
 
 func main() {
@@ -105,6 +106,16 @@ func run(ctx context.Context, cmd string, args []string) error {
 			return err
 		}
 		fmt.Printf("Removidos: %d sessões de usuário final, %d tokens de uso único.\n", res.EndUserSessions, res.OneTimeTokens)
+		// Arquivos com envio autorizado e nunca confirmado há mais de 24 horas.
+		a, err := app.New(ctx, cfg, logging.New(os.Stdout, cfg.LogLevel), pool, mailer.NopMailer{Log: logging.New(os.Stdout, cfg.LogLevel)})
+		if err != nil {
+			return err
+		}
+		n, err := a.Documents.CleanupPendingFiles(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Removidos: %d envios de arquivo não confirmados.\n", n)
 		return nil
 	default:
 		return fmt.Errorf("comando desconhecido %q\n\n%s", cmd, uso)

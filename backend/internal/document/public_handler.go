@@ -29,12 +29,14 @@ func NewPublicHandler(svc *Service, id *enduser.Identifier) *PublicHandler {
 func (h *PublicHandler) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(h.id.Identify)
-		r.With(h.id.RequireAction(ActionAPIFind)).Get("/api/documents", h.find)
-		r.With(h.id.RequireAction(ActionAPIFindOne)).Get("/api/documents/{id}", h.findOne)
-		r.With(h.id.RequireAction(ActionAPICreate)).Post("/api/documents", h.create)
+		r.With(h.id.RequireAction(ActionAPIFind)).Get("/documents", h.find)
+		r.With(h.id.RequireAction(ActionAPIFindOne)).Get("/documents/{id}", h.findOne)
+		r.With(h.id.RequireAction(ActionAPIFileFind)).Get("/documents/{id}/files", h.findFiles)
+		r.With(h.id.RequireAction(ActionAPIFileDownload)).Get("/documents/{id}/files/{fileId}/download", h.downloadFile)
+		r.With(h.id.RequireAction(ActionAPICreate)).Post("/documents", h.create)
 		// A policy is-owner roda depois da permissão da ação.
-		r.With(h.id.RequireAction(ActionAPIUpdate), policy.Require(h.isOwner())).Put("/api/documents/{id}", h.update)
-		r.With(h.id.RequireAction(ActionAPIDelete), policy.Require(h.isOwner())).Delete("/api/documents/{id}", h.delete)
+		r.With(h.id.RequireAction(ActionAPIUpdate), policy.Require(h.isOwner())).Put("/documents/{id}", h.update)
+		r.With(h.id.RequireAction(ActionAPIDelete), policy.Require(h.isOwner())).Delete("/documents/{id}", h.delete)
 	})
 }
 
@@ -153,4 +155,32 @@ func (h *PublicHandler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *PublicHandler) findFiles(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	files, err := h.svc.ListFilesPublic(r.Context(), id)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, files, nil)
+}
+
+func (h *PublicHandler) downloadFile(w http.ResponseWriter, r *http.Request) {
+	docID, fileID, err := ids(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	u, exp, err := h.svc.DownloadPublic(r.Context(), docID, fileID)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, downloadLink{URL: u, ExpiresAt: exp}, nil)
 }

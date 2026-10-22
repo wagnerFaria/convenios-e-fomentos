@@ -80,3 +80,17 @@ func asString(raw json.RawMessage) (*string, error) {
 	}
 	return &s, nil
 }
+
+// decodeStrict lê o corpo como um objeto JSON com exatamente os campos de v (campos extras → 422).
+func decodeStrict(r *http.Request, v any) error {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return &httpapi.APIError{Status: 413, Code: "payload_too_large", Message: "O corpo da requisição excede o limite permitido."}
+		}
+		return httpapi.ErrBadRequest("Corpo da requisição inválido.")
+	}
+	return nil
+}

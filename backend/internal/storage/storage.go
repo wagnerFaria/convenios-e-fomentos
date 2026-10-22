@@ -1,0 +1,42 @@
+// Pacote storage isola o armazenamento de objetos (S3/MinIO) dos arquivos dos documentos.
+// O navegador envia e baixa os arquivos direto do armazenamento, por URLs pré-assinadas; a API
+// só emite as URLs e confere o resultado.
+package storage
+
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+// ErrNotFound indica que o objeto não existe.
+var ErrNotFound = errors.New("storage: objeto não encontrado")
+
+// ObjectInfo descreve um objeto armazenado.
+type ObjectInfo struct {
+	Size        int64
+	ContentType string
+}
+
+// Upload é o envio autorizado: o navegador faz um POST multipart para URL com os campos Fields
+// (e o arquivo no último campo "file"). O armazenamento recusa o que violar tipo ou tamanho.
+type Upload struct {
+	URL       string            `json:"url"`
+	Fields    map[string]string `json:"fields"`
+	ExpiresAt time.Time         `json:"expires_at"`
+}
+
+// Store é o contrato do armazenamento.
+type Store interface {
+	// PresignUpload autoriza um único envio ao objeto key, com exatamente contentType e tamanho
+	// entre 1 byte e maxSize.
+	PresignUpload(ctx context.Context, key, contentType string, maxSize int64, ttl time.Duration) (Upload, error)
+	// PresignDownload devolve uma URL de download temporária, que baixa como anexo com o nome filename.
+	PresignDownload(ctx context.Context, key, filename, contentType string, ttl time.Duration) (string, time.Time, error)
+	// Stat devolve tamanho e tipo do objeto, ou ErrNotFound.
+	Stat(ctx context.Context, key string) (ObjectInfo, error)
+	// Head lê até n bytes iniciais do objeto (para conferir a assinatura do formato).
+	Head(ctx context.Context, key string, n int64) ([]byte, error)
+	// Delete remove o objeto; remover um objeto inexistente não é erro.
+	Delete(ctx context.Context, key string) error
+}

@@ -7,9 +7,9 @@ info:
     Respostas de sucesso: `{ "data": ..., "meta": ... }`.
     Respostas de erro: `{ "error": { "status", "code", "message", "details" } }`.
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost
 paths:
-  /health:
+  /api/health:
     get:
       tags: [Infraestrutura]
       summary: Verificação de vida (liveness)
@@ -20,7 +20,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
-  /ready:
+  /api/ready:
     get:
       tags: [Infraestrutura]
       summary: Verificação de prontidão (consulta o banco)
@@ -37,7 +37,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /admin/auth/me:
+  /api/admin/auth/me:
     get:
       tags: [Autenticação de administradores]
       summary: Administrador autenticado, roles e permissões efetivas
@@ -87,7 +87,7 @@ paths:
                             conditions: {type: array, items: {type: string}}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
-  /admin/users:
+  /api/admin/users:
     get:
       tags: [Administradores]
       summary: Lista administradores (busca, filtros, ordenação, paginação)
@@ -129,7 +129,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "409": {description: "CPF já cadastrado (`cpf_taken`)", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/users/batch-delete:
+  /api/admin/users/batch-delete:
     post:
       tags: [Administradores]
       summary: Exclui administradores em lote (tudo ou nada, até 100)
@@ -151,7 +151,7 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/users/{id}:
+  /api/admin/users/{id}:
     get:
       tags: [Administradores]
       summary: Detalha um administrador
@@ -199,7 +199,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
-  /admin/users/{id}/activate:
+  /api/admin/users/{id}/activate:
     post:
       tags: [Administradores]
       summary: Ativa o administrador
@@ -213,7 +213,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
-  /admin/users/{id}/deactivate:
+  /api/admin/users/{id}/deactivate:
     post:
       tags: [Administradores]
       summary: Desativa o administrador e revoga as sessões
@@ -227,7 +227,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
-  /admin/users/{id}/roles:
+  /api/admin/users/{id}/roles:
     post:
       tags: [Administradores]
       summary: Atribui roles ao administrador
@@ -250,7 +250,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/users/{id}/roles/{roleId}:
+  /api/admin/users/{id}/roles/{roleId}:
     delete:
       tags: [Administradores]
       summary: Remove uma role do administrador
@@ -266,7 +266,7 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/roles:
+  /api/admin/roles:
     get:
       tags: [Roles de administrador]
       summary: Lista roles com a contagem de administradores
@@ -296,7 +296,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/roles/{id}:
+  /api/admin/roles/{id}:
     get:
       tags: [Roles de administrador]
       summary: Detalha a role com permissões e contagem de administradores
@@ -345,7 +345,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
-  /admin/roles/{id}/permissions:
+  /api/admin/roles/{id}/permissions:
     put:
       tags: [Roles de administrador]
       summary: Substitui, em transação, todas as permissões da role
@@ -379,7 +379,7 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/roles/{id}/duplicate:
+  /api/admin/roles/{id}/duplicate:
     post:
       tags: [Roles de administrador]
       summary: Duplica a role (nome com sufixo, descrição e permissões)
@@ -393,7 +393,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
-  /admin/catalog/actions:
+  /api/admin/catalog/actions:
     get:
       tags: [Catálogo]
       summary: Ações registradas, agrupadas por categoria
@@ -405,7 +405,7 @@ paths:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
-  /admin/catalog/conditions:
+  /api/admin/catalog/conditions:
     get:
       tags: [Catálogo]
       summary: Condições disponíveis
@@ -415,7 +415,7 @@ paths:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
-  /admin/audit-logs:
+  /api/admin/audit-logs:
     get:
       tags: [Auditoria]
       summary: Lista registros de auditoria (filtros por ator, ação, entidade e período)
@@ -593,7 +593,7 @@ paths:
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
-  /admin/end-user-roles:
+  /api/admin/end-user-roles:
     get:
       tags: [Roles de usuário final]
       summary: Lista roles com a contagem de usuários
@@ -624,7 +624,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/end-user-roles/{id}:
+  /api/admin/end-user-roles/{id}:
     get:
       tags: [Roles de usuário final]
       summary: Detalha a role; cada permissão traz método e rota vinculada
@@ -674,7 +674,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
-  /admin/end-users:
+  /api/admin/end-users:
     get:
       tags: [Usuários finais - administração]
       summary: Lista usuários finais
@@ -718,7 +718,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/end-users/{id}:
+  /api/admin/end-users/{id}:
     get:
       tags: [Usuários finais - administração]
       summary: Detalha o usuário
@@ -768,7 +768,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
-  /admin/end-users/{id}/block:
+  /api/admin/end-users/{id}/block:
     post:
       tags: [Usuários finais - administração]
       summary: Bloqueia o usuário e revoga as sessões
@@ -781,7 +781,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
-  /admin/end-users/{id}/unblock:
+  /api/admin/end-users/{id}/unblock:
     post:
       tags: [Usuários finais - administração]
       summary: Desbloqueia o usuário
@@ -794,7 +794,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
-  /admin/end-users/{id}/confirm:
+  /api/admin/end-users/{id}/confirm:
     post:
       tags: [Usuários finais - administração]
       summary: Marca o e-mail como confirmado
@@ -807,7 +807,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
-  /admin/end-users/{id}/role:
+  /api/admin/end-users/{id}/role:
     put:
       tags: [Usuários finais - administração]
       summary: Altera a role (um usuário tem uma única role)
@@ -830,7 +830,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/end-user-settings:
+  /api/admin/end-user-settings:
     get:
       tags: [Configurações de usuários finais]
       summary: Lê as configurações avançadas
@@ -865,7 +865,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/email-templates:
+  /api/admin/email-templates:
     get:
       tags: [Templates de e-mail]
       summary: Lista os templates
@@ -875,7 +875,7 @@ paths:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
-  /admin/email-templates/{key}:
+  /api/admin/email-templates/{key}:
     get:
       tags: [Templates de e-mail]
       summary: Lê um template (email-confirmation ou reset-password)
@@ -914,7 +914,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/api-tokens:
+  /api/admin/api-tokens:
     get:
       tags: [Tokens de API]
       summary: Lista tokens de API (sem os revogados)
@@ -950,7 +950,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/api-tokens/{id}:
+  /api/admin/api-tokens/{id}:
     get:
       tags: [Tokens de API]
       summary: Detalha um token (inclui last_used_at e status)
@@ -1001,7 +1001,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
-  /admin/api-tokens/{id}/regenerate:
+  /api/admin/api-tokens/{id}/regenerate:
     post:
       tags: [Tokens de API]
       summary: Regenera o valor do token (o anterior deixa de valer na hora)
@@ -1015,7 +1015,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
-  /admin/content/documents:
+  /api/admin/content/documents:
     get:
       tags: [Documentos - administração]
       summary: Lista documentos (permissão de registros e de campos aplicadas)
@@ -1056,7 +1056,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "422": {$ref: "#/components/responses/Error"}
-  /admin/content/documents/{id}:
+  /api/admin/content/documents/{id}:
     get:
       tags: [Documentos - administração]
       summary: Detalha um documento
@@ -1107,7 +1107,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
-  /admin/content/documents/{id}/publish:
+  /api/admin/content/documents/{id}/publish:
     post:
       tags: [Documentos - administração]
       summary: Publica o documento
@@ -1120,7 +1120,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
-  /admin/content/documents/{id}/unpublish:
+  /api/admin/content/documents/{id}/unpublish:
     post:
       tags: [Documentos - administração]
       summary: Despublica o documento (volta a rascunho)
@@ -1133,6 +1133,93 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+  /api/admin/content/documents/{id}/files:
+    get:
+      tags: [Documentos - administração]
+      summary: Lista os arquivos anexados ao documento (inclusive envios pendentes)
+      description: "Permissão: `admin::content.document.file.read` (as condições valem sobre o documento; 403 se ele não passar)."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Documentos - administração]
+      summary: Autoriza o envio de um arquivo (passo 1 de 2)
+      description: "Permissão: `admin::content.document.file.upload`. Registra o arquivo como `pendente` e devolve `upload`: o navegador faz um POST multipart para `upload.url` com todos os `upload.fields` e, por último, o campo `file` com o conteúdo. O armazenamento recusa tipo ou tamanho diferentes dos declarados. Depois chame `/confirm`. Tipos: PDF e DOCX até 200 MB; PNG, JPEG e WebP até 25 MB. Máximo de 50 arquivos por documento."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, content_type, size_bytes]
+              properties:
+                filename: {type: string, maxLength: 255, description: "A extensão precisa corresponder ao tipo"}
+                content_type: {type: string, enum: [application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, image/png, image/jpeg, image/webp]}
+                size_bytes: {type: integer, minimum: 1}
+      responses:
+        "201": {description: "Criado: `{file, upload: {url, fields, expires_at}}`"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/content/documents/{id}/files/{fileId}/confirm:
+    post:
+      tags: [Documentos - administração]
+      summary: Confirma o envio do arquivo (passo 2 de 2)
+      description: "Permissão: `admin::content.document.file.upload`. A API confere o objeto no armazenamento (existência, tipo, tamanho e assinatura do formato). Se não passar, o objeto e o registro são apagados (422). Repetir a chamada num arquivo já confirmado é seguro. 409 `file_not_uploaded` se o envio ainda não aconteceu."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/content/documents/{id}/files/{fileId}/download:
+    get:
+      tags: [Documentos - administração]
+      summary: Devolve uma URL temporária para baixar o arquivo
+      description: "Permissão: `admin::content.document.file.read`. Resposta `{url, expires_at}`; a URL baixa como anexo e vale poucos minutos. Arquivos pendentes respondem 404."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/content/documents/{id}/files/{fileId}:
+    delete:
+      tags: [Documentos - administração]
+      summary: Exclui o arquivo (registro e objeto)
+      description: "Permissão: `admin::content.document.file.delete`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Excluído}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /api/documents:
     get:
       tags: [Documentos - API pública]
@@ -1215,6 +1302,35 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+  /api/documents/{id}/files:
+    get:
+      tags: [Documentos - API pública]
+      summary: Lista os arquivos de um documento publicado
+      description: "Ação `api::document.file.find`. Só arquivos confirmados; documento em rascunho responde 404."
+      security: [{}, {apiBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/documents/{id}/files/{fileId}/download:
+    get:
+      tags: [Documentos - API pública]
+      summary: Devolve uma URL temporária para baixar o arquivo de um documento publicado
+      description: "Ação `api::document.file.download`. Resposta `{url, expires_at}`."
+      security: [{}, {apiBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+
 components:
   securitySchemes:
     apiBearer:

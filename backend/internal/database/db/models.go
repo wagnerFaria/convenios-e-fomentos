@@ -116,6 +116,19 @@ type Document struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
+type DocumentFile struct {
+	ID          uuid.UUID  `json:"id"`
+	DocumentID  uuid.UUID  `json:"document_id"`
+	ObjectKey   string     `json:"object_key"`
+	Filename    string     `json:"filename"`
+	ContentType string     `json:"content_type"`
+	SizeBytes   int64      `json:"size_bytes"`
+	Status      string     `json:"status"`
+	CreatedByID *uuid.UUID `json:"created_by_id"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ConfirmedAt *time.Time `json:"confirmed_at"`
+}
+
 type EmailTemplate struct {
 	Key         string    `json:"key"`
 	SenderName  string    `json:"sender_name"`

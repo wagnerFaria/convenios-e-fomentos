@@ -84,11 +84,19 @@ const (
 	ActionAdminDelete  = "admin::content.document.delete"
 	ActionAdminPublish = "admin::content.document.publish"
 
+	// Arquivos anexados. As condições são avaliadas sobre o documento ao qual o arquivo pertence.
+	ActionAdminFileRead   = "admin::content.document.file.read"
+	ActionAdminFileUpload = "admin::content.document.file.upload"
+	ActionAdminFileDelete = "admin::content.document.file.delete"
+
 	ActionAPIFind    = "api::document.find"
 	ActionAPIFindOne = "api::document.findOne"
 	ActionAPICreate  = "api::document.create"
 	ActionAPIUpdate  = "api::document.update"
 	ActionAPIDelete  = "api::document.delete"
+
+	ActionAPIFileFind     = "api::document.file.find"
+	ActionAPIFileDownload = "api::document.file.download"
 )
 
 // Register registra as ações e o schema do recurso no Action Registry.
@@ -106,11 +114,16 @@ func Register(reg *authz.Registry) {
 		admin(ActionAdminUpdate, "Atualizar documentos", true, true),
 		admin(ActionAdminDelete, "Excluir documentos", false, true),
 		admin(ActionAdminPublish, "Publicar documentos", false, true),
+		admin(ActionAdminFileRead, "Ler e baixar arquivos dos documentos", false, true),
+		admin(ActionAdminFileUpload, "Enviar arquivos aos documentos", false, true),
+		admin(ActionAdminFileDelete, "Excluir arquivos dos documentos", false, true),
 		api(ActionAPIFind, "Listar documentos publicados", "GET", "/api/documents"),
 		api(ActionAPIFindOne, "Detalhar documento publicado", "GET", "/api/documents/{id}"),
 		api(ActionAPICreate, "Criar documento", "POST", "/api/documents"),
 		api(ActionAPIUpdate, "Atualizar o próprio documento", "PUT", "/api/documents/{id}"),
 		api(ActionAPIDelete, "Excluir o próprio documento", "DELETE", "/api/documents/{id}"),
+		api(ActionAPIFileFind, "Listar arquivos de documento publicado", "GET", "/api/documents/{id}/files"),
+		api(ActionAPIFileDownload, "Baixar arquivo de documento publicado", "GET", "/api/documents/{id}/files/{fileId}/download"),
 	)
 	reg.RegisterSchema(Resource, Schema)
 }

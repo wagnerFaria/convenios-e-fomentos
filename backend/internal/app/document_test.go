@@ -58,7 +58,7 @@ func (e *env) devToken(email string) string {
 	for _, u := range seed.DevUsers {
 		if u.Email == email {
 			tok := e.oidc.Token(testutil.Identity{CPF: u.CPF, Email: u.Email, Given: u.First, Family: u.Last})
-			require.Equal(e.t, 200, e.do("GET", "/admin/auth/me", nil, tok).Status)
+			require.Equal(e.t, 200, e.do("GET", "/api/admin/auth/me", nil, tok).Status)
 			return tok
 		}
 	}
@@ -74,7 +74,7 @@ func seeded(t *testing.T) (*env, string, func(email string) string) {
 }
 
 func (e *env) newDoc(token string, body map[string]any) resp {
-	return e.do("POST", "/admin/content/documents", body, token)
+	return e.do("POST", "/api/admin/content/documents", body, token)
 }
 
 func (e *env) docID(token string, body map[string]any) string {
@@ -104,7 +104,7 @@ func TestSeedIdempotenteEEstrutura(t *testing.T) {
 		}
 	}
 	before := snapshot()
-	assert.Equal(t, []int{4, 12, 2, 5, 1, 7, 2, 2}, before)
+	assert.Equal(t, []int{4, 19, 2, 5, 1, 11, 2, 2}, before)
 
 	// Segunda execução: nada novo, e as senhas não são repetidas no log.
 	assert.Empty(t, e.runSeed(true))
@@ -125,9 +125,9 @@ func TestSeedIdempotenteEEstrutura(t *testing.T) {
 		return out
 	}
 	assert.Empty(t, perms("super-admin"), "Super Admin é curinga, sem linhas")
-	assert.Len(t, perms("editor"), 5)
+	assert.Len(t, perms("editor"), 8)
 	author := perms("author")
-	assert.Len(t, author, 4)
+	assert.Len(t, author, 7)
 	assert.Contains(t, author["admin::content.document.update"], `["admin::is-creator"]`)
 	assert.Contains(t, author["admin::content.document.delete"], `["admin::is-creator"]`)
 	assert.NotContains(t, author, "admin::content.document.publish", "Author não publica")
@@ -138,14 +138,14 @@ func TestSeedIdempotenteEEstrutura(t *testing.T) {
 	endPerms := func(typ string) int {
 		return count("SELECT count(*) FROM end_user_permissions p JOIN end_user_roles r ON r.id=p.role_id WHERE r.type=$1", typ)
 	}
-	assert.Equal(t, 2, endPerms("public"))
-	assert.Equal(t, 5, endPerms("authenticated"))
+	assert.Equal(t, 4, endPerms("public"))
+	assert.Equal(t, 7, endPerms("authenticated"))
 
 	// Alterações feitas depois não são desfeitas por um novo seed.
 	author2 := e.roleID("author")
-	require.Equal(t, 200, e.do("PUT", "/admin/roles/"+author2+"/permissions", map[string]any{"permissions": []map[string]any{{"action": "admin::content.document.read"}}}, boss).Status)
+	require.Equal(t, 200, e.do("PUT", "/api/admin/roles/"+author2+"/permissions", map[string]any{"permissions": []map[string]any{{"action": "admin::content.document.read"}}}, boss).Status)
 	pub := e.endRoleID("public")
-	require.Equal(t, 200, e.do("PUT", "/admin/end-user-roles/"+pub, map[string]any{"name": "Public", "permissions": []string{}}, boss).Status)
+	require.Equal(t, 200, e.do("PUT", "/api/admin/end-user-roles/"+pub, map[string]any{"name": "Public", "permissions": []string{}}, boss).Status)
 	e.runSeed(true)
 	assert.Len(t, perms("author"), 1)
 	assert.Equal(t, 0, endPerms("public"))
@@ -164,13 +164,13 @@ func TestUsuariosDeDesenvolvimentoFuncionam(t *testing.T) {
 	e, _ := setup(t)
 	pw := e.runSeed(true)
 	for _, email := range []string{"super@dev.local", "editor@dev.local", "author@dev.local", "revisor@dev.local"} {
-		me := e.do("GET", "/admin/auth/me", nil, e.devToken(email))
+		me := e.do("GET", "/api/admin/auth/me", nil, e.devToken(email))
 		assert.Equal(t, 200, me.Status, email)
 	}
-	assert.Equal(t, true, e.do("GET", "/admin/auth/me", nil, e.devToken("super@dev.local")).data()["isSuperAdmin"])
+	assert.Equal(t, true, e.do("GET", "/api/admin/auth/me", nil, e.devToken("super@dev.local")).data()["isSuperAdmin"])
 	assert.Equal(t, 200, e.userLogin("usuario@dev.local", pw["usuario@dev.local"]).Status)
 	assert.Equal(t, 200, e.userLogin("usuario", pw["usuario@dev.local"]).Status)
-	me := e.do("GET", "/admin/auth/me", nil, e.devToken("author@dev.local"))
+	me := e.do("GET", "/api/admin/auth/me", nil, e.devToken("author@dev.local"))
 	assert.Equal(t, e.deptID("Financeiro"), me.data()["departmentId"])
 }
 
@@ -186,7 +186,7 @@ func TestSeedGarantiSuperAdminsPorCPF(t *testing.T) {
 	assert.Equal(t, 2, n)
 
 	// No primeiro acesso a pessoa assume o registro e já é Super Admin.
-	me := e.do("GET", "/admin/auth/me", nil, e.token("lia@exemplo.com"))
+	me := e.do("GET", "/api/admin/auth/me", nil, e.token("lia@exemplo.com"))
 	require.Equal(t, 200, me.Status)
 	assert.Equal(t, true, me.data()["isSuperAdmin"])
 	assert.Equal(t, "lia@exemplo.com", me.data()["email"])
@@ -210,32 +210,32 @@ func TestEditorTemControleTotalSobreDocumentos(t *testing.T) {
 	assert.NotEmpty(t, r.data()["created_by_id"])
 	assert.Equal(t, r.data()["created_by_id"], r.data()["updated_by_id"])
 
-	u := e.do("PUT", "/admin/content/documents/"+id, map[string]any{"titulo": "Editado", "department_id": e.deptID("Jurídico")}, editor)
+	u := e.do("PUT", "/api/admin/content/documents/"+id, map[string]any{"titulo": "Editado", "department_id": e.deptID("Jurídico")}, editor)
 	require.Equal(t, 200, u.Status, u.Body)
 	assert.Equal(t, "Editado", u.data()["titulo"])
 	assert.Equal(t, "texto", u.data()["conteudo"], "campos ausentes não mudam")
 	assert.Equal(t, e.deptID("Jurídico"), u.data()["department_id"])
-	u = e.do("PUT", "/admin/content/documents/"+id, map[string]any{"department_id": nil}, editor)
+	u = e.do("PUT", "/api/admin/content/documents/"+id, map[string]any{"department_id": nil}, editor)
 	assert.Nil(t, u.data()["department_id"], "null limpa o campo")
 
-	pub := e.do("POST", "/admin/content/documents/"+id+"/publish", nil, editor)
+	pub := e.do("POST", "/api/admin/content/documents/"+id+"/publish", nil, editor)
 	require.Equal(t, 200, pub.Status)
 	assert.Equal(t, "publicado", pub.data()["status"])
 	assert.NotNil(t, pub.data()["published_at"])
-	unpub := e.do("POST", "/admin/content/documents/"+id+"/unpublish", nil, editor)
+	unpub := e.do("POST", "/api/admin/content/documents/"+id+"/unpublish", nil, editor)
 	assert.Equal(t, "rascunho", unpub.data()["status"])
 	assert.Nil(t, unpub.data()["published_at"])
 	// Mudar o status pelo PUT equivale a publicar.
-	up := e.do("PUT", "/admin/content/documents/"+id, map[string]any{"status": "publicado"}, editor)
+	up := e.do("PUT", "/api/admin/content/documents/"+id, map[string]any{"status": "publicado"}, editor)
 	assert.Equal(t, "publicado", up.data()["status"])
 	assert.NotNil(t, up.data()["published_at"])
 
-	assert.Equal(t, 200, e.do("GET", "/admin/content/documents/"+id, nil, editor).Status)
-	assert.Equal(t, 204, e.do("DELETE", "/admin/content/documents/"+id, nil, editor).Status)
-	assert.Equal(t, 404, e.do("GET", "/admin/content/documents/"+id, nil, editor).Status)
-	assert.Equal(t, 404, e.do("DELETE", "/admin/content/documents/"+id, nil, editor).Status)
-	assert.Equal(t, 404, e.do("POST", "/admin/content/documents/"+uuid.NewString()+"/publish", nil, editor).Status)
-	assert.Equal(t, 404, e.do("PUT", "/admin/content/documents/xyz", map[string]any{}, editor).Status)
+	assert.Equal(t, 200, e.do("GET", "/api/admin/content/documents/"+id, nil, editor).Status)
+	assert.Equal(t, 204, e.do("DELETE", "/api/admin/content/documents/"+id, nil, editor).Status)
+	assert.Equal(t, 404, e.do("GET", "/api/admin/content/documents/"+id, nil, editor).Status)
+	assert.Equal(t, 404, e.do("DELETE", "/api/admin/content/documents/"+id, nil, editor).Status)
+	assert.Equal(t, 404, e.do("POST", "/api/admin/content/documents/"+uuid.NewString()+"/publish", nil, editor).Status)
+	assert.Equal(t, 404, e.do("PUT", "/api/admin/content/documents/xyz", map[string]any{}, editor).Status)
 }
 
 func TestValidacaoECamposDeSistemaNuncaGraváveis(t *testing.T) {
@@ -253,14 +253,14 @@ func TestValidacaoECamposDeSistemaNuncaGraváveis(t *testing.T) {
 	// Campos de sistema: recusados até para o Super Admin, listando quais são.
 	for _, field := range []string{"id", "created_at", "updated_at", "created_by_id", "updated_by_id", "published_at", "owner_user_id"} {
 		for _, tok := range []string{editor, boss} {
-			r := e.do("PUT", "/admin/content/documents/"+id, map[string]any{"titulo": "x", field: "valor"}, tok)
+			r := e.do("PUT", "/api/admin/content/documents/"+id, map[string]any{"titulo": "x", field: "valor"}, tok)
 			if field == "id" || strings.HasSuffix(field, "_id") || strings.HasSuffix(field, "_at") {
 				assert.Equal(t, 422, r.Status, field)
 				assert.Equal(t, []string{field}, fieldsOf(r), field)
 			}
 		}
 	}
-	created := e.do("POST", "/admin/content/documents", map[string]any{"titulo": "T", "created_by_id": uuid.NewString(), "id": uuid.NewString()}, editor)
+	created := e.do("POST", "/api/admin/content/documents", map[string]any{"titulo": "T", "created_by_id": uuid.NewString(), "id": uuid.NewString()}, editor)
 	assert.Equal(t, 422, created.Status)
 	assert.Equal(t, []string{"created_by_id", "id"}, fieldsOf(created))
 
@@ -276,12 +276,12 @@ func TestValidacaoECamposDeSistemaNuncaGraváveis(t *testing.T) {
 		"observação longa":   {"observacao_interna": strings.Repeat("a", 5001)},
 	}
 	for name, body := range cases {
-		assert.Equal(t, 422, e.do("PUT", "/admin/content/documents/"+id, body, editor).Status, name)
+		assert.Equal(t, 422, e.do("PUT", "/api/admin/content/documents/"+id, body, editor).Status, name)
 	}
 	assert.Equal(t, 422, e.newDoc(editor, map[string]any{"conteudo": "sem título"}).Status)
 	assert.Equal(t, 422, e.newDoc(editor, map[string]any{"titulo": "T", "status": "publicado"}).Status, "nasce como rascunho")
-	assert.Equal(t, 400, e.do("POST", "/admin/content/documents", []string{"x"}, editor).Status)
-	d := e.do("GET", "/admin/content/documents/"+id, nil, editor)
+	assert.Equal(t, 400, e.do("POST", "/api/admin/content/documents", []string{"x"}, editor).Status)
+	d := e.do("GET", "/api/admin/content/documents/"+id, nil, editor)
 	assert.Equal(t, "Doc", d.data()["titulo"], "nenhuma requisição recusada alterou o documento")
 }
 
@@ -295,24 +295,24 @@ func TestAuthorEditaSoOQueCriou(t *testing.T) {
 	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT department_id::text FROM documents WHERE id=$1", mine).Scan(&dept))
 	assert.Equal(t, e.deptID("Financeiro"), dept, "sem department_id, usa o do criador")
 
-	assert.Equal(t, 200, e.do("PUT", "/admin/content/documents/"+mine, map[string]any{"titulo": "Meu 2"}, author).Status, "próprio: permitido")
-	deny := e.do("PUT", "/admin/content/documents/"+theirs, map[string]any{"titulo": "invadido"}, author)
+	assert.Equal(t, 200, e.do("PUT", "/api/admin/content/documents/"+mine, map[string]any{"titulo": "Meu 2"}, author).Status, "próprio: permitido")
+	deny := e.do("PUT", "/api/admin/content/documents/"+theirs, map[string]any{"titulo": "invadido"}, author)
 	assert.Equal(t, 403, deny.Status, "de outro: negado")
 	assert.Equal(t, "forbidden", deny.errCode())
-	assert.Equal(t, 403, e.do("DELETE", "/admin/content/documents/"+theirs, nil, author).Status)
-	assert.Equal(t, "Do editor", e.do("GET", "/admin/content/documents/"+theirs, nil, author).data()["titulo"], "Author lê tudo")
+	assert.Equal(t, 403, e.do("DELETE", "/api/admin/content/documents/"+theirs, nil, author).Status)
+	assert.Equal(t, "Do editor", e.do("GET", "/api/admin/content/documents/"+theirs, nil, author).data()["titulo"], "Author lê tudo")
 
 	// Sem publicar: nem pela ação, nem mudando o status.
-	pub := e.do("POST", "/admin/content/documents/"+mine+"/publish", nil, author)
+	pub := e.do("POST", "/api/admin/content/documents/"+mine+"/publish", nil, author)
 	assert.Equal(t, 403, pub.Status)
-	st := e.do("PUT", "/admin/content/documents/"+mine, map[string]any{"status": "publicado"}, author)
+	st := e.do("PUT", "/api/admin/content/documents/"+mine, map[string]any{"status": "publicado"}, author)
 	assert.Equal(t, 422, st.Status, "o campo status não está liberado ao Author")
 
-	assert.Equal(t, 204, e.do("DELETE", "/admin/content/documents/"+mine, nil, author).Status)
-	assert.Equal(t, 200, e.do("GET", "/admin/content/documents/"+theirs, nil, editor).Status, "o doc do editor segue intacto")
+	assert.Equal(t, 204, e.do("DELETE", "/api/admin/content/documents/"+mine, nil, author).Status)
+	assert.Equal(t, 200, e.do("GET", "/api/admin/content/documents/"+theirs, nil, editor).Status, "o doc do editor segue intacto")
 
 	// O Author lista tudo, mas só consegue editar os próprios (a UI usa as permissões efetivas do /me).
-	me := e.do("GET", "/admin/auth/me", nil, author)
+	me := e.do("GET", "/api/admin/auth/me", nil, author)
 	var upd map[string]any
 	for _, p := range me.data()["permissions"].([]any) {
 		if p.(map[string]any)["action"] == "admin::content.document.update" {
@@ -332,38 +332,38 @@ func TestRevisorDoDepartamento(t *testing.T) {
 	b := e.docID(editor, map[string]any{"titulo": "Jurídico 1", "department_id": jur})
 
 	// Campo permitido (observacao_interna) no documento do próprio departamento.
-	ok := e.do("PUT", "/admin/content/documents/"+a, map[string]any{"observacao_interna": "revisado"}, rev)
+	ok := e.do("PUT", "/api/admin/content/documents/"+a, map[string]any{"observacao_interna": "revisado"}, rev)
 	require.Equal(t, 200, ok.Status, ok.Body)
 	assert.Equal(t, "revisado", ok.data()["observacao_interna"])
 	assert.Equal(t, "Financeiro 1", ok.data()["titulo"])
 
 	// Campo proibido: 422 listando o campo; nada é gravado, mesmo junto de um campo permitido.
-	bad := e.do("PUT", "/admin/content/documents/"+a, map[string]any{"titulo": "hackeado", "observacao_interna": "outra"}, rev)
+	bad := e.do("PUT", "/api/admin/content/documents/"+a, map[string]any{"titulo": "hackeado", "observacao_interna": "outra"}, rev)
 	assert.Equal(t, 422, bad.Status)
 	fs := bad.Body["error"].(map[string]any)["details"].(map[string]any)["fields"].([]any)
 	require.Len(t, fs, 1)
 	assert.Equal(t, "titulo", fs[0].(map[string]any)["field"])
-	cur := e.do("GET", "/admin/content/documents/"+a, nil, editor)
+	cur := e.do("GET", "/api/admin/content/documents/"+a, nil, editor)
 	assert.Equal(t, "Financeiro 1", cur.data()["titulo"])
 	assert.Equal(t, "revisado", cur.data()["observacao_interna"])
-	assert.Equal(t, 422, e.do("PUT", "/admin/content/documents/"+a, map[string]any{"conteudo": "x"}, rev).Status)
-	assert.Equal(t, 422, e.do("PUT", "/admin/content/documents/"+a, map[string]any{"department_id": jur}, rev).Status, "não move o documento de departamento")
+	assert.Equal(t, 422, e.do("PUT", "/api/admin/content/documents/"+a, map[string]any{"conteudo": "x"}, rev).Status)
+	assert.Equal(t, 422, e.do("PUT", "/api/admin/content/documents/"+a, map[string]any{"department_id": jur}, rev).Status, "não move o documento de departamento")
 
 	// Outro departamento: negado (403), mesmo com campo permitido.
-	assert.Equal(t, 403, e.do("PUT", "/admin/content/documents/"+b, map[string]any{"observacao_interna": "x"}, rev).Status)
-	assert.Equal(t, 403, e.do("POST", "/admin/content/documents/"+b+"/publish", nil, rev).Status)
-	assert.Equal(t, 403, e.do("PUT", "/admin/content/documents/"+b, map[string]any{"status": "publicado"}, rev).Status)
+	assert.Equal(t, 403, e.do("PUT", "/api/admin/content/documents/"+b, map[string]any{"observacao_interna": "x"}, rev).Status)
+	assert.Equal(t, 403, e.do("POST", "/api/admin/content/documents/"+b+"/publish", nil, rev).Status)
+	assert.Equal(t, 403, e.do("PUT", "/api/admin/content/documents/"+b, map[string]any{"status": "publicado"}, rev).Status)
 
 	// Status do próprio departamento (campo liberado + ação publicar liberada).
-	st := e.do("PUT", "/admin/content/documents/"+a, map[string]any{"status": "publicado"}, rev)
+	st := e.do("PUT", "/api/admin/content/documents/"+a, map[string]any{"status": "publicado"}, rev)
 	require.Equal(t, 200, st.Status, st.Body)
 	assert.Equal(t, "publicado", st.data()["status"])
-	assert.Equal(t, 200, e.do("POST", "/admin/content/documents/"+a+"/unpublish", nil, rev).Status)
+	assert.Equal(t, 200, e.do("POST", "/api/admin/content/documents/"+a+"/unpublish", nil, rev).Status)
 
 	// Sem criar nem excluir.
 	assert.Equal(t, 403, e.newDoc(rev, map[string]any{"titulo": "x"}).Status)
-	assert.Equal(t, 403, e.do("DELETE", "/admin/content/documents/"+a, nil, rev).Status)
-	assert.Equal(t, 200, e.do("GET", "/admin/content/documents/"+b, nil, rev).Status, "lê todos")
+	assert.Equal(t, 403, e.do("DELETE", "/api/admin/content/documents/"+a, nil, rev).Status)
+	assert.Equal(t, 200, e.do("GET", "/api/admin/content/documents/"+b, nil, rev).Status, "lê todos")
 }
 
 func TestMudarStatusExigeAcaoPublicarMesmoComCampoLiberado(t *testing.T) {
@@ -376,13 +376,13 @@ func TestMudarStatusExigeAcaoPublicarMesmoComCampoLiberado(t *testing.T) {
 	e.grant("atualizador", "admin::content.document.read", "", "[]")
 	tok, _ := e.newAdmin(boss, "atu@exemplo.com", "atualizador")
 
-	assert.Equal(t, 200, e.do("PUT", "/admin/content/documents/"+id, map[string]any{"titulo": "novo"}, tok).Status)
-	r := e.do("PUT", "/admin/content/documents/"+id, map[string]any{"status": "publicado"}, tok)
+	assert.Equal(t, 200, e.do("PUT", "/api/admin/content/documents/"+id, map[string]any{"titulo": "novo"}, tok).Status)
+	r := e.do("PUT", "/api/admin/content/documents/"+id, map[string]any{"status": "publicado"}, tok)
 	assert.Equal(t, 403, r.Status)
 	assert.Equal(t, "admin::content.document.publish", r.Body["error"].(map[string]any)["details"].(map[string]any)["action"])
-	assert.Equal(t, "rascunho", e.do("GET", "/admin/content/documents/"+id, nil, editor).data()["status"])
+	assert.Equal(t, "rascunho", e.do("GET", "/api/admin/content/documents/"+id, nil, editor).data()["status"])
 	// Repetir o mesmo status não é uma transição.
-	assert.Equal(t, 200, e.do("PUT", "/admin/content/documents/"+id, map[string]any{"status": "rascunho"}, tok).Status)
+	assert.Equal(t, 200, e.do("PUT", "/api/admin/content/documents/"+id, map[string]any{"status": "rascunho"}, tok).Status)
 }
 
 func TestPermissaoDeCamposEFiltroNaLeitura(t *testing.T) {
@@ -399,7 +399,7 @@ func TestPermissaoDeCamposEFiltroNaLeitura(t *testing.T) {
 	mine := e.docID(tok, map[string]any{"titulo": "Meu", "conteudo": "segredo", "observacao_interna": "interno"})
 	theirs := e.docID(editor, map[string]any{"titulo": "Alheio", "conteudo": "c", "department_id": fin})
 
-	list := e.do("GET", "/admin/content/documents", nil, tok)
+	list := e.do("GET", "/api/admin/content/documents", nil, tok)
 	require.Equal(t, 200, list.Status)
 	require.Len(t, list.list(), 1, "o filtro de permissão restringe a listagem")
 	assert.EqualValues(t, 1, list.meta()["total"], "e a contagem da paginação")
@@ -412,8 +412,8 @@ func TestPermissaoDeCamposEFiltroNaLeitura(t *testing.T) {
 	for _, system := range []string{"id", "created_at", "updated_at", "created_by_id", "updated_by_id", "published_at"} {
 		assert.Contains(t, item, system, "campos de sistema são sempre legíveis")
 	}
-	assert.Equal(t, 403, e.do("GET", "/admin/content/documents/"+theirs, nil, tok).Status)
-	one := e.do("GET", "/admin/content/documents/"+mine, nil, tok)
+	assert.Equal(t, 403, e.do("GET", "/api/admin/content/documents/"+theirs, nil, tok).Status)
+	one := e.do("GET", "/api/admin/content/documents/"+mine, nil, tok)
 	assert.NotContains(t, one.data(), "conteudo")
 
 	// A resposta do create também respeita os campos de leitura.
@@ -422,18 +422,18 @@ func TestPermissaoDeCamposEFiltroNaLeitura(t *testing.T) {
 	assert.Contains(t, cr.data(), "titulo")
 
 	// Filtros do usuário se combinam (AND) com o de permissão: nunca o ampliam.
-	assert.Len(t, e.do("GET", "/admin/content/documents?q=Alheio", nil, tok).list(), 0)
-	assert.Len(t, e.do("GET", "/admin/content/documents?q=Meu", nil, tok).list(), 1)
-	assert.Len(t, e.do("GET", "/admin/content/documents?department_id="+fin, nil, tok).list(), 0)
+	assert.Len(t, e.do("GET", "/api/admin/content/documents?q=Alheio", nil, tok).list(), 0)
+	assert.Len(t, e.do("GET", "/api/admin/content/documents?q=Meu", nil, tok).list(), 1)
+	assert.Len(t, e.do("GET", "/api/admin/content/documents?department_id="+fin, nil, tok).list(), 0)
 
 	// União entre roles, campo a campo e registro a registro: a 2ª role lê todos os campos
 	// dos documentos do departamento do administrador.
 	e.mkRole("leitor-depto")
 	e.grant("leitor-depto", "admin::content.document.read", "", `["admin::same-department"]`)
 	both, bothID := e.newAdmin(boss, "ld@exemplo.com", "leitor-proprio")
-	require.Equal(t, 200, e.do("PUT", "/admin/users/"+bothID, map[string]any{"departmentId": fin}, boss).Status)
-	require.Equal(t, 200, e.do("POST", "/admin/users/"+bothID+"/roles", map[string]any{"roleIds": []string{e.roleID("leitor-depto")}}, boss).Status)
-	l := e.do("GET", "/admin/content/documents?sort=titulo:asc", nil, both)
+	require.Equal(t, 200, e.do("PUT", "/api/admin/users/"+bothID, map[string]any{"departmentId": fin}, boss).Status)
+	require.Equal(t, 200, e.do("POST", "/api/admin/users/"+bothID+"/roles", map[string]any{"roleIds": []string{e.roleID("leitor-depto")}}, boss).Status)
+	l := e.do("GET", "/api/admin/content/documents?sort=titulo:asc", nil, both)
 	require.Equal(t, 200, l.Status, l.Body)
 	byTitle := map[string]map[string]any{}
 	for _, it := range l.list() {
@@ -455,25 +455,25 @@ func TestListagemAdminPaginacaoOrdenacaoEFiltros(t *testing.T) {
 		}
 		id := e.docID(editor, map[string]any{"titulo": t0, "conteudo": "texto " + t0, "department_id": dept})
 		if i < 3 {
-			e.do("POST", "/admin/content/documents/"+id+"/publish", nil, editor)
+			e.do("POST", "/api/admin/content/documents/"+id+"/publish", nil, editor)
 		}
 	}
 	e.docID(author, map[string]any{"titulo": "Do autor"})
 
-	all := e.do("GET", "/admin/content/documents", nil, editor)
+	all := e.do("GET", "/api/admin/content/documents", nil, editor)
 	assert.EqualValues(t, 8, all.meta()["total"])
-	p2 := e.do("GET", "/admin/content/documents?pageSize=3&page=2&sort=titulo:asc", nil, editor)
+	p2 := e.do("GET", "/api/admin/content/documents?pageSize=3&page=2&sort=titulo:asc", nil, editor)
 	assert.EqualValues(t, 3, p2.meta()["pageCount"])
 	assert.Len(t, p2.list(), 3)
-	last := e.do("GET", "/admin/content/documents?pageSize=3&page=3&sort=titulo:asc", nil, editor)
+	last := e.do("GET", "/api/admin/content/documents?pageSize=3&page=3&sort=titulo:asc", nil, editor)
 	assert.Len(t, last.list(), 2)
-	assert.Len(t, e.do("GET", "/admin/content/documents?pageSize=3&page=9", nil, editor).list(), 0)
-	assert.EqualValues(t, 100, e.do("GET", "/admin/content/documents?pageSize=10000", nil, editor).meta()["pageSize"], "limite máximo")
+	assert.Len(t, e.do("GET", "/api/admin/content/documents?pageSize=3&page=9", nil, editor).list(), 0)
+	assert.EqualValues(t, 100, e.do("GET", "/api/admin/content/documents?pageSize=10000", nil, editor).meta()["pageSize"], "limite máximo")
 
 	// Ordenação estável e sem repetir registros entre páginas.
 	seen := map[string]bool{}
 	for page := 1; page <= 3; page++ {
-		for _, it := range e.do("GET", fmt.Sprintf("/admin/content/documents?pageSize=3&page=%d&sort=status:asc", page), nil, editor).list() {
+		for _, it := range e.do("GET", fmt.Sprintf("/api/admin/content/documents?pageSize=3&page=%d&sort=status:asc", page), nil, editor).list() {
 			id := it.(map[string]any)["id"].(string)
 			assert.False(t, seen[id], "repetido entre páginas")
 			seen[id] = true
@@ -481,7 +481,7 @@ func TestListagemAdminPaginacaoOrdenacaoEFiltros(t *testing.T) {
 	}
 	assert.Len(t, seen, 8)
 
-	count := func(q string) int { return len(e.do("GET", "/admin/content/documents?"+q, nil, editor).list()) }
+	count := func(q string) int { return len(e.do("GET", "/api/admin/content/documents?"+q, nil, editor).list()) }
 	assert.Equal(t, 3, count("status=publicado"))
 	assert.Equal(t, 5, count("status=rascunho"))
 	assert.Equal(t, 1, count("q=alfa"))
@@ -490,10 +490,10 @@ func TestListagemAdminPaginacaoOrdenacaoEFiltros(t *testing.T) {
 	assert.Equal(t, 3, count("department_id="+jur))
 	assert.Equal(t, 5, count("department_id="+fin), "4 do editor + 1 do autor, que herda o departamento dele")
 	assert.Equal(t, 1, count("status=publicado&department_id="+jur+"&q=alfa"))
-	first := e.do("GET", "/admin/content/documents?sort=titulo:desc", nil, editor).list()[0].(map[string]any)["titulo"]
+	first := e.do("GET", "/api/admin/content/documents?sort=titulo:desc", nil, editor).list()[0].(map[string]any)["titulo"]
 	assert.Equal(t, "épsilon", first, "ordenação de texto pelo banco")
 	for _, bad := range []string{"sort=observacao_interna", "sort=titulo%3BDROP+TABLE+documents", "sort=titulo:up", "status=x", "department_id=x", "page=0", "pageSize=-1"} {
-		assert.Equal(t, 422, e.do("GET", "/admin/content/documents?"+bad, nil, editor).Status, bad)
+		assert.Equal(t, 422, e.do("GET", "/api/admin/content/documents?"+bad, nil, editor).Status, bad)
 	}
 	var n int
 	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM documents").Scan(&n))
@@ -506,9 +506,9 @@ func TestRotasAdminDeDocumentosExigemPermissao(t *testing.T) {
 	nobody, _ := e.newAdmin(boss, "nobody@exemplo.com", "vazio")
 	id := uuid.NewString()
 	for _, rt := range []struct{ method, path string }{
-		{"GET", "/admin/content/documents"}, {"POST", "/admin/content/documents"}, {"GET", "/admin/content/documents/" + id},
-		{"PUT", "/admin/content/documents/" + id}, {"DELETE", "/admin/content/documents/" + id},
-		{"POST", "/admin/content/documents/" + id + "/publish"}, {"POST", "/admin/content/documents/" + id + "/unpublish"},
+		{"GET", "/api/admin/content/documents"}, {"POST", "/api/admin/content/documents"}, {"GET", "/api/admin/content/documents/" + id},
+		{"PUT", "/api/admin/content/documents/" + id}, {"DELETE", "/api/admin/content/documents/" + id},
+		{"POST", "/api/admin/content/documents/" + id + "/publish"}, {"POST", "/api/admin/content/documents/" + id + "/unpublish"},
 	} {
 		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
 			assert.Equal(t, 401, e.do(rt.method, rt.path, map[string]any{}, "").Status)
@@ -522,7 +522,7 @@ func TestAPIPublicaAnonimoXAutenticado(t *testing.T) {
 	editor := login("editor@dev.local")
 	pub := e.docID(editor, map[string]any{"titulo": "Publicado", "conteudo": "aberto", "observacao_interna": "SEGREDO-INTERNO-123"})
 	draft := e.docID(editor, map[string]any{"titulo": "Rascunho", "conteudo": "fechado", "observacao_interna": "SEGREDO-INTERNO-123"})
-	require.Equal(t, 200, e.do("POST", "/admin/content/documents/"+pub+"/publish", nil, editor).Status)
+	require.Equal(t, 200, e.do("POST", "/api/admin/content/documents/"+pub+"/publish", nil, editor).Status)
 	var bodies []string
 	collect := func(r resp) resp { bodies = append(bodies, toJSON(r.Body)); return r }
 
@@ -567,7 +567,7 @@ func TestAPIPublicaAnonimoXAutenticado(t *testing.T) {
 	assert.Equal(t, 403, denied.Status)
 	assert.Equal(t, "is-owner", denied.Body["error"].(map[string]any)["details"].(map[string]any)["policy"])
 	assert.Equal(t, 403, e.do("DELETE", "/api/documents/"+pub, nil, joao).Status)
-	assert.Equal(t, "Publicado", e.do("GET", "/admin/content/documents/"+pub, nil, editor).data()["titulo"])
+	assert.Equal(t, "Publicado", e.do("GET", "/api/admin/content/documents/"+pub, nil, editor).data()["titulo"])
 
 	// Campos que a API pública não aceita.
 	for name, body := range map[string]map[string]any{
@@ -601,7 +601,7 @@ func TestAPIPublicaListagem(t *testing.T) {
 	editor := login("editor@dev.local")
 	for _, title := range []string{"Beta", "Alfa", "Gama", "Delta", "Épsilon"} {
 		id := e.docID(editor, map[string]any{"titulo": title, "conteudo": "conteúdo " + title})
-		e.do("POST", "/admin/content/documents/"+id+"/publish", nil, editor)
+		e.do("POST", "/api/admin/content/documents/"+id+"/publish", nil, editor)
 	}
 	e.docID(editor, map[string]any{"titulo": "Rascunho oculto"})
 
@@ -624,7 +624,7 @@ func TestAPIPublicaComTokensDeAPI(t *testing.T) {
 	e, boss, login := seeded(t)
 	editor := login("editor@dev.local")
 	pub := e.docID(editor, map[string]any{"titulo": "Publicado"})
-	e.do("POST", "/admin/content/documents/"+pub+"/publish", nil, editor)
+	e.do("POST", "/api/admin/content/documents/"+pub+"/publish", nil, editor)
 
 	ro := e.createToken(boss, "leitura", "read-only", "7d").data()["token"].(string)
 	full := e.createToken(boss, "total", "full-access", "7d").data()["token"].(string)
@@ -650,17 +650,17 @@ func TestMudarPermissoesPublicasValeNaHora(t *testing.T) {
 	e, boss, login := seeded(t)
 	editor := login("editor@dev.local")
 	pub := e.docID(editor, map[string]any{"titulo": "Publicado"})
-	e.do("POST", "/admin/content/documents/"+pub+"/publish", nil, editor)
+	e.do("POST", "/api/admin/content/documents/"+pub+"/publish", nil, editor)
 	assert.Equal(t, 200, e.do("GET", "/api/documents/"+pub, nil, "").Status)
 
 	// Tirar a leitura da role Public: o anônimo passa a receber 401.
 	publicRole := e.endRoleID("public")
-	require.Equal(t, 200, e.do("PUT", "/admin/end-user-roles/"+publicRole, map[string]any{"name": "Public", "permissions": []string{"api::document.find"}}, boss).Status)
+	require.Equal(t, 200, e.do("PUT", "/api/admin/end-user-roles/"+publicRole, map[string]any{"name": "Public", "permissions": []string{"api::document.find"}}, boss).Status)
 	assert.Equal(t, 200, e.do("GET", "/api/documents", nil, "").Status)
 	assert.Equal(t, 401, e.do("GET", "/api/documents/"+pub, nil, "").Status)
 
 	// A role Authenticated detalha as ações com a rota vinculada.
-	r := e.do("GET", "/admin/end-user-roles/"+e.endRoleID("authenticated"), nil, boss)
+	r := e.do("GET", "/api/admin/end-user-roles/"+e.endRoleID("authenticated"), nil, boss)
 	routes := map[string]string{}
 	for _, p := range r.data()["permissions"].([]any) {
 		m := p.(map[string]any)

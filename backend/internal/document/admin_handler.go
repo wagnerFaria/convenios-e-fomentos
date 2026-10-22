@@ -34,6 +34,13 @@ func (h *AdminHandler) Routes(r chi.Router) {
 	r.With(g(ActionAdminDelete)).Delete("/admin/content/documents/{id}", h.delete)
 	r.With(g(ActionAdminPublish)).Post("/admin/content/documents/{id}/publish", h.setPublished(true))
 	r.With(g(ActionAdminPublish)).Post("/admin/content/documents/{id}/unpublish", h.setPublished(false))
+
+	// Arquivos: o navegador envia e baixa direto do armazenamento, por URLs pré-assinadas.
+	r.With(g(ActionAdminFileRead)).Get("/admin/content/documents/{id}/files", h.listFiles)
+	r.With(g(ActionAdminFileUpload)).Post("/admin/content/documents/{id}/files", h.createFile)
+	r.With(g(ActionAdminFileUpload)).Post("/admin/content/documents/{id}/files/{fileId}/confirm", h.confirmFile)
+	r.With(g(ActionAdminFileRead)).Get("/admin/content/documents/{id}/files/{fileId}/download", h.downloadFile)
+	r.With(g(ActionAdminFileDelete)).Delete("/admin/content/documents/{id}/files/{fileId}", h.deleteFile)
 }
 
 func actorOf(r *http.Request) AdminActor {
@@ -207,4 +214,100 @@ func (h *AdminHandler) setPublished(publish bool) http.HandlerFunc {
 		}
 		h.render(w, r, http.StatusOK, d)
 	}
+}
+
+func fileIDParam(r *http.Request) (uuid.UUID, error) {
+	id, err := uuid.Parse(chi.URLParam(r, "fileId"))
+	if err != nil {
+		return uuid.Nil, httpapi.ErrNotFound()
+	}
+	return id, nil
+}
+
+// ids lê {id} e {fileId} da rota.
+func ids(r *http.Request) (doc, file uuid.UUID, err error) {
+	if doc, err = idParam(r); err != nil {
+		return
+	}
+	file, err = fileIDParam(r)
+	return
+}
+
+func (h *AdminHandler) listFiles(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	dec, _ := admin.DecisionFrom(r.Context())
+	files, err := h.svc.ListFilesByAdmin(r.Context(), id, dec)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, files, nil)
+}
+
+func (h *AdminHandler) createFile(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	var in FileInput
+	if err := decodeStrict(r, &in); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	dec, _ := admin.DecisionFrom(r.Context())
+	f, up, err := h.svc.CreateFile(r.Context(), actorOf(r), id, in, dec)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusCreated, map[string]any{"file": f, "upload": up}, nil)
+}
+
+func (h *AdminHandler) confirmFile(w http.ResponseWriter, r *http.Request) {
+	docID, fileID, err := ids(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	dec, _ := admin.DecisionFrom(r.Context())
+	f, err := h.svc.ConfirmFile(r.Context(), docID, fileID, dec)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, f, nil)
+}
+
+func (h *AdminHandler) downloadFile(w http.ResponseWriter, r *http.Request) {
+	docID, fileID, err := ids(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	dec, _ := admin.DecisionFrom(r.Context())
+	u, exp, err := h.svc.DownloadByAdmin(r.Context(), docID, fileID, dec)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, downloadLink{URL: u, ExpiresAt: exp}, nil)
+}
+
+func (h *AdminHandler) deleteFile(w http.ResponseWriter, r *http.Request) {
+	docID, fileID, err := ids(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	dec, _ := admin.DecisionFrom(r.Context())
+	if err := h.svc.DeleteFile(r.Context(), docID, fileID, dec); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

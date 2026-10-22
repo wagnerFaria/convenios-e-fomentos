@@ -2,9 +2,9 @@
 
 API em Go cujo centro é um **controle de permissões robusto, granular e configurável em tempo de execução**, inspirado no
 Strapi 5: RBAC completo para administradores, *Users & Permissions* para usuários finais e tokens de API para integrações.
-Não há frontend: tudo o que o painel do Strapi faz está disponível por endpoints `/admin/...`, para um frontend futuro apenas consumir.
+Não há frontend: tudo o que o painel do Strapi faz está disponível por endpoints `/api/admin/...`, para um frontend futuro apenas consumir.
 
-- Documentação interativa da API: `GET /docs` (especificação em [`api/openapi.yaml`](api/openapi.yaml), OpenAPI 3.1).
+- Documentação interativa da API: `GET /api/docs` (especificação em [`api/openapi.yaml`](api/openapi.yaml), OpenAPI 3.1).
 - Revisão de segurança e pendências: [`SEGURANCA.md`](SEGURANCA.md).
 
 ## Sumário
@@ -30,7 +30,7 @@ Três tipos de sujeito, cada um com seu domínio de permissões:
 
 | Sujeito | Entra por | Autenticação | Permissões |
 |---|---|---|---|
-| **Administrador** | `/admin/...` | Access token do **MT Login** (Keycloak/OIDC, RS256, validado pelo JWKS); identidade = **CPF** | RBAC completo: **ação + recurso + campos + condições**, união de várias roles |
+| **Administrador** | `/api/admin/...` | Access token do **MT Login** (Keycloak/OIDC, RS256, validado pelo JWKS); identidade = **CPF** | RBAC completo: **ação + recurso + campos + condições**, união de várias roles |
 | **Usuário final** | `/api/...` | JWT `aud=api` + refresh token; sem token = anônimo (role **Public**) | Por **ação** (`api::recurso.acao`), uma única role; propriedade via **policies** |
 | **Token de API** | `/api/...` | `Authorization: Bearer gat_...` | Tipo `read-only`, `full-access` ou `custom` (lista de ações) |
 
@@ -38,7 +38,7 @@ Três tipos de sujeito, cada um com seu domínio de permissões:
 Requisição
  └─ httpapi: ID da requisição → IP real (proxies confiáveis) → limite por IP → logs → recover
              → cabeçalhos de segurança → limite de corpo → CORS
-     ├─ /admin/*  auth.RequireAdmin  (token do MT Login + administrador ativo no banco)
+     ├─ /api/admin/*  auth.RequireAdmin  (token do MT Login + administrador ativo no banco)
      │            admin.RequirePermission  → authz.Engine.Can(ação) → Decision no contexto
      │            handler fino → service (regra de negócio, aplica filtro/campos) → sqlc
      └─ /api/*    enduser.Identifier.Identify  (anônimo/Public | JWT aud=api | gat_...)
@@ -86,7 +86,7 @@ make seed                                  # roles, permissões, departamentos e
 make run                                   # ou: make dev (air)
 ```
 
-Verificações: `GET /health` (liveness), `GET /ready` (consulta o banco), `GET /docs`.
+Verificações: `GET /api/health` (liveness), `GET /api/ready` (consulta o banco), `GET /api/docs`.
 Se a porta 5432 do host estiver ocupada: `DB_PORT=5433 docker compose up -d db` e ajuste a `DATABASE_URL`.
 
 Comandos do `Makefile`: `run`, `dev`, `build`, `test`, `test-unit`, `cover-authz`, `lint`, `sqlc`, `migrate-up`,
@@ -129,7 +129,7 @@ docker compose run --rm --entrypoint /cli api admin:create --cpf 000.000.000-00
 O comando é idempotente: cria o registro (nome e e-mail ficam vazios até o primeiro acesso) ou concede a role a quem já existe.
 Outros comandos: `migrate:up|down|status`, `seed`, `cleanup`.
 
-Os demais: `POST /admin/users` pré-cadastra por **CPF + roles** (a pessoa completa o registro no primeiro acesso), ou basta a pessoa
+Os demais: `POST /api/admin/users` pré-cadastra por **CPF + roles** (a pessoa completa o registro no primeiro acesso), ou basta a pessoa
 entrar e um administrador atribuir as roles depois. Nome, CPF e e-mail vêm do MT Login e são atualizados a cada acesso.
 
 ---
@@ -141,7 +141,7 @@ entrar e um administrador atribuir as roles depois. Nome, CPF e e-mail vêm do M
 Toda ação protegida é uma string `dominio::recurso.acao` (`admin::content.document.update`, `api::document.find`),
 **registrada em código** no `authz.Registry` na inicialização, com nome legível em português, categoria
 (`collection-types`, `single-types`, `plugins`, `settings`, `application`), recurso, suporte a campos/condições/locales
-e, para `api::`, método HTTP e rota vinculada. **Ação não registrada sempre nega.** `GET /admin/catalog/actions` lista tudo
+e, para `api::`, método HTTP e rota vinculada. **Ação não registrada sempre nega.** `GET /api/admin/catalog/actions` lista tudo
 agrupado por categoria (base da futura tela de permissões). Na subida, permissões de ações que saíram do código são removidas
 (com aviso no log).
 
@@ -198,7 +198,7 @@ Bearer`. A API **só valida**: assinatura RS256 pelas chaves do `JWKS_URI` (cach
 identifica o administrador: se não existe, é criado (ativo, sem roles, com auditoria `admin.auto-provisioned`); se existe, nome e
 e-mail são atualizados. **A cada requisição o banco confirma que a conta segue ativa e não foi bloqueada** (efeito imediato; 403
 `account_disabled`). Token válido sem CPF válido: 403 `invalid_identity`. A API não guarda sessão de administrador: renovação e
-encerramento são do MT Login. O CPF só aparece completo no `/admin/auth/me` do próprio usuário; listagens e auditoria o mascaram.
+encerramento são do MT Login. O CPF só aparece completo no `/api/admin/auth/me` do próprio usuário; listagens e auditoria o mascaram.
 
 **Usuários finais.** Access token JWT HS256 de 15 min com `aud=api` que carrega o ID da sessão; o banco confirma a cada requisição que
 a sessão segue ativa e a conta não foi bloqueada (revogação imediata, sem cache). Refresh token opaco de 32 bytes (guardado como hash
@@ -227,14 +227,14 @@ Tudo abaixo usa o recurso de exemplo `documents` (`internal/document`) como refe
    divergente do prefixo (e a aplicação nem sobe).
 2. **Proteja a rota** com o middleware da ação (autentica + autoriza e deixa a `Decision` no contexto):
    ```go
-   r.With(g(ActionAdminArchive)).Post("/admin/content/documents/{id}/archive", h.archive)
+   r.With(g(ActionAdminArchive)).Post("/api/admin/content/documents/{id}/archive", h.archive)
    ```
 3. **No handler/serviço**, aplique a decisão ao registro (`dec, _ := admin.DecisionFrom(r.Context())`):
    ```go
    if !dec.AllowsRecord(doc.Getter()) { return httpapi.ErrForbidden() }
    ```
-4. **Conceda** a quem deve ter: `PUT /admin/roles/{id}/permissions` (ou nas permissões padrão do seed, se for o caso). Para o
-   front, a ação já aparece em `GET /admin/catalog/actions`.
+4. **Conceda** a quem deve ter: `PUT /api/admin/roles/{id}/permissions` (ou nas permissões padrão do seed, se for o caso). Para o
+   front, a ação já aparece em `GET /api/admin/catalog/actions`.
 5. **Documente e teste**: adicione a rota ao `api/openapi.yaml` (o teste `TestOpenAPIEstaCoerenteComAsRotas` falha se rota e
    especificação divergirem) e um teste de integração com 401, 403 e o caso permitido.
 
@@ -258,7 +258,7 @@ conds.MustRegister(authz.Condition{
   `has-same-role-as-creator`), injete uma interface no construtor da condição.
 - Os campos do filtro são **nomes lógicos do `Schema`** do recurso (`status` aqui). Condição que cite um campo que o recurso
   não declara falha de forma segura (erro), nunca vira SQL.
-- A condição aparece em `GET /admin/catalog/conditions` e passa a ser aceita em permissões de ações com
+- A condição aparece em `GET /api/admin/catalog/conditions` e passa a ser aceita em permissões de ações com
   `SupportsConditions: true` (várias na mesma permissão = OR).
 
 ### 5.3 Criar uma nova policy (ex.: só documentos publicados)
@@ -286,7 +286,7 @@ da policy em `details.policy`. Em `internal/document/public_handler.go` há o us
 1. **Migração** (`make migrate-create name=criar_tabela_x`) e **queries** em `internal/database/queries/*.sql` → `make sqlc`.
 2. **Modelo + Schema**: struct com tags `json`/`db`/`authz:"system"`; `authz.NewSchema(...)`.
 3. **Ações**: `Register(reg)` com as ações `admin::` (campos/condições conforme fizer sentido) e `api::` (com rota), mais
-   `reg.RegisterSchema(recurso, schema)` — isso habilita a validação de campos em `PUT /admin/roles/{id}/permissions`.
+   `reg.RegisterSchema(recurso, schema)` — isso habilita a validação de campos em `PUT /api/admin/roles/{id}/permissions`.
 4. **Service**: recebe a `Decision` e a aplica: `Filter` na listagem (`Filter.ToSQL(schema.Column, n)` **combinado com AND** aos
    filtros do usuário), `AllowsRecord` em leitura/edição/exclusão, `FieldsFor` + `Schema.Project` na leitura e
    `Schema.RejectedWrite` na escrita. Ordenação só por lista permitida (`httpapi.ParseSort`).
@@ -337,6 +337,12 @@ desenvolvimento, nem com Argon2 abaixo do mínimo da OWASP. A API também não s
 | `SMTP_HOST` / `SMTP_PORT` | *(vazio)* / `587` | Servidor SMTP (STARTTLS; TLS implícito na 465). Sem host: log em dev, descarte em produção. |
 | `SMTP_USER` / `SMTP_PASSWORD` | *(vazio)* | Credenciais SMTP (opcionais). |
 | `SMTP_FROM` | `no-reply@localhost` | Remetente padrão e dos templates criados no seed. |
+| `STORAGE_ENDPOINT` | *(vazio)* | Endpoint interno do MinIO/S3 (`host:porta`). Vazio desliga os arquivos dos documentos (rotas respondem 503). |
+| `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | *(vazio)* | Credenciais do armazenamento (obrigatórias com `STORAGE_ENDPOINT`). |
+| `STORAGE_BUCKET` / `STORAGE_REGION` | `documentos` / `us-east-1` | Bucket (privado) e região usada na assinatura. |
+| `STORAGE_USE_SSL` | `false` | TLS na conexão **interna** com o armazenamento. |
+| `STORAGE_PUBLIC_URL` | `http://localhost/storage` | URL do armazenamento vista pelo navegador (mesmo domínio + prefixo do proxy). As URLs pré-assinadas são calculadas sobre o host dela; em produção deve ser `https`. |
+| `STORAGE_UPLOAD_TTL` / `STORAGE_DOWNLOAD_TTL` | `15m` / `2m` | Validade das URLs pré-assinadas de envio e de download. |
 | `DB_PORT` | `5432` | Só do `docker-compose.yml`: porta do PostgreSQL publicada no host. |
 
 ---
@@ -371,7 +377,7 @@ Ferramentas: `sqlc` (código tipado a partir de SQL), `goose` (CLI de migraçõe
 ```
 cmd/api            servidor HTTP
 cmd/cli            migrate:*, seed, admin:create --cpf, cleanup
-api/openapi.yaml   especificação OpenAPI 3.1 (servida em /docs)
+api/openapi.yaml   especificação OpenAPI 3.1 (servida em /api/docs)
 internal/config    leitura e validação das variáveis de ambiente
 internal/database  pool pgx, transações, migrações (migrations/), queries sqlc (queries/ → db/)
 internal/httpapi   roteador (o pacote se chama httpapi para não colidir com net/http), middlewares, respostas, validação
@@ -415,6 +421,11 @@ idempotente; e a coerência entre `openapi.yaml` e as rotas.
 - **Migrações** rodam por `cli migrate:up` (o Compose faz isso antes de subir a API). **Rollback** é manual (`migrate:down`).
 - **`cleanup`** (`make cleanup`) remove sessões de usuário final e tokens de uso único vencidos há mais de N dias (`--days`, padrão 7). Agende,
   por exemplo, uma vez por dia. A carência preserva a detecção de reutilização de refresh token.
+- **Arquivos dos documentos** (MinIO/S3): o navegador envia e baixa direto do armazenamento por URLs pré-assinadas; a API só as emite e confere
+  o resultado. Fluxo de envio: `POST .../documents/{id}/files` (autoriza e devolve `upload.url` + `upload.fields`) → POST multipart ao armazenamento →
+  `POST .../files/{fileId}/confirm`. Tipos: PDF e DOCX até 200 MB; PNG, JPEG e WebP até 25 MB; até 50 arquivos por documento. O proxy precisa
+  expor o MinIO em `STORAGE_PUBLIC_URL` e **remover o prefixo** antes de repassar, mantendo o `Host` (a assinatura SigV4 cobre `Host` e caminho);
+  veja `haproxy/haproxy.cfg`. O `cleanup` também remove envios autorizados e nunca confirmados há mais de 24 h.
 - **Proxy reverso**: configure `TRUSTED_PROXIES` com o CIDR do proxy; sem isso o IP considerado é o da conexão.
 - **Encerramento**: SIGINT/SIGTERM param de aceitar conexões, concluem as requisições (15 s) e gravações pendentes de `last_used_at`.
 - **Imagem**: Dockerfile multi-stage, binário estático em `distroless/static:nonroot`.
@@ -453,6 +464,6 @@ idempotente; e a coerência entre `openapi.yaml` e as rotas.
   validação de `properties.locales`.
 - **Múltiplas instâncias**: o cache de permissões já sincroniza por LISTEN/NOTIFY. Falta apenas o que é de infraestrutura: o rate
   limit hoje é por instância (mover para Redis/proxy se necessário) e um balanceador com `TRUSTED_PROXIES`.
-- **Frontend administrativo**: consome `/admin/*`. Pontos prontos: `GET /admin/auth/me` (permissões efetivas), catálogo de ações e
+- **Frontend administrativo**: consome `/api/admin/*`. Pontos prontos: `GET /api/admin/auth/me` (permissões efetivas), catálogo de ações e
   condições, `availableFields` por ação, rota vinculada das ações públicas e `/docs`.
 - Ver o checklist completo em [`SEGURANCA.md`](SEGURANCA.md).

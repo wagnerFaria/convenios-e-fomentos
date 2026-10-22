@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/storage"
 )
 
 const (
@@ -28,6 +30,12 @@ type Service struct {
 	pool   *pgxpool.Pool
 	q      *db.Queries
 	engine *authz.Engine
+
+	// Armazenamento dos arquivos (opcional; ver SetStorage).
+	store       storage.Store
+	uploadTTL   time.Duration
+	downloadTTL time.Duration
+	log         *slog.Logger
 }
 
 // NewService cria o serviço.
@@ -339,7 +347,8 @@ func (s *Service) SetPublished(ctx context.Context, actor AdminActor, id uuid.UU
 
 // DeleteByAdmin exclui o documento; del é a decisão da ação delete.
 func (s *Service) DeleteByAdmin(ctx context.Context, id uuid.UUID, del authz.Decision) error {
-	return database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+	var keys []string
+	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		row, err := q.GetDocumentForUpdate(ctx, id)
 		if err != nil {
@@ -348,9 +357,16 @@ func (s *Service) DeleteByAdmin(ctx context.Context, id uuid.UUID, del authz.Dec
 		if !del.AllowsRecord(fromDB(row).Getter()) {
 			return httpapi.ErrForbidden()
 		}
+		if keys, err = q.ListDocumentFileKeys(ctx, id); err != nil {
+			return err
+		}
 		_, err = q.DeleteDocument(ctx, id)
 		return err
 	})
+	if err == nil {
+		s.deleteObjects(ctx, keys)
+	}
+	return err
 }
 
 // CreateByUser cria um rascunho pertencente ao usuário final (owner = quem chamou;
@@ -397,12 +413,24 @@ func (s *Service) UpdateByUser(ctx context.Context, id uuid.UUID, p Patch) (Docu
 
 // DeleteByUser exclui o documento (a propriedade é checada pela policy na rota).
 func (s *Service) DeleteByUser(ctx context.Context, id uuid.UUID) error {
-	n, err := s.q.DeleteDocument(ctx, id)
-	if err != nil {
-		return err
+	var keys []string
+	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		var err error
+		if keys, err = q.ListDocumentFileKeys(ctx, id); err != nil {
+			return err
+		}
+		n, err := q.DeleteDocument(ctx, id)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return httpapi.ErrNotFound()
+		}
+		return nil
+	})
+	if err == nil {
+		s.deleteObjects(ctx, keys)
 	}
-	if n == 0 {
-		return httpapi.ErrNotFound()
-	}
-	return nil
+	return err
 }

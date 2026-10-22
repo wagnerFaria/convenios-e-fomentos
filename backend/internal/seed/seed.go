@@ -72,6 +72,7 @@ func adminRoles() []roleSpec {
 			perms: []authz.Permission{
 				{Action: document.ActionAdminCreate}, {Action: document.ActionAdminRead}, {Action: document.ActionAdminUpdate},
 				{Action: document.ActionAdminDelete}, {Action: document.ActionAdminPublish},
+				{Action: document.ActionAdminFileRead}, {Action: document.ActionAdminFileUpload}, {Action: document.ActionAdminFileDelete},
 			},
 		},
 		{
@@ -81,12 +82,15 @@ func adminRoles() []roleSpec {
 				{Action: document.ActionAdminRead},
 				{Action: document.ActionAdminUpdate, Fields: []string{"titulo", "conteudo", "observacao_interna", "department_id"}, Conditions: []string{"admin::is-creator"}},
 				{Action: document.ActionAdminDelete, Conditions: []string{"admin::is-creator"}},
+				{Action: document.ActionAdminFileRead},
+				{Action: document.ActionAdminFileUpload, Conditions: []string{"admin::is-creator"}},
+				{Action: document.ActionAdminFileDelete, Conditions: []string{"admin::is-creator"}},
 			},
 		},
 		{
 			code: RoleReviewer, name: "Revisor do Departamento", description: "Lê documentos; só altera status e observação interna dos documentos do próprio departamento.",
 			perms: []authz.Permission{
-				{Action: document.ActionAdminRead},
+				{Action: document.ActionAdminRead}, {Action: document.ActionAdminFileRead},
 				{Action: document.ActionAdminUpdate, Fields: []string{"status", "observacao_interna"}, Conditions: []string{"admin::same-department"}},
 				{Action: document.ActionAdminPublish, Conditions: []string{"admin::same-department"}},
 			},
@@ -95,8 +99,8 @@ func adminRoles() []roleSpec {
 }
 
 var endUserDefaults = map[string][]string{
-	enduser.RolePublic:        {document.ActionAPIFind, document.ActionAPIFindOne},
-	enduser.RoleAuthenticated: {document.ActionAPIFind, document.ActionAPIFindOne, document.ActionAPICreate, document.ActionAPIUpdate, document.ActionAPIDelete},
+	enduser.RolePublic:        {document.ActionAPIFind, document.ActionAPIFindOne, document.ActionAPIFileFind, document.ActionAPIFileDownload},
+	enduser.RoleAuthenticated: {document.ActionAPIFind, document.ActionAPIFindOne, document.ActionAPIFileFind, document.ActionAPIFileDownload, document.ActionAPICreate, document.ActionAPIUpdate, document.ActionAPIDelete},
 }
 
 // Run executa o seed.

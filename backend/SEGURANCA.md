@@ -8,7 +8,7 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
 - Leitura dirigida do código por área (autenticação, autorização, entrada/saída, banco, segredos, logs, infraestrutura).
 - `golangci-lint` com `gosec`, `errorlint` e `noctx` (sem avisos) e `govulncheck` nas dependências.
 - Todos os achados abaixo que puderam virar teste viraram teste de regressão.
-- Verificação de ponta a ponta com a imagem Docker real (migração → API → `/ready`, `/docs`, `seed`, `cleanup`).
+- Verificação de ponta a ponta com a imagem Docker real (migração → API → `/api/ready`, `/api/docs`, `seed`, `cleanup`).
 - **Não** foi feito: teste de intrusão externo, fuzzing, análise de carga nem revisão por terceiros.
 
 ## 2. Resultado por área
@@ -22,7 +22,7 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
   e-mail não verificado.
 - ✅ Primeiro acesso cria o administrador **sem nenhuma role** (nada é liberado automaticamente), de forma atômica (`ON CONFLICT`) e auditada.
 - ✅ Bloqueio e desativação valem na hora: cada requisição confere a conta no banco (sem cache).
-- ✅ CPF é dado pessoal: mascarado em listagens e na auditoria, completo apenas para o próprio usuário em `/admin/auth/me`; não vai para logs.
+- ✅ CPF é dado pessoal: mascarado em listagens e na auditoria, completo apenas para o próprio usuário em `/api/admin/auth/me`; não vai para logs.
 - ⚠️ **Qualquer pessoa que autentique no client do MT Login ganha uma conta de administrador sem permissões.** Se o realm for aberto a
   cidadãos, a tabela `admins` acumula contas sem perfil; restrinja o client no Keycloak (role/grupo) ou exija um claim para criar o registro.
 - ⚠️ Encerrar a sessão no MT Login não derruba, na hora, o access token já emitido (até a expiração dele, curta). Desativar a conta aqui
@@ -95,10 +95,22 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
 - ⚠️ Restou o aviso GO-2026-5932 (`x/crypto/openpgp`, sem correção): a aplicação **não importa** esse pacote.
 - Reexecute `govulncheck ./...` e `go list -m -u all` periodicamente (ex.: no CI).
 
+### Arquivos dos documentos (MinIO/S3)
+- ✅ Bucket privado; nenhum acesso anônimo. Envio e download só por URLs pré-assinadas de curta duração (envio 15 min, download 2 min), emitidas depois da
+  checagem de permissão sobre o **documento** (condições por registro valem para os arquivos).
+- ✅ O envio usa POST policy: o armazenamento recusa tipo diferente do declarado, tamanho acima do limite (PDF/DOCX 200 MB; imagens 25 MB), troca da
+  chave do objeto e uso fora do prazo. A chave do objeto é gerada pelo servidor (`documents/<documento>/<arquivo>`), nunca derivada do nome do cliente, e não sai da API.
+- ✅ A confirmação confere existência, tipo, tamanho real e a assinatura do formato (magic bytes); o que não passa é apagado. Downloads saem como
+  `attachment`, com o tipo gravado no servidor, e a API pública só serve arquivos confirmados de documentos publicados (senão 404).
+- ✅ Excluir o documento ou o arquivo apaga os objetos; envios nunca confirmados são removidos pelo `cleanup` após 24 h.
+- ⚠️ Não há antivírus nem verificação do conteúdo além da assinatura do formato. Se os arquivos vierem de terceiros, passe-os por um scanner (ex.: ClamAV)
+  antes de liberar o download.
+- ⚠️ O console do MinIO só é exposto (`/minio-console`) no HAProxy de desenvolvimento; não o publique em produção e troque `MINIO_ROOT_USER/PASSWORD`.
+
 ### Infraestrutura
 - ✅ Imagem multi-stage, binário estático em `distroless/static:nonroot` (sem shell, sem gerenciador de pacotes).
-- ⚠️ O `/docs` carrega a UI (Scalar) de um CDN, sem SRI, e fica público; a CSP da página libera só esse CDN. Em produção, bloqueie
-  `/docs` no proxy se a documentação não deve ser pública, ou sirva a UI localmente.
+- ⚠️ O `/api/docs` carrega a UI (Scalar) de um CDN, sem SRI, e fica público; a CSP da página libera só esse CDN. Em produção, bloqueie
+  `/api/docs` no proxy se a documentação não deve ser pública, ou sirva a UI localmente.
 - ⚠️ `Strict-Transport-Security` é enviado sempre, mas só tem efeito em HTTPS: termine o TLS no proxy.
 
 ## 3. Riscos aceitos e limitações conhecidas
@@ -122,10 +134,10 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
 **Melhorias identificadas (nenhuma bloqueia o uso):**
 - ⏳ Remover `admins.password_hash` e a tabela `admin_sessions` (sem uso desde o login pelo MT Login) numa migração, depois de validado o novo fluxo.
 - ⏳ Bloquear/desbloquear administradores por endpoint (a coluna `blocked` existe e é respeitada; a API cobre ativar/desativar).
-- ⏳ Opção para desabilitar ou servir localmente o `/docs`.
+- ⏳ Opção para desabilitar ou servir localmente o `/api/docs`.
 - ⏳ Fila de e-mails; retenção da auditoria; MFA para administradores.
 - ⏳ Pipeline de CI executando `make lint`, `make test`, `make cover-authz` e `govulncheck`.
-- ⏳ Métricas/observabilidade (Prometheus, traces); hoje há logs JSON com `request_id` e `/ready`.
+- ⏳ Métricas/observabilidade (Prometheus, traces); hoje há logs JSON com `request_id` e `/api/ready`.
 - ⏳ `make dev` depende do `air`, que é opcional e não vem instalado.
 
 ## 5. Checklist para colocar em produção
@@ -140,5 +152,5 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
 6. Rodar `cli migrate:up` antes de subir a nova versão; **não** rodar o `seed` em produção, a menos que se queira criar as roles de exemplo
    (os usuários de exemplo só existem com `APP_ENV=development`).
 7. Agendar `cli cleanup` (diário) e acompanhar `GET /ready`.
-8. Decidir sobre a exposição de `/docs` e revisar as permissões das roles (principalmente `settings.roles.*` e `settings.users.*`).
+8. Decidir sobre a exposição de `/api/docs` e revisar as permissões das roles (principalmente `settings.roles.*` e `settings.users.*`).
 9. Rodar `govulncheck ./...` e a suíte completa no pipeline antes de cada release.

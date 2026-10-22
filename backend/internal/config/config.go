@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -59,6 +60,22 @@ type Config struct {
 	TrustedProxies []string `env:"TRUSTED_PROXIES" envSeparator:","`
 
 	PublicURL string `env:"PUBLIC_URL" envDefault:"http://localhost:8080"`
+
+	// Armazenamento S3 (MinIO) dos arquivos dos documentos. Sem STORAGE_ENDPOINT o recurso fica
+	// desligado: as rotas de arquivos respondem 503.
+	StorageEndpoint  string `env:"STORAGE_ENDPOINT"`
+	StorageUseSSL    bool   `env:"STORAGE_USE_SSL"`
+	StorageAccessKey string `env:"STORAGE_ACCESS_KEY"`
+	StorageSecretKey string `env:"STORAGE_SECRET_KEY"`
+	StorageBucket    string `env:"STORAGE_BUCKET" envDefault:"documentos"`
+	StorageRegion    string `env:"STORAGE_REGION" envDefault:"us-east-1"`
+	// URL pública do armazenamento, vista pelo navegador (mesmo domínio da aplicação, com o prefixo
+	// do proxy: ex. https://app.exemplo.gov.br/storage). As URLs pré-assinadas são calculadas sobre
+	// o host dela; o proxy remove o prefixo antes de repassar ao MinIO.
+	StoragePublicURL string `env:"STORAGE_PUBLIC_URL" envDefault:"http://localhost/storage"`
+	// Validade das URLs pré-assinadas de envio e de download.
+	StorageUploadTTL   time.Duration `env:"STORAGE_UPLOAD_TTL" envDefault:"15m"`
+	StorageDownloadTTL time.Duration `env:"STORAGE_DOWNLOAD_TTL" envDefault:"2m"`
 
 	// Parâmetros do Argon2id (padrão recomendado pela OWASP: m=19 MiB, t=2, p=1).
 	Argon2MemoryKiB  uint32 `env:"ARGON2_MEMORY_KIB" envDefault:"19456"`
@@ -124,6 +141,19 @@ func (c *Config) Validate() error {
 	}
 	if c.Argon2Iterations < 1 || c.Argon2Parallel < 1 || c.Argon2MemoryKiB < 8*uint32(c.Argon2Parallel) {
 		errs = append(errs, errors.New("parâmetros do Argon2 inválidos (iterações >= 1, paralelismo >= 1, memória >= 8 KiB por thread)"))
+	}
+	if c.StorageEndpoint != "" {
+		if c.StorageAccessKey == "" || c.StorageSecretKey == "" || c.StorageBucket == "" {
+			errs = append(errs, errors.New("STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY e STORAGE_BUCKET são obrigatórios com STORAGE_ENDPOINT"))
+		}
+		if u, err := url.Parse(c.StoragePublicURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			errs = append(errs, errors.New("STORAGE_PUBLIC_URL deve ser uma URL http(s) completa"))
+		} else if c.IsProduction() && u.Scheme != "https" {
+			errs = append(errs, errors.New("STORAGE_PUBLIC_URL deve ser https em produção"))
+		}
+		if c.StorageUploadTTL <= 0 || c.StorageDownloadTTL <= 0 {
+			errs = append(errs, errors.New("STORAGE_UPLOAD_TTL e STORAGE_DOWNLOAD_TTL devem ser positivos"))
+		}
 	}
 	if c.IsProduction() && c.Argon2MemoryKiB < owaspArgon2MemoryKiB {
 		errs = append(errs, fmt.Errorf("ARGON2_MEMORY_KIB abaixo do mínimo recomendado pela OWASP (%d) em produção", owaspArgon2MemoryKiB))
