@@ -11,6 +11,7 @@ interface AlertModalProps {
   title?: string;
   description?: string;
   confirmLabel?: string;
+  cancelLabel?: string;
 }
 
 export function AlertModal({
@@ -20,13 +21,14 @@ export function AlertModal({
   loading,
   title = 'Are you sure?',
   description = 'This action cannot be undone.',
-  confirmLabel = 'Continue'
+  confirmLabel = 'Continue',
+  cancelLabel = 'Cancel'
 }: AlertModalProps) {
   return (
     <Modal title={title} description={description} isOpen={isOpen} onClose={onClose}>
       <div className='flex w-full items-center justify-end space-x-2 pt-6'>
         <Button variant='outline' onClick={onClose}>
-          Cancel
+          {cancelLabel}
         </Button>
         <LoadingButton loading={loading} type='button' variant='destructive' onClick={onConfirm}>
           {confirmLabel}

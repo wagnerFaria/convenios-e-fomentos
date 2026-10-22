@@ -21,6 +21,20 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
+    label: 'Conteúdo',
+    items: [
+      {
+        title: 'Documentos',
+        url: '/dashboard/documentos',
+        icon: 'post',
+        isActive: false,
+        shortcut: ['d', 'o'],
+        access: { permission: 'admin::content.document.read' },
+        items: []
+      }
+    ]
+  },
+  {
     label: 'Conta',
     items: [
       {
