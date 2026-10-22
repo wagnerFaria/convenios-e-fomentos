@@ -47,3 +47,30 @@ func RequirePermission(engine *authz.Engine, action string, resource ...string) 
 		})
 	}
 }
+
+// RequireAnyPermission exige que o administrador (já autenticado por RequireAdmin) tenha ao menos
+// uma das ações. Serve a leituras compartilhadas, como a lista de departamentos que alimenta
+// o seletor da tela de administradores.
+func RequireAnyPermission(engine *authz.Engine, actions ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := auth.AdminFrom(r.Context())
+			if !ok {
+				httpapi.Error(w, r, httpapi.ErrUnauthorized())
+				return
+			}
+			for _, action := range actions {
+				d, err := engine.Can(r.Context(), SubjectOf(p), action)
+				if err != nil {
+					httpapi.Error(w, r, err)
+					return
+				}
+				if d.Allowed {
+					next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), decisionKey{}, d)))
+					return
+				}
+			}
+			httpapi.Error(w, r, httpapi.ErrForbidden())
+		})
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/authz"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/config"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/department"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/document"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/enduser"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
@@ -124,6 +125,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 	endUserHandler := enduser.NewHandler(endUserSvc, identifier, cfg.RateLimitAuthPerMin)
 	endUserAdmin := enduser.NewAdminHandler(endUserSvc, adminHandler.Guard)
 	tokenAdmin := apitoken.NewHandler(tokenSvc, adminHandler.Guard)
+	departmentAdmin := department.NewHandler(department.NewService(pool), adminHandler.Guard, adminHandler.GuardAny)
 	documentSvc := document.NewService(pool, engine)
 	if o.store != nil {
 		documentSvc.SetStorage(o.store, cfg.StorageUploadTTL, cfg.StorageDownloadTTL, log)
@@ -139,6 +141,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 			audit.NewHandler(q).Routes(r, adminHandler.Guard)
 			endUserAdmin.Routes(r)
 			tokenAdmin.Routes(r)
+			departmentAdmin.Routes(r)
 			documentAdmin.Routes(r)
 			documentPublic.Routes(r)
 			endUserHandler.Routes(r)

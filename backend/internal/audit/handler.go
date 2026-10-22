@@ -26,9 +26,11 @@ func (h *Handler) Routes(r chi.Router, guard func(action string) func(http.Handl
 
 // LogView é um registro de auditoria exposto pela API.
 type LogView struct {
-	ID        uuid.UUID       `json:"id"`
-	ActorType string          `json:"actorType"`
-	ActorID   *string         `json:"actorId"`
+	ID        uuid.UUID `json:"id"`
+	ActorType string    `json:"actorType"`
+	ActorID   *string   `json:"actorId"`
+	// ActorName é o nome atual do administrador; nulo para outros atores, administrador excluído ou sem nome.
+	ActorName *string         `json:"actorName"`
 	Action    string          `json:"action"`
 	Entity    string          `json:"entity"`
 	EntityID  *string         `json:"entityId"`
@@ -91,7 +93,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]LogView, 0, len(rows))
 	for _, l := range rows {
-		out = append(out, LogView{ID: l.ID, ActorType: l.ActorType, ActorID: l.ActorID, Action: l.Action, Entity: l.Entity,
+		var name *string
+		if l.ActorName != "" {
+			name = &l.ActorName
+		}
+		out = append(out, LogView{ID: l.ID, ActorType: l.ActorType, ActorID: l.ActorID, ActorName: name, Action: l.Action, Entity: l.Entity,
 			EntityID: l.EntityID, Payload: l.Payload, IP: l.Ip, CreatedAt: l.CreatedAt})
 	}
 	httpapi.JSON(w, http.StatusOK, out, page.Meta(int(total)))

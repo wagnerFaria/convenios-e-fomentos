@@ -68,6 +68,13 @@ func (h *Handler) rbacRoutes(r chi.Router) {
 // Guard expõe o middleware autenticação + permissão para outros pacotes (ex.: auditoria).
 func (h *Handler) Guard(action string) func(http.Handler) http.Handler { return h.guard(action) }
 
+// GuardAny é como Guard, mas basta ter uma das ações.
+func (h *Handler) GuardAny(actions ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return h.auth.RequireAdmin(RequireAnyPermission(h.engine, actions...)(next))
+	}
+}
+
 // ---- administradores ----
 
 func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {

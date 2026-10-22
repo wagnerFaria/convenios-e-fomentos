@@ -482,11 +482,90 @@ paths:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
+  /api/admin/departments:
+    get:
+      tags: [Departamentos]
+      summary: Lista departamentos com a contagem de administradores e documentos
+      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read` (alimenta o seletor de departamento dos administradores). Resposta: `[{id, name, userCount, documentCount}]`."
+      security: [{adminBearer: []}]
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Departamentos]
+      summary: Cria um departamento
+      description: "Nome único (409 `department_name_taken`). Permissão: `admin::settings.departments.create`."
+      security: [{adminBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, maxLength: 100}
+      responses:
+        "201": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/departments/{id}:
+    get:
+      tags: [Departamentos]
+      summary: Detalha um departamento
+      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    put:
+      tags: [Departamentos]
+      summary: Renomeia um departamento
+      description: "Permissão: `admin::settings.departments.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, maxLength: 100}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Departamentos]
+      summary: Exclui um departamento
+      description: "Recusado com 409 `department_in_use` (`details.userCount`, `details.documentCount`) se houver administradores ou documentos vinculados. Permissão: `admin::settings.departments.delete`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
   /api/admin/audit-logs:
     get:
       tags: [Auditoria]
       summary: Lista registros de auditoria (filtros por ator, ação, entidade e período)
-      description: "Alterações trazem payload.before e payload.after. Permissão: `admin::settings.audit-logs.read`."
+      description: "Alterações trazem payload.before e payload.after. `actorName` é o nome atual do administrador (nulo para outros atores ou administrador excluído). Permissão: `admin::settings.audit-logs.read`."
       security: [{adminBearer: []}]
       parameters:
         - {name: actorType, in: query, schema: {type: string}}
