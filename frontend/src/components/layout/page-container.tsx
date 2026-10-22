@@ -1,4 +1,5 @@
 import React from 'react';
+import { AccessDenied } from '../access-denied';
 import { Heading } from '../ui/heading';
 import type { InfobarContent } from '@/components/ui/infobar';
 
@@ -43,11 +44,7 @@ export default function PageContainer({
   if (!access) {
     return (
       <div role='status' className='flex flex-1 items-center justify-center p-4 md:px-6'>
-        {accessFallback ?? (
-          <div className='text-muted-foreground text-center text-lg'>
-            You do not have access to this page.
-          </div>
-        )}
+        {accessFallback ?? <AccessDenied />}
       </div>
     );
   }
