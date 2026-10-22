@@ -53,7 +53,7 @@ func (h *Handler) rbacRoutes(r chi.Router) {
 	r.With(h.guard("admin::settings.users.update")).Post("/admin/users/{id}/roles", h.addUserRoles)
 	r.With(h.guard("admin::settings.users.update")).Delete("/admin/users/{id}/roles/{roleId}", h.removeUserRole)
 
-	r.With(h.guard("admin::settings.roles.read")).Get("/admin/roles", h.listRoles)
+	r.With(h.GuardAny("admin::settings.roles.read", "admin::settings.users.read")).Get("/admin/roles", h.listRoles)
 	r.With(h.guard("admin::settings.roles.create")).Post("/admin/roles", h.createRole)
 	r.With(h.guard("admin::settings.roles.read")).Get("/admin/roles/{id}", h.getRole)
 	r.With(h.guard("admin::settings.roles.update")).Put("/admin/roles/{id}", h.updateRole)

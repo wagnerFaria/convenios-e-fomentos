@@ -337,7 +337,7 @@ paths:
     get:
       tags: [Roles de administrador]
       summary: Lista roles com a contagem de administradores
-      description: "Permissão: `admin::settings.roles.read`."
+      description: "Permissão: `admin::settings.roles.read` ou `admin::settings.users.read` (alimenta o seletor de roles dos administradores). As permissões de cada role só vêm no detalhe, que exige `roles.read`."
       security: [{adminBearer: []}]
       responses:
         "200": {description: OK}

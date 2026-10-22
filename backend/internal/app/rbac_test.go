@@ -804,3 +804,16 @@ func TestPermissoesEfetivasDeOutroAdministrador(t *testing.T) {
 	assert.Equal(t, true, su.data()["isSuperAdmin"])
 	assert.NotEmpty(t, su.data()["permissions"])
 }
+
+func TestListagemDeRolesAbertaAQuemAdministraAdministradores(t *testing.T) {
+	e, boss := setup(t)
+	e.mkRole("leitor", "admin::settings.users.read")
+	e.mkRole("vazio")
+	leitor, _ := e.newAdmin(boss, "leitor@exemplo.com", "leitor")
+	vazio, _ := e.newAdmin(boss, "vazio@exemplo.com", "vazio")
+
+	assert.Equal(t, 200, e.do("GET", "/api/admin/roles", nil, leitor).Status, "alimenta o seletor de roles")
+	assert.Equal(t, 403, e.do("GET", "/api/admin/roles", nil, vazio).Status)
+	assert.Equal(t, 401, e.do("GET", "/api/admin/roles", nil, "").Status)
+	assert.Equal(t, 403, e.do("GET", "/api/admin/roles/"+e.roleID("vazio"), nil, leitor).Status, "as permissões continuam exigindo roles.read")
+}
