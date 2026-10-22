@@ -52,3 +52,9 @@ export interface AdminMe {
   roles: AdminRoleRef[];
   permissions: AdminPermission[];
 }
+
+/** Lista paginada: `meta` só vem nas listagens paginadas. */
+export interface Paginated<T> {
+  data: T[];
+  meta?: ApiMeta;
+}

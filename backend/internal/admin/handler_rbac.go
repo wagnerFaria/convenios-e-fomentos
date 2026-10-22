@@ -46,10 +46,14 @@ func (h *Handler) rbacRoutes(r chi.Router) {
 	r.With(h.guard("admin::settings.users.delete")).Delete("/admin/users/{id}", h.deleteUser)
 	r.With(h.guard("admin::settings.users.update")).Post("/admin/users/{id}/activate", h.setActive(true))
 	r.With(h.guard("admin::settings.users.update")).Post("/admin/users/{id}/deactivate", h.setActive(false))
+	r.With(h.guard("admin::settings.users.update")).Post("/admin/users/{id}/block", h.setBlocked(true))
+	r.With(h.guard("admin::settings.users.update")).Post("/admin/users/{id}/unblock", h.setBlocked(false))
+	r.With(h.guard("admin::settings.users.read")).Get("/admin/users/{id}/permissions", h.getUserPermissions)
+	r.With(h.guard("admin::settings.users.update")).Put("/admin/users/{id}/roles", h.setUserRoles)
 	r.With(h.guard("admin::settings.users.update")).Post("/admin/users/{id}/roles", h.addUserRoles)
 	r.With(h.guard("admin::settings.users.update")).Delete("/admin/users/{id}/roles/{roleId}", h.removeUserRole)
 
-	r.With(h.guard("admin::settings.roles.read")).Get("/admin/roles", h.listRoles)
+	r.With(h.GuardAny("admin::settings.roles.read", "admin::settings.users.read")).Get("/admin/roles", h.listRoles)
 	r.With(h.guard("admin::settings.roles.create")).Post("/admin/roles", h.createRole)
 	r.With(h.guard("admin::settings.roles.read")).Get("/admin/roles/{id}", h.getRole)
 	r.With(h.guard("admin::settings.roles.update")).Put("/admin/roles/{id}", h.updateRole)
@@ -57,12 +61,20 @@ func (h *Handler) rbacRoutes(r chi.Router) {
 	r.With(h.guard("admin::settings.roles.update")).Put("/admin/roles/{id}/permissions", h.replacePermissions)
 	r.With(h.guard("admin::settings.roles.create")).Post("/admin/roles/{id}/duplicate", h.duplicateRole)
 
-	r.With(h.guard("admin::settings.roles.read")).Get("/admin/catalog/actions", h.catalogActions)
+	// O catálogo de ações também alimenta os seletores de permissões de tokens de API e de roles de usuário final.
+	r.With(h.GuardAny("admin::settings.roles.read", "admin::settings.api-tokens.read", "admin::plugin.enduser-roles.read")).Get("/admin/catalog/actions", h.catalogActions)
 	r.With(h.guard("admin::settings.roles.read")).Get("/admin/catalog/conditions", h.catalogConditions)
 }
 
 // Guard expõe o middleware autenticação + permissão para outros pacotes (ex.: auditoria).
 func (h *Handler) Guard(action string) func(http.Handler) http.Handler { return h.guard(action) }
+
+// GuardAny é como Guard, mas basta ter uma das ações.
+func (h *Handler) GuardAny(actions ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return h.auth.RequireAdmin(RequireAnyPermission(h.engine, actions...)(next))
+	}
+}
 
 // ---- administradores ----
 
@@ -80,7 +92,7 @@ func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := ListUsersFilter{Q: q.Get("q"), Status: q.Get("status"), Sort: sort, Page: page}
 	if f.Status != "" && !slices.Contains(UserStatuses, f.Status) {
-		httpapi.Error(w, r, fieldIssue("status", "Valores aceitos: active, inactive, pending, blocked."))
+		httpapi.Error(w, r, fieldIssue("status", "Valores aceitos: active, awaiting, inactive, pending, blocked."))
 		return
 	}
 	if v := q.Get("roleId"); v != "" {
@@ -148,6 +160,57 @@ func (h *Handler) setActive(active bool) http.HandlerFunc {
 		}
 		httpapi.JSON(w, http.StatusOK, v, nil)
 	}
+}
+
+func (h *Handler) setBlocked(blocked bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := idParam(r, "id")
+		if err != nil {
+			httpapi.Error(w, r, err)
+			return
+		}
+		v, err := h.svc.SetBlocked(r.Context(), h.actor(r), id, blocked)
+		if err != nil {
+			httpapi.Error(w, r, err)
+			return
+		}
+		httpapi.JSON(w, http.StatusOK, v, nil)
+	}
+}
+
+func (h *Handler) getUserPermissions(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	v, err := h.svc.GetUserPermissions(r.Context(), id)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+func (h *Handler) setUserRoles(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	var in struct {
+		RoleIDs []uuid.UUID `json:"roleIds" validate:"required,min=1"`
+	}
+	if err := httpapi.Decode(r, &in); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	v, err := h.svc.SetRoles(r.Context(), h.actor(r), id, in.RoleIDs)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, v, nil)
 }
 
 func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request) {

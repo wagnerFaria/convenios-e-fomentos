@@ -136,7 +136,7 @@ func (s *S3) Head(ctx context.Context, key string, n int64) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage: lendo: %w", err)
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 	b, err := io.ReadAll(io.LimitReader(obj, n))
 	if err != nil {
 		if isNotFound(err) {

@@ -8,6 +8,8 @@ package db
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const countAuditLogs = `-- name: CountAuditLogs :one
@@ -75,15 +77,18 @@ func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) 
 }
 
 const listAuditLogs = `-- name: ListAuditLogs :many
-SELECT id, actor_type, actor_id, action, entity, entity_id, payload, ip, created_at FROM audit_logs
-WHERE ($1::text IS NULL OR actor_type = $1)
-  AND ($2::text IS NULL OR actor_id = $2)
-  AND ($3::text IS NULL OR action = $3)
-  AND ($4::text IS NULL OR entity = $4)
-  AND ($5::text IS NULL OR entity_id = $5)
-  AND ($6::timestamptz IS NULL OR created_at >= $6)
-  AND ($7::timestamptz IS NULL OR created_at <= $7)
-ORDER BY created_at DESC, id DESC
+SELECT l.id, l.actor_type, l.actor_id, l.action, l.entity, l.entity_id, l.payload, l.ip, l.created_at,
+       COALESCE(btrim(a.first_name || ' ' || a.last_name), '')::text AS actor_name
+FROM audit_logs l
+LEFT JOIN admins a ON a.id = CASE WHEN l.actor_type = 'admin' AND l.actor_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN l.actor_id::uuid END
+WHERE ($1::text IS NULL OR l.actor_type = $1)
+  AND ($2::text IS NULL OR l.actor_id = $2)
+  AND ($3::text IS NULL OR l.action = $3)
+  AND ($4::text IS NULL OR l.entity = $4)
+  AND ($5::text IS NULL OR l.entity_id = $5)
+  AND ($6::timestamptz IS NULL OR l.created_at >= $6)
+  AND ($7::timestamptz IS NULL OR l.created_at <= $7)
+ORDER BY l.created_at DESC, l.id DESC
 LIMIT $9 OFFSET $8
 `
 
@@ -99,7 +104,21 @@ type ListAuditLogsParams struct {
 	PageLimit  int32      `json:"page_limit"`
 }
 
-func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error) {
+type ListAuditLogsRow struct {
+	ID        uuid.UUID `json:"id"`
+	ActorType string    `json:"actor_type"`
+	ActorID   *string   `json:"actor_id"`
+	Action    string    `json:"action"`
+	Entity    string    `json:"entity"`
+	EntityID  *string   `json:"entity_id"`
+	Payload   []byte    `json:"payload"`
+	Ip        *string   `json:"ip"`
+	CreatedAt time.Time `json:"created_at"`
+	ActorName string    `json:"actor_name"`
+}
+
+// O ator administrador é resolvido para o nome atual; vazio se foi excluído ou ainda sem nome.
+func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]ListAuditLogsRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogs,
 		arg.ActorType,
 		arg.ActorID,
@@ -115,9 +134,9 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AuditLog{}
+	items := []ListAuditLogsRow{}
 	for rows.Next() {
-		var i AuditLog
+		var i ListAuditLogsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ActorType,
@@ -128,6 +147,7 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 			&i.Payload,
 			&i.Ip,
 			&i.CreatedAt,
+			&i.ActorName,
 		); err != nil {
 			return nil, err
 		}

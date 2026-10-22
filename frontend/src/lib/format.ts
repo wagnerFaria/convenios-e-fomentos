@@ -15,3 +15,11 @@ export function formatDate(
     return '';
   }
 }
+
+/** Data e hora no formato brasileiro (ex.: 22/10/2026 14:30). */
+export function formatDateTime(date: Date | string | number | null | undefined) {
+  if (!date) return '';
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}

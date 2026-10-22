@@ -49,6 +49,9 @@ RETURNING *;
 -- name: SetAdminActive :exec
 UPDATE admins SET is_active = $2, updated_at = now() WHERE id = $1;
 
+-- name: SetAdminBlocked :exec
+UPDATE admins SET blocked = $2, updated_at = now() WHERE id = $1;
+
 -- name: GetAdminsByIDs :many
 SELECT * FROM admins WHERE id = ANY($1::uuid[]);
 

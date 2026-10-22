@@ -7,7 +7,72 @@ package db
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
+
+const createDepartment = `-- name: CreateDepartment :one
+INSERT INTO departments (name) VALUES ($1) RETURNING id, name
+`
+
+func (q *Queries) CreateDepartment(ctx context.Context, name string) (Department, error) {
+	row := q.db.QueryRow(ctx, createDepartment, name)
+	var i Department
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const deleteDepartment = `-- name: DeleteDepartment :execrows
+DELETE FROM departments WHERE id = $1
+`
+
+func (q *Queries) DeleteDepartment(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDepartment, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getDepartmentForUpdate = `-- name: GetDepartmentForUpdate :one
+SELECT id, name FROM departments WHERE id = $1 FOR UPDATE
+`
+
+// Trava a linha: inserções/atualizações de administradores e documentos que referenciam o
+// departamento esperam a transação terminar.
+func (q *Queries) GetDepartmentForUpdate(ctx context.Context, id uuid.UUID) (Department, error) {
+	row := q.db.QueryRow(ctx, getDepartmentForUpdate, id)
+	var i Department
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const getDepartmentWithCounts = `-- name: GetDepartmentWithCounts :one
+SELECT d.id, d.name,
+       (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
+       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
+FROM departments d
+WHERE d.id = $1
+`
+
+type GetDepartmentWithCountsRow struct {
+	ID            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	UserCount     int64     `json:"user_count"`
+	DocumentCount int64     `json:"document_count"`
+}
+
+func (q *Queries) GetDepartmentWithCounts(ctx context.Context, id uuid.UUID) (GetDepartmentWithCountsRow, error) {
+	row := q.db.QueryRow(ctx, getDepartmentWithCounts, id)
+	var i GetDepartmentWithCountsRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.UserCount,
+		&i.DocumentCount,
+	)
+	return i, err
+}
 
 const listDepartments = `-- name: ListDepartments :many
 SELECT id, name FROM departments ORDER BY name
@@ -31,6 +96,62 @@ func (q *Queries) ListDepartments(ctx context.Context) ([]Department, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const listDepartmentsWithCounts = `-- name: ListDepartmentsWithCounts :many
+SELECT d.id, d.name,
+       (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
+       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
+FROM departments d
+ORDER BY d.name
+`
+
+type ListDepartmentsWithCountsRow struct {
+	ID            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	UserCount     int64     `json:"user_count"`
+	DocumentCount int64     `json:"document_count"`
+}
+
+func (q *Queries) ListDepartmentsWithCounts(ctx context.Context) ([]ListDepartmentsWithCountsRow, error) {
+	rows, err := q.db.Query(ctx, listDepartmentsWithCounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDepartmentsWithCountsRow{}
+	for rows.Next() {
+		var i ListDepartmentsWithCountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.UserCount,
+			&i.DocumentCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateDepartment = `-- name: UpdateDepartment :one
+UPDATE departments SET name = $2 WHERE id = $1 RETURNING id, name
+`
+
+type UpdateDepartmentParams struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+func (q *Queries) UpdateDepartment(ctx context.Context, arg UpdateDepartmentParams) (Department, error) {
+	row := q.db.QueryRow(ctx, updateDepartment, arg.ID, arg.Name)
+	var i Department
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
 }
 
 const upsertDepartment = `-- name: UpsertDepartment :one

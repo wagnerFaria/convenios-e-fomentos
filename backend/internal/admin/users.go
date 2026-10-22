@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/wagner/convenios-e-fomentos/backend/internal/authz"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
@@ -18,11 +19,13 @@ import (
 )
 
 // Status do administrador, na ordem de precedência: blocked, inactive, pending
-// (ainda não fez o primeiro acesso com o MT Login) e active.
+// (ainda não fez o primeiro acesso com o MT Login), awaiting (já acessou, mas ainda sem
+// nenhuma role, aguardando liberação) e active.
 const (
 	StatusActive   = "active"
 	StatusInactive = "inactive"
 	StatusPending  = "pending"
+	StatusAwaiting = "awaiting"
 	StatusBlocked  = "blocked"
 )
 
@@ -44,7 +47,7 @@ type UserView struct {
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
 
-func statusOf(a db.Admin) string {
+func statusOf(a db.Admin, roleCount int) string {
 	switch {
 	case a.Blocked:
 		return StatusBlocked
@@ -52,6 +55,8 @@ func statusOf(a db.Admin) string {
 		return StatusInactive
 	case a.LastLoginAt == nil:
 		return StatusPending
+	case roleCount == 0:
+		return StatusAwaiting
 	}
 	return StatusActive
 }
@@ -68,7 +73,7 @@ func viewOf(a db.Admin, roles []db.AdminRole) UserView {
 	for _, r := range roles {
 		rv = append(rv, RoleView{ID: r.ID, Code: r.Code, Name: r.Name})
 	}
-	return UserView{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, CPF: maskedCPF(a.Cpf), Email: a.Email, Status: statusOf(a), IsActive: a.IsActive,
+	return UserView{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, CPF: maskedCPF(a.Cpf), Email: a.Email, Status: statusOf(a, len(roles)), IsActive: a.IsActive,
 		Blocked: a.Blocked, DepartmentID: a.DepartmentID, Roles: rv, LastLoginAt: a.LastLoginAt, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt}
 }
 
@@ -105,7 +110,7 @@ var UserSortColumns = map[string]string{
 }
 
 // UserStatuses são os valores aceitos no filtro de status.
-var UserStatuses = []string{StatusActive, StatusInactive, StatusPending, StatusBlocked}
+var UserStatuses = []string{StatusActive, StatusInactive, StatusPending, StatusAwaiting, StatusBlocked}
 
 func escapeLike(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
@@ -144,7 +149,9 @@ func (s *Service) ListUsers(ctx context.Context, f ListUsersFilter) ([]UserView,
 	case StatusInactive:
 		where = append(where, `NOT a.blocked AND NOT a.is_active`)
 	case StatusActive:
-		where = append(where, `NOT a.blocked AND a.is_active AND a.last_login_at IS NOT NULL`)
+		where = append(where, `NOT a.blocked AND a.is_active AND a.last_login_at IS NOT NULL AND EXISTS (SELECT 1 FROM admin_users_roles ur WHERE ur.admin_id = a.id)`)
+	case StatusAwaiting:
+		where = append(where, `NOT a.blocked AND a.is_active AND a.last_login_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM admin_users_roles ur WHERE ur.admin_id = a.id)`)
 	}
 	clause := ""
 	if len(where) > 0 {
@@ -177,7 +184,7 @@ func (s *Service) ListUsers(ctx context.Context, f ListUsersFilter) ([]UserView,
 		if err := json.Unmarshal(rolesJSON, &v.Roles); err != nil {
 			return nil, 0, err
 		}
-		v.Status = statusOf(db.Admin{Blocked: v.Blocked, IsActive: v.IsActive, LastLoginAt: v.LastLoginAt})
+		v.Status = statusOf(db.Admin{Blocked: v.Blocked, IsActive: v.IsActive, LastLoginAt: v.LastLoginAt}, len(v.Roles))
 		out = append(out, v)
 	}
 	return out, total, rows.Err()
@@ -205,21 +212,28 @@ type userSnapshot struct {
 	Email        string     `json:"email"`
 	DepartmentID *uuid.UUID `json:"departmentId"`
 	IsActive     bool       `json:"isActive"`
+	Blocked      bool       `json:"blocked"`
 	Roles        []string   `json:"roles,omitempty"`
 }
 
 func snapshotOf(a db.Admin) userSnapshot {
-	return userSnapshot{FirstName: a.FirstName, LastName: a.LastName, CPF: maskedCPF(a.Cpf), Email: a.Email, DepartmentID: a.DepartmentID, IsActive: a.IsActive}
+	return userSnapshot{FirstName: a.FirstName, LastName: a.LastName, CPF: maskedCPF(a.Cpf), Email: a.Email, DepartmentID: a.DepartmentID, IsActive: a.IsActive, Blocked: a.Blocked}
 }
 
 // UpdateUser edita os dados do administrador.
 func (s *Service) UpdateUser(ctx context.Context, actor Actor, id uuid.UUID, in UpdateUserInput) (*UserView, error) {
+	if err := ensureNotOwnAccount(actor, id); err != nil {
+		return nil, err
+	}
 	var out *UserView
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		before, err := q.GetAdminByID(ctx, id)
 		if err != nil {
 			return notFound(err)
+		}
+		if err := s.ensureCanManage(ctx, q, actor, before); err != nil {
+			return err
 		}
 		after, err := q.UpdateAdmin(ctx, db.UpdateAdminParams{ID: id, DepartmentID: in.DepartmentID})
 		switch {
@@ -276,6 +290,9 @@ func (s *Service) SetActive(ctx context.Context, actor Actor, id uuid.UUID, acti
 		if err != nil {
 			return notFound(err)
 		}
+		if err := s.ensureCanManage(ctx, q, actor, before); err != nil {
+			return err
+		}
 		if err := q.SetAdminActive(ctx, db.SetAdminActiveParams{ID: id, IsActive: active}); err != nil {
 			return err
 		}
@@ -285,6 +302,39 @@ func (s *Service) SetActive(ctx context.Context, actor Actor, id uuid.UUID, acti
 		}
 		after := before
 		after.IsActive = active
+		if err := s.audit.Record(ctx, q, actor.entry(action, "admin", id, snapshotOf(before), snapshotOf(after))); err != nil {
+			return err
+		}
+		out, err = s.userView(ctx, q, id)
+		return err
+	})
+	return out, err
+}
+
+// SetBlocked bloqueia ou desbloqueia o administrador. Bloqueado, ele perde o acesso na próxima
+// requisição, sem perder roles. Não é permitido sobre si mesmo nem sobre o último Super Admin ativo.
+func (s *Service) SetBlocked(ctx context.Context, actor Actor, id uuid.UUID, blocked bool) (*UserView, error) {
+	if blocked && actor.ID == id {
+		return nil, errCannotModifySelf
+	}
+	var out *UserView
+	err := s.withSuperGuard(ctx, func(q *db.Queries) error {
+		before, err := q.GetAdminByID(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := s.ensureCanManage(ctx, q, actor, before); err != nil {
+			return err
+		}
+		if err := q.SetAdminBlocked(ctx, db.SetAdminBlockedParams{ID: id, Blocked: blocked}); err != nil {
+			return err
+		}
+		action := "admin.unblock"
+		if blocked {
+			action = "admin.block"
+		}
+		after := before
+		after.Blocked = blocked
 		if err := s.audit.Record(ctx, q, actor.entry(action, "admin", id, snapshotOf(before), snapshotOf(after))); err != nil {
 			return err
 		}
@@ -313,6 +363,9 @@ func (s *Service) DeleteUsers(ctx context.Context, actor Actor, ids []uuid.UUID)
 		}
 		if len(found) != len(ids) {
 			return httpapi.ErrNotFound()
+		}
+		if err := s.ensureCanManage(ctx, q, actor, found...); err != nil {
+			return err
 		}
 		if _, err := q.DeleteAdminsByIDs(ctx, ids); err != nil {
 			return err
@@ -353,11 +406,18 @@ func hasSuperRole(roles []db.AdminRole) bool {
 // AddRoles atribui roles ao administrador. Só um Super Admin concede a role Super Admin.
 func (s *Service) AddRoles(ctx context.Context, actor Actor, id uuid.UUID, roleIDs []uuid.UUID) (*UserView, error) {
 	roleIDs = uniqueIDs(roleIDs)
+	if err := ensureNotOwnAccount(actor, id); err != nil {
+		return nil, err
+	}
 	var out *UserView
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if _, err := q.GetAdminByID(ctx, id); err != nil {
+		target, err := q.GetAdminByID(ctx, id)
+		if err != nil {
 			return notFound(err)
+		}
+		if err := s.ensureCanManage(ctx, q, actor, target); err != nil {
+			return err
 		}
 		roles, err := q.GetAdminRolesByIDs(ctx, roleIDs)
 		if err != nil {
@@ -368,6 +428,9 @@ func (s *Service) AddRoles(ctx context.Context, actor Actor, id uuid.UUID, roleI
 		}
 		if hasSuperRole(roles) && !actor.Subject.IsSuperAdmin() {
 			return httpapi.ErrForbidden()
+		}
+		if err := s.ensureCoversRoles(ctx, actor, roleIDs); err != nil {
+			return err
 		}
 		current, err := q.ListRolesForAdmin(ctx, id)
 		if err != nil {
@@ -399,10 +462,17 @@ func codesOfView(rs []RoleView) []string {
 // RemoveRole retira uma role do administrador. Ele precisa manter ao menos uma
 // role, e o último Super Admin ativo não pode perder a role Super Admin.
 func (s *Service) RemoveRole(ctx context.Context, actor Actor, id, roleID uuid.UUID) (*UserView, error) {
+	if err := ensureNotOwnAccount(actor, id); err != nil {
+		return nil, err
+	}
 	var out *UserView
 	err := s.withSuperGuard(ctx, func(q *db.Queries) error {
-		if _, err := q.GetAdminByID(ctx, id); err != nil {
+		target, err := q.GetAdminByID(ctx, id)
+		if err != nil {
 			return notFound(err)
+		}
+		if err := s.ensureCanManage(ctx, q, actor, target); err != nil {
+			return err
 		}
 		role, err := q.GetAdminRole(ctx, roleID)
 		if err != nil {
@@ -432,4 +502,93 @@ func (s *Service) RemoveRole(ctx context.Context, actor Actor, id, roleID uuid.U
 			map[string]any{"roles": roleCodes(current)}, map[string]any{"roles": codesOfView(out.Roles)}))
 	})
 	return out, err
+}
+
+// SetRoles substitui o conjunto de roles do administrador (liberação de quem aguarda acesso e
+// edição das roles em uma só operação). Valem as mesmas regras de AddRoles e RemoveRole: só um
+// Super Admin concede ou retira a role Super Admin, o último Super Admin ativo não a perde e só
+// se atribui o que o ator cobre.
+func (s *Service) SetRoles(ctx context.Context, actor Actor, id uuid.UUID, roleIDs []uuid.UUID) (*UserView, error) {
+	roleIDs = uniqueIDs(roleIDs)
+	if len(roleIDs) == 0 {
+		return nil, fieldIssue("roleIds", "O administrador precisa ter ao menos uma role.")
+	}
+	if err := ensureNotOwnAccount(actor, id); err != nil {
+		return nil, err
+	}
+	var out *UserView
+	err := s.withSuperGuard(ctx, func(q *db.Queries) error {
+		target, err := q.GetAdminByID(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := s.ensureCanManage(ctx, q, actor, target); err != nil {
+			return err
+		}
+		next, err := q.GetAdminRolesByIDs(ctx, roleIDs)
+		if err != nil {
+			return err
+		}
+		if len(next) != len(roleIDs) {
+			return fieldIssue("roleIds", "Uma ou mais roles não existem.")
+		}
+		current, err := q.ListRolesForAdmin(ctx, id)
+		if err != nil {
+			return err
+		}
+		if hasSuperRole(next) != hasSuperRole(current) && !actor.Subject.IsSuperAdmin() {
+			return httpapi.ErrForbidden()
+		}
+		var added []uuid.UUID
+		for _, r := range next {
+			if !slices.ContainsFunc(current, func(c db.AdminRole) bool { return c.ID == r.ID }) {
+				added = append(added, r.ID)
+			}
+		}
+		if err := s.ensureCoversRoles(ctx, actor, added); err != nil {
+			return err
+		}
+		for _, r := range current {
+			if !slices.Contains(roleIDs, r.ID) {
+				if _, err := q.RemoveAdminRole(ctx, db.RemoveAdminRoleParams{AdminID: id, RoleID: r.ID}); err != nil {
+					return err
+				}
+			}
+		}
+		for _, rid := range added {
+			if err := q.AssignAdminRole(ctx, db.AssignAdminRoleParams{AdminID: id, RoleID: rid}); err != nil {
+				return err
+			}
+		}
+		out, err = s.userView(ctx, q, id)
+		if err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, q, actor.entry("admin.roles-set", "admin", id,
+			map[string]any{"roles": roleCodes(current)}, map[string]any{"roles": codesOfView(out.Roles)}))
+	})
+	return out, err
+}
+
+// UserPermissions são as permissões efetivas de um administrador, já unidas entre suas roles.
+type UserPermissions struct {
+	IsSuperAdmin bool                        `json:"isSuperAdmin"`
+	Permissions  []authz.EffectivePermission `json:"permissions"`
+}
+
+// GetUserPermissions devolve as permissões efetivas do administrador (as mesmas que ele recebe em /me).
+func (s *Service) GetUserPermissions(ctx context.Context, id uuid.UUID) (*UserPermissions, error) {
+	a, err := s.q.GetAdminByID(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	subj, err := s.subjectOf(ctx, s.q, a)
+	if err != nil {
+		return nil, err
+	}
+	perms, err := s.engine.Effective(ctx, subj)
+	if err != nil {
+		return nil, err
+	}
+	return &UserPermissions{IsSuperAdmin: subj.IsSuperAdmin(), Permissions: perms}, nil
 }

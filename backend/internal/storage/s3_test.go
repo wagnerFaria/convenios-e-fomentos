@@ -74,7 +74,7 @@ func TestS3PreassinadoPeloMesmoDominio(t *testing.T) {
 		req.Header.Set("Content-Type", mw.FormDataContentType())
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		_, _ = io.Copy(io.Discard, res.Body)
 		return res.StatusCode
 	}
@@ -117,7 +117,7 @@ func TestS3PreassinadoPeloMesmoDominio(t *testing.T) {
 		assert.True(t, exp.After(time.Now()))
 		res, err := http.Get(u) //nolint:gosec,noctx // URL do próprio teste
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		body, _ := io.ReadAll(res.Body)
 		require.Equal(t, 200, res.StatusCode, string(body))
 		assert.Equal(t, "%PDF-1.7 conteudo", string(body))

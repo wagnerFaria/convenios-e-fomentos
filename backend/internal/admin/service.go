@@ -114,6 +114,9 @@ func (s *Service) Register(ctx context.Context, actor *auth.AdminPrincipal, in R
 		if hasSuperRole(roles) && !SubjectOf(actor).IsSuperAdmin() {
 			return httpapi.ErrForbidden()
 		}
+		if err := s.ensureCoversRoles(ctx, ActorOf(actor, ip), roleIDs); err != nil {
+			return err
+		}
 		created, err := q.CreateAdmin(ctx, db.CreateAdminParams{Cpf: &digits, IsActive: true, DepartmentID: in.DepartmentID})
 		switch {
 		case database.IsUniqueViolation(err):

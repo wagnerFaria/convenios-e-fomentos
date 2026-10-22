@@ -96,7 +96,7 @@ paths:
       parameters:
         - {name: q, in: query, schema: {type: string}, description: "Busca em nome, sobrenome, e-mail e CPF (a partir de 3 dígitos, com ou sem pontuação)"}
         - {name: roleId, in: query, schema: {type: string}, description: Filtra por role (UUID)}
-        - {name: status, in: query, schema: {type: string}, description: "active, inactive, pending (ainda sem primeiro acesso) ou blocked"}
+        - {name: status, in: query, schema: {type: string}, description: "active, awaiting (já acessou, mas sem nenhuma role: aguardando liberação), inactive, pending (ainda sem primeiro acesso) ou blocked"}
         - {name: sort, in: query, schema: {type: string}, description: "Campo:direção. Campos: firstName, lastName, email, createdAt. Ex.: email:asc"}
         - {name: page, in: query, schema: {type: integer}}
         - {name: pageSize, in: query, schema: {type: integer}, description: "Padrão 25, máximo 100"}
@@ -203,7 +203,7 @@ paths:
     post:
       tags: [Administradores]
       summary: Ativa o administrador
-      description: "Convite pendente não pode ser ativado (409 invitation_pending). Permissão: `admin::settings.users.update`."
+      description: "403 `target_more_privileged` se o administrador tem permissões que o ator não possui. Permissão: `admin::settings.users.update`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -216,8 +216,8 @@ paths:
   /api/admin/users/{id}/deactivate:
     post:
       tags: [Administradores]
-      summary: Desativa o administrador e revoga as sessões
-      description: "409 cannot_modify_self ou last_super_admin. Permissão: `admin::settings.users.update`."
+      summary: Desativa o administrador
+      description: "O acesso é cortado na próxima requisição. 409 `cannot_modify_self` ou `last_super_admin`; 403 `target_more_privileged`. Permissão: `admin::settings.users.update`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -227,11 +227,78 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
+  /api/admin/users/{id}/block:
+    post:
+      tags: [Administradores]
+      summary: Bloqueia o administrador
+      description: "Bloqueado, perde o acesso na próxima requisição (`account_disabled`) mas mantém as roles. 409 `cannot_modify_self` ou `last_super_admin`; 403 `target_more_privileged`. Permissão: `admin::settings.users.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/users/{id}/unblock:
+    post:
+      tags: [Administradores]
+      summary: Desbloqueia o administrador
+      description: "403 `target_more_privileged` se o administrador tem permissões que o ator não possui. Permissão: `admin::settings.users.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/users/{id}/permissions:
+    get:
+      tags: [Administradores]
+      summary: Permissões efetivas do administrador
+      description: "As mesmas que ele recebe em `/api/admin/auth/me`, unidas entre todas as roles: `{isSuperAdmin, permissions[{action, subject, fields, conditions}]}`. Permissão: `admin::settings.users.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
   /api/admin/users/{id}/roles:
+    put:
+      tags: [Administradores]
+      summary: Substitui o conjunto de roles do administrador
+      description: |
+        Libera o acesso de quem aguarda liberação (`awaiting`) e edita as roles de uma vez. Só Super Admin concede ou retira a
+        role Super Admin (403); o último Super Admin ativo não a perde (409). Quem não é Super Admin só atribui roles cujas
+        permissões possui (403 `privilege_escalation`), não altera a própria conta (409 `cannot_modify_self`) nem a de quem tem
+        mais poder (403 `target_more_privileged`). Permissão: `admin::settings.users.update`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roleIds]
+              properties:
+                roleIds: {type: array, minItems: 1, items: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
     post:
       tags: [Administradores]
       summary: Atribui roles ao administrador
-      description: "Só Super Admin concede a role Super Admin (403). Permissão: `admin::settings.users.update`."
+      description: "Só Super Admin concede a role Super Admin (403). Quem não é Super Admin só atribui roles cujas permissões possui (403 `privilege_escalation`). Permissão: `admin::settings.users.update`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -270,7 +337,7 @@ paths:
     get:
       tags: [Roles de administrador]
       summary: Lista roles com a contagem de administradores
-      description: "Permissão: `admin::settings.roles.read`."
+      description: "Permissão: `admin::settings.roles.read` ou `admin::settings.users.read` (alimenta o seletor de roles dos administradores). As permissões de cada role só vêm no detalhe, que exige `roles.read`."
       security: [{adminBearer: []}]
       responses:
         "200": {description: OK}
@@ -349,7 +416,7 @@ paths:
     put:
       tags: [Roles de administrador]
       summary: Substitui, em transação, todas as permissões da role
-      description: "Valida ações, campos e condições contra os registros. Super Admin é imutável (409). Invalida o cache de permissões. Permissão: `admin::settings.roles.update`."
+      description: "Valida ações, campos e condições contra os registros. Super Admin é imutável (409). Quem não é Super Admin só concede ou amplia permissões que possui (403 `privilege_escalation`, com `details.permissions`) e não altera uma role que possui (409 `cannot_modify_own_role`). Invalida o cache de permissões. Permissão: `admin::settings.roles.update`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -383,7 +450,7 @@ paths:
     post:
       tags: [Roles de administrador]
       summary: Duplica a role (nome com sufixo, descrição e permissões)
-      description: "Permissão: `admin::settings.roles.create`."
+      description: "Quem não é Super Admin só duplica roles cujas permissões possui (403 `privilege_escalation`). Permissão: `admin::settings.roles.create`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -397,7 +464,7 @@ paths:
     get:
       tags: [Catálogo]
       summary: Ações registradas, agrupadas por categoria
-      description: "Base da tela de permissões. Cada ação informa suporte a campos, condições e locales, e os campos configuráveis (availableFields). Permissão: `admin::settings.roles.read`."
+      description: "Base da tela de permissões. Cada ação informa suporte a campos, condições e locales, e os campos configuráveis (availableFields). Permissão: `admin::settings.roles.read`, `admin::settings.api-tokens.read` ou `admin::plugin.enduser-roles.read` (alimentam os seletores de ações de tokens e de roles de usuário final)."
       security: [{adminBearer: []}]
       parameters:
         - {name: domain, in: query, schema: {type: string, enum: [admin, api]}, description: "Padrão admin"}
@@ -415,11 +482,90 @@ paths:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
+  /api/admin/departments:
+    get:
+      tags: [Departamentos]
+      summary: Lista departamentos com a contagem de administradores e documentos
+      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read` (alimenta o seletor de departamento dos administradores). Resposta: `[{id, name, userCount, documentCount}]`."
+      security: [{adminBearer: []}]
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Departamentos]
+      summary: Cria um departamento
+      description: "Nome único (409 `department_name_taken`). Permissão: `admin::settings.departments.create`."
+      security: [{adminBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, maxLength: 100}
+      responses:
+        "201": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/departments/{id}:
+    get:
+      tags: [Departamentos]
+      summary: Detalha um departamento
+      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    put:
+      tags: [Departamentos]
+      summary: Renomeia um departamento
+      description: "Permissão: `admin::settings.departments.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, maxLength: 100}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Departamentos]
+      summary: Exclui um departamento
+      description: "Recusado com 409 `department_in_use` (`details.userCount`, `details.documentCount`) se houver administradores ou documentos vinculados. Permissão: `admin::settings.departments.delete`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
   /api/admin/audit-logs:
     get:
       tags: [Auditoria]
       summary: Lista registros de auditoria (filtros por ator, ação, entidade e período)
-      description: "Alterações trazem payload.before e payload.after. Permissão: `admin::settings.audit-logs.read`."
+      description: "Alterações trazem payload.before e payload.after. `actorName` é o nome atual do administrador (nulo para outros atores ou administrador excluído). Permissão: `admin::settings.audit-logs.read`."
       security: [{adminBearer: []}]
       parameters:
         - {name: actorType, in: query, schema: {type: string}}
@@ -597,7 +743,7 @@ paths:
     get:
       tags: [Roles de usuário final]
       summary: Lista roles com a contagem de usuários
-      description: "Permissão: `admin::plugin.enduser-roles.read`."
+      description: "Permissão: `admin::plugin.enduser-roles.read`, `admin::plugin.enduser-users.read` ou `admin::plugin.enduser-settings.read` (alimenta os seletores de role dos usuários finais e das configurações)."
       security: [{adminBearer: []}]
       responses:
         "200": {description: OK}

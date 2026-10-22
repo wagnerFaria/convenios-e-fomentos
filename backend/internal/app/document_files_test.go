@@ -205,12 +205,10 @@ func TestArquivosPermissoesPorRegistro(t *testing.T) {
 func TestArquivosExcluirDocumentoApagaObjetos(t *testing.T) {
 	e, boss := setup(t)
 	doc := e.docID(boss, map[string]any{"titulo": "Edital"})
-	var keys []string
 	for i := 0; i < 2; i++ {
 		id, key := e.startUpload(boss, doc, "a.pdf", pdfType, 10)
 		e.store.Put(key, pdfType, []byte("%PDF-1.4"))
 		require.Equal(t, 200, e.do("POST", filesPath(doc, "/", id, "/confirm"), nil, boss).Status)
-		keys = append(keys, key)
 	}
 	require.Equal(t, 2, e.store.Len())
 	require.Equal(t, 204, e.do("DELETE", "/api/admin/content/documents/"+doc, nil, boss).Status)

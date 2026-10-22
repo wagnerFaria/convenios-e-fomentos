@@ -22,6 +22,7 @@ func RegisterCoreActions(r *Registry) {
 	all := []string{"create", "read", "update", "delete"}
 	r.MustRegister(crud("settings.users", "administradores", CategorySettings, all...)...)
 	r.MustRegister(crud("settings.roles", "roles de administrador", CategorySettings, all...)...)
+	r.MustRegister(crud("settings.departments", "departamentos", CategorySettings, all...)...)
 	r.MustRegister(crud("settings.api-tokens", "tokens de API", CategorySettings, all...)...)
 	r.MustRegister(Action{ID: "admin::settings.api-tokens.regenerate", Domain: DomainAdmin, Category: CategorySettings, Name: "Regenerar tokens de API", Resource: "settings.api-tokens"})
 	r.MustRegister(crud("settings.email-templates", "templates de e-mail", CategorySettings, "read", "update")...)
