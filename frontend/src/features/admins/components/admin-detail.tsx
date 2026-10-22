@@ -15,6 +15,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { FieldGroup } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCan, useSession } from '@/features/auth/session-provider';
+import { AuditHistory } from '@/features/audit-logs/components/audit-history';
+import { auditActions } from '@/features/audit-logs/api/types';
 import { PermissionSummary } from '@/features/roles/components/permission-summary';
 import { ApiError } from '@/lib/api/errors';
 import { errorMessage } from '@/lib/errors';
@@ -353,6 +355,18 @@ export function AdminDetail({ id }: { id: string }) {
           )}
         </CardContent>
       </Card>
+
+      {can(auditActions.read) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Histórico</CardTitle>
+            <CardDescription>Últimas alterações nesta conta.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AuditHistory entity='admin' entityId={a.id} />
+          </CardContent>
+        </Card>
+      )}
 
       <AlertModal
         isOpen={confirm !== null}

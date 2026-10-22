@@ -14,6 +14,8 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldGroup } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
+import { auditActions } from '@/features/audit-logs/api/types';
+import { AuditHistory } from '@/features/audit-logs/components/audit-history';
 import { useCan } from '@/features/auth/session-provider';
 import { ApiError } from '@/lib/api/errors';
 import { errorMessage } from '@/lib/errors';
@@ -183,6 +185,18 @@ export function RoleDetail({ id }: { id: string }) {
           )}
         </CardContent>
       </Card>
+
+      {can(auditActions.read) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Histórico</CardTitle>
+            <CardDescription>Últimas alterações neste perfil.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AuditHistory entity='admin_role' entityId={r.id} />
+          </CardContent>
+        </Card>
+      )}
 
       <AlertModal
         isOpen={confirmDelete}
