@@ -54,8 +54,15 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
   ativo é protegido por lock consultivo (testado com requisições concorrentes).
 - ✅ Cada rota de `/admin` tem teste de 401 (sem token) e 403 (sem permissão).
 - 🔧 Um teste unitário revelou (Fase 4) que `fields: []` ("nenhum campo") virava `null` ("todos os campos") ao normalizar — corrigido, com regressão.
-- ⚠️ Quem tem `settings.roles.update` pode editar a própria role e se conceder mais permissões (exceto a role Super Admin, imutável).
-  É o comportamento esperado de um RBAC administrável, como no Strapi: conceda essa permissão com critério.
+- ✅ **Sem escalonamento de privilégio** (quem não é Super Admin): só concede ou amplia permissões que possui (ação, campos e condições:
+  `authz.Covers`/`Widened`, 403 `privilege_escalation` com a lista do que faltou); só atribui, pré-cadastra ou duplica roles cujas permissões
+  cobre; não altera as permissões de uma role que possui (409 `cannot_modify_own_role`) nem os perfis ou a lotação da própria conta
+  (409 `cannot_modify_self`); e não age sobre administradores com permissões que não possui (403 `target_more_privileged`). Remover
+  permissões é sempre permitido. Cada regra tem teste de integração (`TestEscalonamentoDePrivilegioEBloqueado`) e unitário (`covers_test.go`).
+  Tokens de API ficam fora: concedem o domínio `api::` (API pública), não o `admin::`.
+- ⚠️ Os seletores do painel liberam leituras auxiliares a quem administra o recurso (lista de departamentos e de roles com `users.read`,
+  catálogo de ações da API com `api-tokens.read`/`enduser-roles.read`, lista de roles públicas com `enduser-users.read`/`enduser-settings.read`).
+  Elas expõem só nomes e contagens; as permissões de cada role continuam exigindo `settings.roles.read`.
 - ⚠️ Public e Authenticated não herdam permissões uma da outra (como no Strapi); revisar ao configurar a API pública.
 
 ### Entrada e saída
@@ -129,11 +136,11 @@ Convenção: ✅ verificado (há teste ou verificação automatizada) · 🔧 co
 **Funcionalidades fora do escopo definido** (decisões já documentadas no README):
 - ⏳ OAuth/OIDC para **usuários finais**: estrutura pronta (`end_users.provider`, `enduser.Provider`); nenhum provedor implementado (os administradores já usam o MT Login).
 - ⏳ i18n/locales: preparado (`SupportsLocales`, `properties`), sem conteúdo localizado.
-- ⏳ Frontend administrativo.
+- ✅ Frontend administrativo: usuários, perfis e permissões, departamentos, auditoria, tokens de API e portal público.
 
 **Melhorias identificadas (nenhuma bloqueia o uso):**
 - ⏳ Remover `admins.password_hash` e a tabela `admin_sessions` (sem uso desde o login pelo MT Login) numa migração, depois de validado o novo fluxo.
-- ⏳ Bloquear/desbloquear administradores por endpoint (a coluna `blocked` existe e é respeitada; a API cobre ativar/desativar).
+- ✅ Bloquear/desbloquear administradores (`POST /admin/users/{id}/block|unblock`).
 - ⏳ Opção para desabilitar ou servir localmente o `/api/docs`.
 - ⏳ Fila de e-mails; retenção da auditoria; MFA para administradores.
 - ⏳ Pipeline de CI executando `make lint`, `make test`, `make cover-authz` e `govulncheck`.

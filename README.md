@@ -134,9 +134,18 @@ preenchidos a partir do MT Login e você já entra como Super Admin.
 
 ### Os demais administradores
 
+Tudo isso é feito no painel, em **Administração → Usuários** (`/dashboard/administracao/usuarios`):
+
 - **Pré-cadastro:** um administrador com a permissão `admin::settings.users.create` cadastra o **CPF** e as roles
-  (`POST /api/admin/users`); no primeiro acesso da pessoa o registro é completado e já vem com as roles. Até lá o status é `pending`.
-- **Criação automática:** quem entra sem pré-cadastro vira administrador ativo sem roles (veja acima) e pode receber roles depois.
+  (botão **Pré-cadastrar**, ou `POST /api/admin/users`); no primeiro acesso da pessoa o registro é completado e já vem com as roles.
+  Até lá o status é *Pré-cadastrado* (`pending`).
+- **Aguardando liberação:** quem entra sem pré-cadastro vira administrador ativo sem roles (status `awaiting`). Eles aparecem num aviso
+  no topo da lista, com o botão **Liberar acesso** (define as roles e o departamento de uma vez, `PUT /api/admin/users/{id}/roles`).
+- **Perfis e permissões:** **Administração → Perfis e permissões** monta as roles marcando ações, com restrição por campos e por
+  condições (é o criador, mesma role do criador, mesmo departamento). Quem não é Super Admin só concede permissões que possui, não altera
+  as roles que tem nem a própria conta, e não age sobre quem tem mais poder (veja [`backend/SEGURANCA.md`](backend/SEGURANCA.md)).
+- Também no painel: **Departamentos**, **Auditoria** (com o antes/depois de cada alteração), **Tokens de API** e o grupo **Portal público**
+  (usuários finais, perfis públicos, configurações e templates de e-mail).
 - O seed ainda cria, **só em desenvolvimento**, um administrador de exemplo por role (`super@`, `editor@`, `author@`,
   `revisor@dev.local`) com **CPFs fictícios**: servem para ver as listagens, mas não conseguem entrar (não existem no MT Login).
   O usuário final `usuario@dev.local` continua tendo senha, que aparece no log do seed apenas na primeira execução.

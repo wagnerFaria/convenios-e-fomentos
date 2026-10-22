@@ -1,179 +1,89 @@
-# Simplified Navigation RBAC System
+# Navegação e permissões (RBAC)
 
-## Overview
+A visibilidade de menus e botões segue as **permissões efetivas** do administrador logado. É só experiência de uso: a autorização real
+é sempre do backend, que responde 403 a qualquer ação sem permissão.
 
-This document explains the fully client-side RBAC (Role-Based Access Control) system for navigation items.
+## De onde vêm as permissões
 
-**Key Insight**: Navigation visibility is UX only, not security. We can check everything client-side using Clerk's hooks!
+1. O layout do dashboard (`src/app/dashboard/layout.tsx`) chama `getSession()` (`src/lib/auth/session.ts`), que consulta
+   `GET /api/admin/auth/me` uma vez por requisição.
+2. A resposta (`AdminMe`, em `src/lib/api/types.ts`) traz `isSuperAdmin`, as `roles` e as `permissions` já unidas entre todas as roles:
+   `{ action, subject, fields, conditions }`.
+3. O `SessionProvider` (`src/features/auth/session-provider.tsx`) repassa isso ao cliente.
+4. Quem não é Super Admin e não tem nenhuma permissão vê "Aguardando liberação" em vez do painel.
 
-## Architecture
+As ações têm o formato `admin::<recurso>.<verbo>` (ex.: `admin::settings.users.read`, `admin::content.document.update`). O catálogo
+completo está em `GET /api/admin/catalog/actions`.
 
-### Core Files
+## No cliente: `useCan` e `<Can>`
 
-1. **`src/hooks/use-nav.ts`** - Single hook that handles all filtering logic (fully client-side)
-2. **`src/types/index.ts`** - Type definitions with `access` property
+```tsx
+const can = useCan();                       // Super Admin sempre passa
+{can('admin::settings.users.create') && <NewAdminDialog />}
 
-### Why Client-Side?
+<Can action='admin::settings.roles.delete'>
+  <Button>Excluir</Button>
+</Can>
+```
 
-- **Navigation visibility is UX only** - Users can't bypass security by seeing/hiding nav items
-- **Clerk provides all data client-side** - `useOrganization()` gives us `membership.permissions` and `membership.role`
-- **Zero server calls** - Instant filtering, no loading states, no UI flashing
-- **Better performance** - No network latency, no async complexity
+`useCan` só confere a **ação**; campos e condições não são avaliados no cliente (o backend filtra e recusa).
 
-**Note**: For actual security (API routes, server actions, page protection), always use server-side checks.
+## Menu lateral e Cmd+K
 
-## Performance Characteristics
+Cada item de `src/config/nav-config.ts` pode exigir uma ação:
 
-### All Checks Are Synchronous
-
-✅ **requireOrg**: Client-side check using `useOrganization()`  
-✅ **permission**: Client-side check using `membership.permissions` array  
-✅ **role**: Client-side check using `membership.role`  
-⚠️ **plan/feature**: Requires server-side check (see below)
-
-### Zero Server Calls
-
-- All navigation filtering happens synchronously
-- No loading states
-- No UI flashing
-- Instant results
-
-## Usage
-
-### In `nav-config.ts`
-
-```typescript
+```ts
 {
-  title: 'Teams',
-  url: '/dashboard/workspaces/team',
-  icon: 'userPen',
-  // Simple: requireOrg (client-side check, instant)
-  access: { requireOrg: true }
-}
-
-{
-  title: 'Admin Panel',
-  url: '/dashboard/admin',
-  icon: 'settings',
-  // All client-side checks - instant!
-  access: {
-    requireOrg: true,
-    permission: 'org:admin:manage',  // Client-side from membership.permissions
-    role: 'admin'  // Client-side from membership.role
+  title: 'Perfis e permissões',
+  url: '/dashboard/administracao/perfis',
+  icon: 'shield',
+  access: { permission: 'admin::settings.roles.read' },
+  items: []
 }
 ```
 
-### In Components
+`useFilteredNavGroups` / `useFilteredNavItems` (`src/hooks/use-nav.ts`) escondem os itens sem permissão e os grupos que ficam vazios.
+Os tipos estão em `src/types/index.ts` (`NavItem.access`).
 
-```typescript
-import { useFilteredNavItems } from '@/hooks/use-nav';
+## Páginas
 
-function MyComponent() {
-  const filteredItems = useFilteredNavItems(navItems);
-  // filteredItems is automatically filtered based on RBAC
+Esconder o menu não protege a rota. As páginas de administração conferem a permissão no servidor e mostram um aviso em português:
+
+```tsx
+export default async function UsuariosPage() {
+  return (
+    <PageContainer access={await hasPermission(adminActions.read)} pageTitle='Usuários'>
+      …
+    </PageContainer>
+  );
 }
 ```
 
-### Plan/Feature Checks
+- `hasPermission` (`src/lib/auth/access.ts`) usa a mesma sessão da requisição.
+- `PageContainer` mostra `AccessDenied` (`src/components/access-denied.tsx`) quando `access` é `false`.
+- Os dados continuam protegidos pela API: sem permissão a consulta devolve 403, e o `QueryError` (`src/components/query-error.tsx`)
+  mostra "Você não tem permissão para ver …".
 
-Plans and features require Clerk's `has()` function which is server-side only. Options:
+## Constantes de ação
 
-1. **Store in organization metadata** (recommended for navigation):
+Cada feature declara suas ações em `api/types.ts` (ex.: `adminActions`, `roleActions`, `departmentActions`, `tokenActions`,
+`endUserActions`), para não espalhar strings pela interface.
 
-   ```typescript
-   // In your organization setup
-   organization.publicMetadata.plan = 'pro';
+## Leituras auxiliares
 
-   // In nav-config.ts
-   access: {
-     requireOrg: true,
-     // Check metadata instead of plan
-   }
-   ```
+Alguns seletores precisam de listas que pertencem a outro recurso. O backend as libera a quem administra o recurso que as usa:
 
-2. **Show item, protect at page level** (current approach):
-   - Navigation item is shown
-   - Page component checks server-side and redirects/shows error if needed
+| Lista | Também liberada para |
+|---|---|
+| `GET /admin/departments` | `settings.users.read` |
+| `GET /admin/roles` (só nomes e contagens) | `settings.users.read` |
+| `GET /admin/catalog/actions` | `settings.api-tokens.read`, `plugin.enduser-roles.read` |
+| `GET /admin/end-user-roles` | `plugin.enduser-users.read`, `plugin.enduser-settings.read` |
 
-3. **Use server action** (if you really need it):
-   - Only for navigation items that absolutely need plan/feature checks
-   - Most navigation items won't need this
+As permissões de cada role (`GET /admin/roles/{id}`) e o catálogo de condições continuam exigindo `admin::settings.roles.read`.
 
-## Scalability
+## Editor de permissões
 
-### Adding New Items
-
-Just add to `nav-config.ts`:
-
-```typescript
-{
-  title: 'New Feature',
-  url: '/dashboard/new',
-  icon: 'star',
-  access: { plan: 'pro' }  // That's it!
-}
-```
-
-The system automatically:
-
-- Filters it in sidebar
-- Filters it in kbar
-- Handles async checks if needed
-- Handles sync checks immediately
-
-### Adding New Access Types
-
-1. Add to `PermissionCheck` interface in `src/app/actions/rbac.ts`
-2. Add check logic in `checkAccess()` function
-3. Update `use-nav.ts` to handle the new type
-
-## Comparison: Before vs After
-
-### Before (Overcomplicated)
-
-- 4 files with complex logic
-- Multiple hooks and utilities
-- Unclear data flow
-- Potential for bugs
-
-### After (Simplified)
-
-- 1 main hook file
-- Clear, linear logic
-- Easy to understand
-- Easy to maintain
-
-## Best Practices
-
-1. **Use `requireOrg: true` for simple cases** - It's instant and requires no server call
-2. **Combine checks when possible** - `{ requireOrg: true, permission: '...' }` is more efficient than separate checks
-3. **Avoid unnecessary checks** - Don't add `access` if the item should always be visible
-
-## Migration from Old System
-
-The old `visible` function still works for backward compatibility:
-
-```typescript
-// Old way (still works)
-visible: (context) => !!context?.organization;
-
-// New way (recommended)
-access: {
-  requireOrg: true;
-}
-```
-
-## Future Improvements
-
-Potential optimizations if needed:
-
-1. Cache permission checks (e.g., React Query)
-2. Prefetch permissions on app load
-3. Optimistic UI updates
-
-But for now, the current implementation is:
-
-- ✅ Simple
-- ✅ Fast
-- ✅ Scalable
-- ✅ Maintainable
+`src/features/roles/components/permission-editor.tsx` espelha as regras anti-escalonamento do backend: o Super Admin é somente leitura, roles
+que o próprio usuário possui são somente leitura e permissões que ele não tem não podem ser adicionadas. O backend é a garantia: se
+recusar (`privilege_escalation`), a tela lista o que não pôde ser concedido.
