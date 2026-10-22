@@ -23,3 +23,19 @@ export const sortCategories = <T extends { category: string }>(groups: T[]): T[]
     (a, b) =>
       (categoryOrder.indexOf(a.category) + 1 || 99) - (categoryOrder.indexOf(b.category) + 1 || 99)
   );
+
+/** Rótulos dos recursos do catálogo; os demais aparecem pelo identificador. */
+export const resourceLabels: Record<string, string> = {
+  document: 'Documentos',
+  'settings.users': 'Administradores',
+  'settings.roles': 'Perfis de administrador',
+  'settings.departments': 'Departamentos',
+  'settings.api-tokens': 'Tokens de API',
+  'settings.email-templates': 'Templates de e-mail',
+  'settings.audit-logs': 'Auditoria',
+  'plugin.enduser-users': 'Usuários finais',
+  'plugin.enduser-roles': 'Perfis de usuário final',
+  'plugin.enduser-settings': 'Configurações de usuários finais'
+};
+
+export const resourceLabel = (resource: string) => resourceLabels[resource] ?? resource;
