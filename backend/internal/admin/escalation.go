@@ -54,13 +54,9 @@ func (s *Service) ensureCanManage(ctx context.Context, q *db.Queries, actor Acto
 		if t.ID == actor.ID {
 			continue
 		}
-		roles, err := q.ListRolesForAdmin(ctx, t.ID)
+		target, err := s.subjectOf(ctx, q, t)
 		if err != nil {
 			return err
-		}
-		target := authz.Subject{Type: authz.SubjectAdmin, ID: t.ID, DepartmentID: t.DepartmentID}
-		for _, r := range roles {
-			target.Roles = append(target.Roles, authz.Role{ID: r.ID, Code: r.Code})
 		}
 		missing, err := s.engine.CoversSubject(ctx, actor.Subject, target)
 		if err != nil {
@@ -71,6 +67,19 @@ func (s *Service) ensureCanManage(ctx context.Context, q *db.Queries, actor Acto
 		}
 	}
 	return nil
+}
+
+// subjectOf monta o sujeito do motor de permissões para um administrador qualquer.
+func (s *Service) subjectOf(ctx context.Context, q *db.Queries, a db.Admin) (authz.Subject, error) {
+	roles, err := q.ListRolesForAdmin(ctx, a.ID)
+	if err != nil {
+		return authz.Subject{}, err
+	}
+	subj := authz.Subject{Type: authz.SubjectAdmin, ID: a.ID, DepartmentID: a.DepartmentID}
+	for _, r := range roles {
+		subj.Roles = append(subj.Roles, authz.Role{ID: r.ID, Code: r.Code})
+	}
+	return subj, nil
 }
 
 // ownsRole informa se o ator possui a role.

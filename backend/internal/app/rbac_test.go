@@ -74,7 +74,8 @@ func TestRotasExigemAutenticacaoEPermissao(t *testing.T) {
 	routes := []struct{ method, path string }{
 		{"GET", "/api/admin/users"}, {"GET", "/api/admin/users/" + id}, {"PUT", "/api/admin/users/" + id}, {"DELETE", "/api/admin/users/" + id},
 		{"POST", "/api/admin/users/batch-delete"}, {"POST", "/api/admin/users/" + id + "/activate"}, {"POST", "/api/admin/users/" + id + "/deactivate"},
-		{"POST", "/api/admin/users/" + id + "/roles"}, {"DELETE", "/api/admin/users/" + id + "/roles/" + rid},
+		{"POST", "/api/admin/users/" + id + "/roles"}, {"PUT", "/api/admin/users/" + id + "/roles"}, {"DELETE", "/api/admin/users/" + id + "/roles/" + rid},
+		{"POST", "/api/admin/users/" + id + "/block"}, {"POST", "/api/admin/users/" + id + "/unblock"}, {"GET", "/api/admin/users/" + id + "/permissions"},
 		{"GET", "/api/admin/roles"}, {"POST", "/api/admin/roles"}, {"GET", "/api/admin/roles/" + rid}, {"PUT", "/api/admin/roles/" + rid},
 		{"DELETE", "/api/admin/roles/" + rid}, {"PUT", "/api/admin/roles/" + rid + "/permissions"}, {"POST", "/api/admin/roles/" + rid + "/duplicate"},
 		{"GET", "/api/admin/catalog/actions"}, {"GET", "/api/admin/catalog/conditions"}, {"GET", "/api/admin/audit-logs"},
@@ -677,4 +678,129 @@ func TestEscalonamentoDePrivilegioEBloqueado(t *testing.T) {
 		assert.Equal(t, 201, e.do("POST", "/api/admin/roles/"+e.roleID("poderoso")+"/duplicate", nil, boss).Status)
 		assert.Equal(t, 200, e.do("POST", "/api/admin/users/"+podID+"/deactivate", nil, boss).Status)
 	})
+}
+
+func TestAguardandoLiberacaoELiberacaoPorSubstituicaoDeRoles(t *testing.T) {
+	e, boss := setup(t)
+	e.mkRole("leitor", "admin::settings.users.read")
+	e.mkRole("redator", "admin::settings.audit-logs.read")
+
+	// Quem entra pelo MT Login sem pré-cadastro fica ativo, sem roles e aguardando liberação.
+	maria := e.login("maria@exemplo.com")
+	mariaID := e.adminID("maria@exemplo.com")
+	assert.Equal(t, "awaiting", e.do("GET", "/api/admin/users/"+mariaID, nil, boss).data()["status"])
+
+	// Pré-cadastrado que ainda não entrou continua pending; ana segue active.
+	require.Equal(t, 201, e.do("POST", "/api/admin/users", map[string]any{"cpf": cpfFor("pre@exemplo.com"), "roleIds": []string{e.roleID("leitor")}}, boss).Status)
+	statusOf := func(status string) []any { return e.do("GET", "/api/admin/users?status="+status, nil, boss).list() }
+	require.Len(t, statusOf("awaiting"), 1)
+	assert.Equal(t, mariaID, statusOf("awaiting")[0].(map[string]any)["id"])
+	assert.Len(t, statusOf("pending"), 1)
+	assert.Len(t, statusOf("active"), 1, "só a Ana; quem não tem role não é active")
+
+	// Liberar: define o conjunto de roles. Vale na requisição seguinte.
+	r := e.do("PUT", "/api/admin/users/"+mariaID+"/roles", map[string]any{"roleIds": []string{e.roleID("leitor"), e.roleID("redator")}}, boss)
+	require.Equal(t, 200, r.Status, r.Body)
+	assert.Equal(t, "active", r.data()["status"])
+	assert.Len(t, r.data()["roles"], 2)
+	assert.Empty(t, statusOf("awaiting"))
+	assert.Equal(t, 200, e.do("GET", "/api/admin/users", nil, maria).Status)
+
+	// O conjunto é substituído: roles ausentes saem.
+	r = e.do("PUT", "/api/admin/users/"+mariaID+"/roles", map[string]any{"roleIds": []string{e.roleID("redator")}}, boss)
+	require.Equal(t, 200, r.Status)
+	assert.Len(t, r.data()["roles"], 1)
+	assert.Equal(t, 403, e.do("GET", "/api/admin/users", nil, maria).Status)
+
+	// Validações.
+	assert.Equal(t, 422, e.do("PUT", "/api/admin/users/"+mariaID+"/roles", map[string]any{"roleIds": []string{}}, boss).Status)
+	assert.Equal(t, 422, e.do("PUT", "/api/admin/users/"+mariaID+"/roles", map[string]any{"roleIds": []string{uuid.NewString()}}, boss).Status)
+	assert.Equal(t, 404, e.do("PUT", "/api/admin/users/"+uuid.NewString()+"/roles", map[string]any{"roleIds": []string{e.roleID("leitor")}}, boss).Status)
+	assert.Equal(t, 404, e.do("GET", "/api/admin/users/"+uuid.NewString()+"/permissions", nil, boss).Status)
+}
+
+func TestSubstituirRolesRespeitaSuperAdminEEscalonamento(t *testing.T) {
+	e, boss := setup(t)
+	e.mkRole("gestor", usersAll...)
+	e.mkRole("poderoso", "admin::settings.audit-logs.read")
+	gestor, _ := e.newAdmin(boss, "gestor@exemplo.com", "gestor")
+	e.login("maria@exemplo.com")
+	maria := e.adminID("maria@exemplo.com")
+	ana := e.adminID("ana@exemplo.com")
+	put := func(token, id string, roles ...string) resp {
+		return e.do("PUT", "/api/admin/users/"+id+"/roles", map[string]any{"roleIds": roles}, token)
+	}
+
+	// Só Super Admin concede a role Super Admin; quem não é, também não cobre o que não tem.
+	assert.Equal(t, 403, put(gestor, maria, e.roleID("super-admin")).Status)
+	assert.Equal(t, "privilege_escalation", put(gestor, maria, e.roleID("poderoso")).errCode())
+	assert.Equal(t, 200, put(gestor, maria, e.roleID("gestor")).Status, "o gestor tem tudo o que a role gestor concede")
+
+	// O último Super Admin ativo não perde a role.
+	r := put(boss, maria, e.roleID("super-admin"))
+	require.Equal(t, 200, r.Status, r.Body)
+	r = e.do("PUT", "/api/admin/users/"+ana+"/roles", map[string]any{"roleIds": []string{e.roleID("gestor")}}, e.token("maria@exemplo.com"))
+	require.Equal(t, 200, r.Status, "agora há dois Super Admins")
+	// Resta só a Maria como Super Admin: ela não pode se rebaixar (conta própria é livre para Super Admin, mas protegida pelo último).
+	r = put(e.token("maria@exemplo.com"), maria, e.roleID("gestor"))
+	assert.Equal(t, 409, r.Status)
+	assert.Equal(t, "last_super_admin", r.errCode())
+}
+
+func TestBloquearEDesbloquearAdministrador(t *testing.T) {
+	e, boss := setup(t)
+	e.mkRole("gestor", usersAll...)
+	e.mkRole("redator")
+	gestor, gestorID := e.newAdmin(boss, "gestor@exemplo.com", "gestor")
+	bia, biaID := e.newAdmin(boss, "bia@exemplo.com", "redator")
+	ana := e.adminID("ana@exemplo.com")
+
+	r := e.do("POST", "/api/admin/users/"+biaID+"/block", nil, gestor)
+	require.Equal(t, 200, r.Status, r.Body)
+	assert.Equal(t, "blocked", r.data()["status"])
+	assert.Len(t, r.data()["roles"], 1, "bloquear mantém as roles")
+	me := e.do("GET", "/api/admin/auth/me", nil, bia)
+	assert.Equal(t, 403, me.Status)
+	assert.Equal(t, "account_disabled", me.errCode())
+	assert.Len(t, e.do("GET", "/api/admin/users?status=blocked", nil, boss).list(), 1)
+
+	r = e.do("POST", "/api/admin/users/"+biaID+"/unblock", nil, gestor)
+	require.Equal(t, 200, r.Status)
+	assert.Equal(t, "active", r.data()["status"])
+	assert.Equal(t, 200, e.do("GET", "/api/admin/auth/me", nil, bia).Status)
+
+	assert.Equal(t, "cannot_modify_self", e.do("POST", "/api/admin/users/"+gestorID+"/block", nil, gestor).errCode())
+	assert.Equal(t, "target_more_privileged", e.do("POST", "/api/admin/users/"+ana+"/block", nil, gestor).errCode())
+	assert.Equal(t, 404, e.do("POST", "/api/admin/users/"+uuid.NewString()+"/block", nil, boss).Status)
+
+	// Com dois Super Admins, um pode bloquear o outro; o bloqueio é auditado.
+	assert.Equal(t, 200, e.do("POST", "/api/admin/users/"+gestorID+"/roles", map[string]any{"roleIds": []string{e.roleID("super-admin")}}, boss).Status)
+	assert.Equal(t, 200, e.do("POST", "/api/admin/users/"+ana+"/block", nil, gestor).Status)
+	logs := e.do("GET", "/api/admin/audit-logs?action=admin.block", nil, gestor)
+	assert.EqualValues(t, 2, logs.meta()["total"])
+}
+
+func TestPermissoesEfetivasDeOutroAdministrador(t *testing.T) {
+	e, boss := setup(t)
+	e.mkRole("leitor", "admin::settings.users.read")
+	e.grant("leitor", "admin::content.document.read", `["title"]`, `["admin::is-creator"]`)
+	_, leitorID := e.newAdmin(boss, "leitor@exemplo.com", "leitor")
+	ana := e.adminID("ana@exemplo.com")
+
+	r := e.do("GET", "/api/admin/users/"+leitorID+"/permissions", nil, boss)
+	require.Equal(t, 200, r.Status, r.Body)
+	assert.Equal(t, false, r.data()["isSuperAdmin"])
+	perms := r.data()["permissions"].([]any)
+	require.Len(t, perms, 2)
+	byAction := map[string]map[string]any{}
+	for _, p := range perms {
+		byAction[p.(map[string]any)["action"].(string)] = p.(map[string]any)
+	}
+	doc := byAction["admin::content.document.read"]
+	assert.Equal(t, []any{"title"}, doc["fields"])
+	assert.Equal(t, []any{"admin::is-creator"}, doc["conditions"])
+
+	su := e.do("GET", "/api/admin/users/"+ana+"/permissions", nil, boss)
+	assert.Equal(t, true, su.data()["isSuperAdmin"])
+	assert.NotEmpty(t, su.data()["permissions"])
 }

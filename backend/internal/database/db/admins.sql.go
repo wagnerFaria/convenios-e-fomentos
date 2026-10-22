@@ -345,6 +345,20 @@ func (q *Queries) SetAdminActive(ctx context.Context, arg SetAdminActiveParams) 
 	return err
 }
 
+const setAdminBlocked = `-- name: SetAdminBlocked :exec
+UPDATE admins SET blocked = $2, updated_at = now() WHERE id = $1
+`
+
+type SetAdminBlockedParams struct {
+	ID      uuid.UUID `json:"id"`
+	Blocked bool      `json:"blocked"`
+}
+
+func (q *Queries) SetAdminBlocked(ctx context.Context, arg SetAdminBlockedParams) error {
+	_, err := q.db.Exec(ctx, setAdminBlocked, arg.ID, arg.Blocked)
+	return err
+}
+
 const syncAdminFromLogin = `-- name: SyncAdminFromLogin :exec
 UPDATE admins SET first_name = $2, last_name = $3, email = $4, last_login_at = now(), updated_at = now()
 WHERE id = $1
