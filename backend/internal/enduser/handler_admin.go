@@ -12,13 +12,15 @@ import (
 
 // AdminHandler expõe a administração de usuários finais, roles, configurações e templates.
 type AdminHandler struct {
-	svc   *Service
-	guard func(action string) func(http.Handler) http.Handler
+	svc      *Service
+	guard    func(action string) func(http.Handler) http.Handler
+	guardAny func(actions ...string) func(http.Handler) http.Handler
 }
 
-// NewAdminHandler cria o handler; guard autentica o administrador e exige a permissão.
-func NewAdminHandler(svc *Service, guard func(action string) func(http.Handler) http.Handler) *AdminHandler {
-	return &AdminHandler{svc: svc, guard: guard}
+// NewAdminHandler cria o handler; guard autentica o administrador e exige a permissão, e guardAny
+// exige uma entre várias.
+func NewAdminHandler(svc *Service, guard func(action string) func(http.Handler) http.Handler, guardAny func(actions ...string) func(http.Handler) http.Handler) *AdminHandler {
+	return &AdminHandler{svc: svc, guard: guard, guardAny: guardAny}
 }
 
 func actor(r *http.Request) AdminActor {
@@ -37,7 +39,8 @@ func idParam(r *http.Request) (uuid.UUID, error) {
 // Routes registra as rotas /admin/end-user-roles, /admin/end-users, /admin/end-user-settings e /admin/email-templates.
 func (h *AdminHandler) Routes(r chi.Router) {
 	g := h.guard
-	r.With(g("admin::plugin.enduser-roles.read")).Get("/admin/end-user-roles", h.listRoles)
+	// A lista de roles também alimenta o seletor de role dos usuários finais e o da role padrão nas configurações.
+	r.With(h.guardAny("admin::plugin.enduser-roles.read", "admin::plugin.enduser-users.read", "admin::plugin.enduser-settings.read")).Get("/admin/end-user-roles", h.listRoles)
 	r.With(g("admin::plugin.enduser-roles.create")).Post("/admin/end-user-roles", h.createRole)
 	r.With(g("admin::plugin.enduser-roles.read")).Get("/admin/end-user-roles/{id}", h.getRole)
 	r.With(g("admin::plugin.enduser-roles.update")).Put("/admin/end-user-roles/{id}", h.updateRole)

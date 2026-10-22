@@ -611,3 +611,18 @@ func TestLimiteDeRequisicoesNaAPIPublica(t *testing.T) {
 	}
 	assert.Equal(t, 429, e.do("POST", "/api/auth/forgot-password", map[string]any{"email": "a@exemplo.com"}, "").Status)
 }
+
+func TestListagemDeRolesPublicasAbertaAosSeletores(t *testing.T) {
+	e, boss := setup(t)
+	e.mkRole("usuarios", "admin::plugin.enduser-users.read")
+	e.mkRole("config", "admin::plugin.enduser-settings.read")
+	e.mkRole("vazio")
+	usuarios, _ := e.newAdmin(boss, "usuarios@exemplo.com", "usuarios")
+	config, _ := e.newAdmin(boss, "config@exemplo.com", "config")
+	vazio, _ := e.newAdmin(boss, "vazio@exemplo.com", "vazio")
+
+	assert.Equal(t, 200, e.do("GET", "/api/admin/end-user-roles", nil, usuarios).Status)
+	assert.Equal(t, 200, e.do("GET", "/api/admin/end-user-roles", nil, config).Status)
+	assert.Equal(t, 403, e.do("GET", "/api/admin/end-user-roles", nil, vazio).Status)
+	assert.Equal(t, 401, e.do("GET", "/api/admin/end-user-roles", nil, "").Status)
+}

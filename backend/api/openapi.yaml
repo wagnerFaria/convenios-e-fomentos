@@ -743,7 +743,7 @@ paths:
     get:
       tags: [Roles de usuário final]
       summary: Lista roles com a contagem de usuários
-      description: "Permissão: `admin::plugin.enduser-roles.read`."
+      description: "Permissão: `admin::plugin.enduser-roles.read`, `admin::plugin.enduser-users.read` ou `admin::plugin.enduser-settings.read` (alimenta os seletores de role dos usuários finais e das configurações)."
       security: [{adminBearer: []}]
       responses:
         "200": {description: OK}

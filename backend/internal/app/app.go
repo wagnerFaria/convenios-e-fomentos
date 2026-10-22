@@ -123,7 +123,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 	tokenSvc := apitoken.NewService(pool, engine, cfg.APITokenSalt, log)
 	identifier := &enduser.Identifier{Svc: endUserSvc, Engine: engine, Tokens: tokenSvc}
 	endUserHandler := enduser.NewHandler(endUserSvc, identifier, cfg.RateLimitAuthPerMin)
-	endUserAdmin := enduser.NewAdminHandler(endUserSvc, adminHandler.Guard)
+	endUserAdmin := enduser.NewAdminHandler(endUserSvc, adminHandler.Guard, adminHandler.GuardAny)
 	tokenAdmin := apitoken.NewHandler(tokenSvc, adminHandler.Guard)
 	departmentAdmin := department.NewHandler(department.NewService(pool), adminHandler.Guard, adminHandler.GuardAny)
 	documentSvc := document.NewService(pool, engine)
