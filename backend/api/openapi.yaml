@@ -464,7 +464,7 @@ paths:
     get:
       tags: [Catálogo]
       summary: Ações registradas, agrupadas por categoria
-      description: "Base da tela de permissões. Cada ação informa suporte a campos, condições e locales, e os campos configuráveis (availableFields). Permissão: `admin::settings.roles.read`."
+      description: "Base da tela de permissões. Cada ação informa suporte a campos, condições e locales, e os campos configuráveis (availableFields). Permissão: `admin::settings.roles.read`, `admin::settings.api-tokens.read` ou `admin::plugin.enduser-roles.read` (alimentam os seletores de ações de tokens e de roles de usuário final)."
       security: [{adminBearer: []}]
       parameters:
         - {name: domain, in: query, schema: {type: string, enum: [admin, api]}, description: "Padrão admin"}

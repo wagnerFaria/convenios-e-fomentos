@@ -61,7 +61,8 @@ func (h *Handler) rbacRoutes(r chi.Router) {
 	r.With(h.guard("admin::settings.roles.update")).Put("/admin/roles/{id}/permissions", h.replacePermissions)
 	r.With(h.guard("admin::settings.roles.create")).Post("/admin/roles/{id}/duplicate", h.duplicateRole)
 
-	r.With(h.guard("admin::settings.roles.read")).Get("/admin/catalog/actions", h.catalogActions)
+	// O catálogo de ações também alimenta os seletores de permissões de tokens de API e de roles de usuário final.
+	r.With(h.GuardAny("admin::settings.roles.read", "admin::settings.api-tokens.read", "admin::plugin.enduser-roles.read")).Get("/admin/catalog/actions", h.catalogActions)
 	r.With(h.guard("admin::settings.roles.read")).Get("/admin/catalog/conditions", h.catalogConditions)
 }
 

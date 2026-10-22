@@ -817,3 +817,19 @@ func TestListagemDeRolesAbertaAQuemAdministraAdministradores(t *testing.T) {
 	assert.Equal(t, 401, e.do("GET", "/api/admin/roles", nil, "").Status)
 	assert.Equal(t, 403, e.do("GET", "/api/admin/roles/"+e.roleID("vazio"), nil, leitor).Status, "as permissões continuam exigindo roles.read")
 }
+
+func TestCatalogoDeAcoesAbertoAQuemUsaSeletoresDePermissao(t *testing.T) {
+	e, boss := setup(t)
+	e.mkRole("tokens", "admin::settings.api-tokens.read")
+	e.mkRole("publicos", "admin::plugin.enduser-roles.read")
+	e.mkRole("vazio")
+	tokens, _ := e.newAdmin(boss, "tokens@exemplo.com", "tokens")
+	publicos, _ := e.newAdmin(boss, "publicos@exemplo.com", "publicos")
+	vazio, _ := e.newAdmin(boss, "vazio@exemplo.com", "vazio")
+
+	for _, tok := range []string{tokens, publicos, boss} {
+		assert.Equal(t, 200, e.do("GET", "/api/admin/catalog/actions?domain=api", nil, tok).Status)
+	}
+	assert.Equal(t, 403, e.do("GET", "/api/admin/catalog/actions", nil, vazio).Status)
+	assert.Equal(t, 403, e.do("GET", "/api/admin/catalog/conditions", nil, tokens).Status, "as condições seguem exigindo roles.read")
+}
