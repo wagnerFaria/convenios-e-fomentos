@@ -3,7 +3,11 @@
 #   cp .env.example .env     # opcional: sem .env valem os padrões abaixo
 #   docker compose -f docker-compose.dev.yml up --build
 #
-#   Frontend:  http://localhost:3000        API: http://localhost:8080  (docs em /docs)
+#   Tudo entra pelo HAProxy:  http://localhost   (HAPROXY_PORT, padrão 80)
+#     /          frontend (Next.js)
+#     /api/*     API em Go (docs em /api/docs)
+#     /storage/* MinIO (API S3, URLs pré-assinadas dos documentos)
+#     /minio-console/  console do MinIO (só em desenvolvimento)
 #
 # Edite os arquivos normalmente no host: a API recompila com o air e o Next aplica HMR.
 # Toda a configuração vem de variáveis (arquivo .env na raiz ou shell); veja o .env.example.
@@ -27,9 +31,10 @@ x-api: &api
     # Padrão montado a partir de POSTGRES_*; defina DATABASE_URL para usar outro banco.
     DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}?sslmode=disable}
     # Os links de e-mail (convite, redefinição de senha) devem abrir o frontend.
-    PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${WEB_EXTERNAL_PORT:-3000}}
-    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:${WEB_EXTERNAL_PORT:-3000}}
-    # Rede padrão do Docker: o X-Forwarded-For enviado pelo Next é considerado no rate limit.
+    PUBLIC_URL: ${PUBLIC_URL:-${APP_URL:-http://localhost}}
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-${APP_URL:-http://localhost}}
+    # Rede padrão do Docker: o X-Forwarded-For enviado pelo HAProxy (e repassado pelo Next) é
+    # considerado no rate limit.
     TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
     # Login dos administradores pelo MT Login (Keycloak): a API valida o access token com o JWKS.
     # Obrigatórios: sem eles a API não sobe. O CPF vem no claim OIDC_CPF_CLAIM do token.
@@ -39,6 +44,13 @@ x-api: &api
     OIDC_CPF_CLAIM: ${OIDC_CPF_CLAIM:-preferred_username}
     # CPFs (separados por vírgula) que o seed torna Super Admin: `docker compose exec api go run ./cmd/cli seed`.
     SEED_SUPER_ADMIN_CPF: ${SEED_SUPER_ADMIN_CPF:-}
+    # Arquivos dos documentos no MinIO. A API fala com ele pela rede do Docker; o navegador usa
+    # as URLs pré-assinadas sobre STORAGE_PUBLIC_URL (mesmo domínio, prefixo /storage no HAProxy).
+    STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-minio:9000}
+    STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-${MINIO_ROOT_USER:-minioadmin}}
+    STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
+    STORAGE_BUCKET: ${STORAGE_BUCKET:-${MINIO_BUCKET:-documentos}}
+    STORAGE_PUBLIC_URL: ${STORAGE_PUBLIC_URL:-${APP_URL:-http://localhost}/storage}
     # Segredos: os padrões servem SOMENTE para desenvolvimento.
     JWT_API_SECRET: ${JWT_API_SECRET:-dev-only-api-secret-change-me-000000000000}
     API_TOKEN_SALT: ${API_TOKEN_SALT:-dev-only-api-token-salt-change-me-0000000}
@@ -82,18 +94,22 @@ services:
 
   api:
     <<: *api
-    ports:
-      - "${API_EXTERNAL_PORT:-8080}:8080"
+    # Sem porta publicada: o acesso externo é pelo HAProxy (/api).
+    expose:
+      - "8080"
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      minio-init:
         condition: service_completed_successfully
 
   web:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    ports:
-      - "${WEB_EXTERNAL_PORT:-3000}:3000"
+    # Sem porta publicada: o acesso externo é pelo HAProxy (/).
+    expose:
+      - "3000"
     volumes:
       - ./frontend:/app
       # Mantém as dependências e o cache do Next dentro do contêiner (não sobrescritos pelo host).
@@ -101,8 +117,9 @@ services:
       - web-next:/app/.next
     environment:
       # Chamadas do servidor do Next ao backend; o navegador só fala com o Next.
+      # Vai direto à API pela rede do Docker, sem passar pelo HAProxy.
       API_URL: ${API_URL:-http://api:8080}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:${WEB_EXTERNAL_PORT:-3000}}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-${APP_URL:-http://localhost}}
       # Login pelo MT Login (Authorization Code + PKCE), conduzido pelo servidor do Next.
       # A URL de retorno e a de pós-logout precisam estar cadastradas no client do Keycloak.
       MTLOGIN_AUTHORIZATION_URI: ${MTLOGIN_AUTHORIZATION_URI:-}
@@ -110,7 +127,7 @@ services:
       MTLOGIN_END_SESSION_URI: ${MTLOGIN_END_SESSION_URI:-}
       MTLOGIN_CLIENT_ID: ${MTLOGIN_CLIENT_ID:-}
       MTLOGIN_CLIENT_SECRET: ${MTLOGIN_CLIENT_SECRET:-}
-      MTLOGIN_REDIRECT_URI: ${MTLOGIN_REDIRECT_URI:-http://localhost:${WEB_EXTERNAL_PORT:-3000}/auth/callback}
+      MTLOGIN_REDIRECT_URI: ${MTLOGIN_REDIRECT_URI:-${APP_URL:-http://localhost}/auth/callback}
       NEXT_PUBLIC_SENTRY_DISABLED: ${NEXT_PUBLIC_SENTRY_DISABLED:-true}
       NEXT_TELEMETRY_DISABLED: ${NEXT_TELEMETRY_DISABLED:-1}
       # Use "true" no macOS/Windows se o HMR não detectar mudanças.
@@ -118,7 +135,48 @@ services:
     depends_on:
       - api
 
+  # Armazenamento S3 dos documentos. As imagens minio/* e quay.io/minio/* deixaram de ser
+  # publicadas; usamos as da Chainguard (única tag gratuita: latest). Sem porta publicada: o acesso externo é pelo HAProxy
+  # (/storage = API S3, /minio-console = console, só em desenvolvimento).
+  minio:
+    image: ${MINIO_IMAGE:-chainguard/minio:latest}
+    command: ["server", "/data", "--console-address", ":9001"]
+    expose:
+      - "9000"
+      - "9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # O console abre por /minio-console no mesmo domínio da aplicação.
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-${APP_URL:-http://localhost}/minio-console}
+    volumes:
+      - minio-data:/data
+
+  # Cria o bucket (privado por padrão). A imagem não tem shell: o alias vem de MC_HOST_local e,
+  # se o MinIO ainda não estiver pronto, o contêiner falha e é reiniciado até conseguir.
+  # CORS não é necessário: o navegador fala só com o mesmo domínio.
+  minio-init:
+    image: ${MINIO_MC_IMAGE:-chainguard/minio-client:latest}
+    restart: on-failure
+    environment:
+      MC_HOST_local: http://${MINIO_ROOT_USER:-minioadmin}:${MINIO_ROOT_PASSWORD:-minioadmin}@minio:9000
+    command: ["mb", "--ignore-existing", "local/${MINIO_BUCKET:-documentos}"]
+    depends_on:
+      - minio
+
+  haproxy:
+    image: ${HAPROXY_IMAGE:-haproxy:lts-alpine}
+    ports:
+      - "${HAPROXY_PORT:-8090}:80"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - api
+      - web
+      - minio
+
 volumes:
+  minio-data:
   pgdata:
   go-mod:
   go-build:

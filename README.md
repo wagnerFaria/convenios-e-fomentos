@@ -29,18 +29,20 @@ controle de permissões granular (RBAC) e um painel administrativo em Next.js qu
 
 | Parte | Tecnologia | Porta | Pasta |
 |---|---|---|---|
-| Frontend | Next.js 16, React 19, TypeScript, Tailwind v4, shadcn/ui, TanStack Query/Form, Bun | 3000 | [`frontend/`](frontend/) |
-| API | Go 1.27, PostgreSQL 16, sqlc, goose, JWT | 8080 | [`backend/`](backend/) |
+| Proxy reverso | HAProxy (`/` → frontend, `/api` → API) | 80 (host) | [`haproxy/`](haproxy/) |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind v4, shadcn/ui, TanStack Query/Form, Bun | 3000 (interna) | [`frontend/`](frontend/) |
+| API | Go 1.27, PostgreSQL 16, sqlc, goose, JWT | 8080 (interna) | [`backend/`](backend/) |
 | Banco | PostgreSQL 16 | 5432 | volume Docker |
 
 ```
-Navegador ──► Next.js (:3000) ──► API Go (:8080) ──► PostgreSQL
-              │  cookies httpOnly      │  JWT + RBAC
-              └─ proxy /api/backend/*  └─ /admin/*  /api/*  /docs
+                    ┌─ /      ──► Next.js (:3000) ──► API Go (:8080) ──► PostgreSQL
+Navegador ─► HAProxy│              │  cookies httpOnly      │  JWT + RBAC
+              (:80) │              └─ proxy /bff/*          └─ /api/admin/*  /api/auth/*  /api/docs
+                    └─ /api/* ──► API Go (:8080)
 ```
 
-O navegador **nunca** fala direto com a API nem enxerga os tokens: o login é feito pelo **MT Login** (Keycloak, OIDC com
-Authorization Code + PKCE) e conduzido pelo servidor do Next, que guarda o access token e o refresh token em cookies `httpOnly`; as chamadas autenticadas passam pelo proxy `/api/backend/*`, que
+O painel **nunca** fala direto com a API nem enxerga os tokens (a API em `/api` fica exposta para clientes externos): o login é feito pelo **MT Login** (Keycloak, OIDC com
+Authorization Code + PKCE) e conduzido pelo servidor do Next, que guarda o access token e o refresh token em cookies `httpOnly`; as chamadas autenticadas passam pelo proxy `/bff/*`, que
 injeta o `Authorization: Bearer` e renova o par de tokens quando necessário. A API só **valida** o token do MT Login
 (assinatura via JWKS); quem é o administrador é decidido pelo **CPF** do token. Detalhes na
 [seção 9](#9-autenticação-e-e-mails-em-desenvolvimento).
@@ -50,7 +52,7 @@ injeta o `Authorization: Bearer` e renova o par de tokens quando necessário. A 
 Para o fluxo recomendado (Docker) basta:
 
 - **Docker** com **Docker Compose v2** (`docker compose version`).
-- Portas livres no host: **3000**, **8080** e **5432** (ou outra, via `DB_PORT`; veja a [seção 11](#11-solução-de-problemas)).
+- Portas livres no host: **80** (HAProxy) e **5432** (ou outra, via `DB_PORT`; veja a [seção 11](#11-solução-de-problemas)).
 
 Opcional, só para rodar fora do Docker ou executar os testes do backend:
 
@@ -75,10 +77,10 @@ Na primeira vez isso constrói as imagens e instala as dependências (alguns min
 
 | O quê | URL |
 |---|---|
-| Painel (frontend) | <http://localhost:3000> |
-| API | <http://localhost:8080> |
-| Documentação interativa da API (OpenAPI) | <http://localhost:8080/docs> |
-| Liveness / readiness da API | <http://localhost:8080/health> · <http://localhost:8080/ready> |
+| Painel (frontend) | <http://localhost> |
+| API (base) | <http://localhost/api> |
+| Documentação interativa da API (OpenAPI) | <http://localhost/api/docs> |
+| Liveness / readiness da API | <http://localhost/api/health> · <http://localhost/api/ready> |
 
 Dicas:
 
@@ -107,7 +109,7 @@ até um administrador atribuir roles. Por isso o primeiro Super Admin precisa se
 1. No `.env` da raiz, as variáveis `MTLOGIN_*`, `JWKS_URI` e `OIDC_ISSUER` (veja o [`.env.example`](.env.example)). Sem elas a
    API não sobe.
 2. No client do Keycloak (`MTLOGIN_CLIENT_ID`), cadastrar a URL de retorno (`MTLOGIN_REDIRECT_URI`, por padrão
-   `http://localhost:3000/auth/callback`) e a de pós-logout (`http://localhost:3000/auth/sign-in`).
+   `http://localhost/auth/callback`) e a de pós-logout (`http://localhost/auth/sign-in`).
 3. Ter um usuário no MT Login **de homologação**, liberado pelo time do MT Login (CPF fora das bases oficiais precisa de liberação
    manual). O CPF vem no claim `preferred_username` (também há `cpf`); é o padrão de `OIDC_CPF_CLAIM`.
 
@@ -127,13 +129,13 @@ docker compose exec api go run ./cmd/cli admin:create --cpf 000.000.000-00
 docker compose up -d api && docker compose exec api go run ./cmd/cli seed
 ```
 
-Depois abra <http://localhost:3000>, clique em **Entrar com MT Login** e autentique. No primeiro acesso o nome e o e-mail são
+Depois abra <http://localhost>, clique em **Entrar com MT Login** e autentique. No primeiro acesso o nome e o e-mail são
 preenchidos a partir do MT Login e você já entra como Super Admin.
 
 ### Os demais administradores
 
 - **Pré-cadastro:** um administrador com a permissão `admin::settings.users.create` cadastra o **CPF** e as roles
-  (`POST /admin/users`); no primeiro acesso da pessoa o registro é completado e já vem com as roles. Até lá o status é `pending`.
+  (`POST /api/admin/users`); no primeiro acesso da pessoa o registro é completado e já vem com as roles. Até lá o status é `pending`.
 - **Criação automática:** quem entra sem pré-cadastro vira administrador ativo sem roles (veja acima) e pode receber roles depois.
 - O seed ainda cria, **só em desenvolvimento**, um administrador de exemplo por role (`super@`, `editor@`, `author@`,
   `revisor@dev.local`) com **CPFs fictícios**: servem para ver as listagens, mas não conseguem entrar (não existem no MT Login).
@@ -141,7 +143,7 @@ preenchidos a partir do MT Login e você já entra como Super Admin.
 
 ## 5. Como o ambiente de desenvolvimento funciona
 
-O arquivo [`docker-compose.dev.yml`](docker-compose.dev.yml) define quatro serviços:
+O arquivo [`docker-compose.dev.yml`](docker-compose.dev.yml) define cinco serviços:
 
 | Serviço | Imagem / build | O que faz |
 |---|---|---|
@@ -149,6 +151,8 @@ O arquivo [`docker-compose.dev.yml`](docker-compose.dev.yml) define quatro servi
 | `migrate` | [`backend/Dockerfile.dev`](backend/Dockerfile.dev) | Aplica as migrações (`migrate:up`) e termina. A API só sobe depois que ele conclui. |
 | `api` | [`backend/Dockerfile.dev`](backend/Dockerfile.dev) | Go com [air](https://github.com/air-verse/air): recompila e reinicia a cada alteração em `.go`, `.sql` ou `.yaml`. |
 | `web` | [`frontend/Dockerfile.dev`](frontend/Dockerfile.dev) | `bun install` + `next dev` (Turbopack) com HMR. |
+| `haproxy` | `haproxy:lts-alpine` | Único ponto de entrada (porta `HAPROXY_PORT`, padrão 80): `/api/*` → `api`, `/storage/*` → MinIO (API S3), `/minio-console/*` → console do MinIO (só dev), o resto → `web`. Config em [`haproxy/haproxy.cfg`](haproxy/haproxy.cfg). |
+| `minio` / `minio-init` | `chainguard/minio` / `chainguard/minio-client` | Armazenamento S3 dos arquivos dos documentos; o `minio-init` cria o bucket privado. As imagens `minio/*` deixaram de ser publicadas. O navegador envia e baixa por URLs pré-assinadas em `/storage` (mesmo domínio). **`APP_URL` (ou `STORAGE_PUBLIC_URL`) precisa ter a mesma origem, com porta, que o navegador usa**: a assinatura cobre o `Host`. |
 
 **Live reload.** O código do host é montado nos contêineres (`./backend:/app`, `./frontend:/app`), então basta salvar o
 arquivo: a API é recompilada em segundos e o Next atualiza a página sem recarregar. Não há `COPY` do código nas imagens de
@@ -164,14 +168,14 @@ cache do Next, mantidos dentro do Docker para não misturar com o host).
 **Configuração.** Tudo é parametrizável por variáveis (`.env` na raiz ou shell; o shell tem precedência) e tem um padrão de
 desenvolvimento no compose, então nada é obrigatório. Os padrões que importam:
 
-- `PUBLIC_URL` e `CORS_ALLOWED_ORIGINS` (`http://localhost:${WEB_EXTERNAL_PORT}`): os links dos e-mails dos usuários finais
-  abrem o frontend.
-- `TRUSTED_PROXIES=172.16.0.0/12`: o backend confia no `X-Forwarded-For` enviado pelo Next (rede padrão do Docker), para que
-  o rate limit de login considere o IP do usuário e não o do servidor Next.
+- `APP_URL` (`http://localhost`): origem pública da aplicação; dela derivam `PUBLIC_URL`, `CORS_ALLOWED_ORIGINS`,
+  `NEXT_PUBLIC_APP_URL` e `MTLOGIN_REDIRECT_URI`. Os links dos e-mails dos usuários finais abrem o frontend.
+- `TRUSTED_PROXIES=172.16.0.0/12`: o backend confia no `X-Forwarded-For` enviado pelo HAProxy e pelo Next (rede padrão do
+  Docker), para que o rate limit de login considere o IP do usuário e não o do proxy.
 - `DATABASE_URL`: montada a partir de `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` (host `db`, na rede do Docker).
   Defina-a explicitamente apenas para usar outro banco. **Atenção:** uma `DATABASE_URL` exportada no seu shell (modo sem Docker,
   apontando para `localhost`) sobrescreve a do `.env` e quebra os contêineres.
-- `API_URL=http://api:8080` no frontend: o servidor do Next fala com a API pela rede do Docker.
+- `API_URL=http://api:8080` no frontend: o servidor do Next fala com a API direto pela rede do Docker, sem passar pelo HAProxy.
 - Segredos (`JWT_*`, `API_TOKEN_SALT`): valores fixos de desenvolvimento, **nunca** use em produção.
 
 ## 6. Rotina de trabalho
@@ -243,7 +247,7 @@ bun install
 bun run dev
 ```
 
-Neste modo, aponte `PUBLIC_URL` do backend para `http://localhost:3000` no `backend/.env` para que os links dos e-mails
+Neste modo, aponte `PUBLIC_URL` do backend para `http://localhost:3000` (sem o HAProxy, o Next fica direto na 3000) no `backend/.env` para que os links dos e-mails
 abram o frontend. Comandos do `Makefile` do backend: `run`, `dev`, `build`, `test`, `test-unit`, `cover-authz`, `lint`,
 `sqlc`, `migrate-up`, `migrate-down`, `migrate-create name=...`, `seed`, `cleanup`, `docker-up`, `docker-down`.
 
@@ -280,7 +284,7 @@ abram o frontend. Comandos do `Makefile` do backend: `run`, `dev`, `build`, `tes
 
 | Grupo | Variáveis |
 |---|---|
-| Portas no host | `WEB_EXTERNAL_PORT` (3000), `API_EXTERNAL_PORT` (8080), `DB_PORT` (5432) |
+| Portas no host | `HAPROXY_PORT` (80), `DB_PORT` (5432); com outra porta, defina também `APP_URL` |
 | Usuário do host | `UID`, `GID` (1000) |
 | PostgreSQL | `POSTGRES_IMAGE`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` (opcional) |
 | Backend | `APP_ENV`, `LOG_LEVEL`, `PUBLIC_URL`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, `JWKS_URI`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CPF_CLAIM`, `SEED_SUPER_ADMIN_CPF`, `JWT_API_SECRET`, `API_TOKEN_SALT`, `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_MAX_TTL`, `REFRESH_TOKEN_IDLE_TTL`, `RATE_LIMIT_AUTH_PER_MINUTE`, `RATE_LIMIT_GLOBAL_PER_MINUTE`, `SMTP_*` |
@@ -299,8 +303,8 @@ abram o frontend. Comandos do `Makefile` do backend: `run`, `dev`, `build`, `tes
 
 - [`frontend/src/proxy.ts`](frontend/src/proxy.ts) protege `/dashboard/*`: sem cookie redireciona ao login; com o access token
   expirado, renova o par de tokens antes de renderizar.
-- [`frontend/src/app/api/backend/[...path]/route.ts`](frontend/src/app/api/backend/[...path]/route.ts) é o proxy autenticado
-  usado pelo navegador (`apiClient` em [`src/lib/api-client.ts`](frontend/src/lib/api-client.ts)). Só repassa `/admin/*` e renova
+- [`frontend/src/app/bff/[...path]/route.ts`](frontend/src/app/bff/[...path]/route.ts) é o proxy autenticado
+  usado pelo navegador (`apiClient` em [`src/lib/api-client.ts`](frontend/src/lib/api-client.ts)). Só repassa `/bff/admin/*` para `/api/admin/*` e renova
   automaticamente em caso de 401.
 - A renovação usa o refresh token no endpoint de token do MT Login e é **serializada por refresh token**, porque o Keycloak pode
   rotacionar o token a cada uso e revogar a sessão se um token já usado for reapresentado
@@ -311,7 +315,7 @@ abram o frontend. Comandos do `Makefile` do backend: `run`, `dev`, `build`, `tes
 - A documentação do MT Login mostra a resposta do `/token` **sem** `refresh_token` e `expires_in`. O frontend tolera isso: usa o `exp`
   do JWT e, sem refresh token, ao expirar o access token pede novo login (transparente enquanto o SSO estiver ativo).
 - Conta desativada/bloqueada (ou token sem CPF válido) leva a `/auth/denied`; conta sem roles vê "Aguardando liberação".
-- Permissões na interface: `useCan()` e `<Can>` leem as permissões do `/admin/auth/me`. Servem só para esconder elementos; quem
+- Permissões na interface: `useCan()` e `<Can>` leem as permissões do `/api/admin/auth/me`. Servem só para esconder elementos; quem
   autoriza de fato é sempre o backend.
 
 **E-mails.** Os e-mails existem só para os **usuários finais** (confirmação de e-mail e redefinição de senha). Sem `SMTP_HOST`,
@@ -348,7 +352,7 @@ O frontend ainda não tem suíte de testes automatizados; a verificação de pon
 | Sintoma | Causa / solução |
 |---|---|
 | `port is already allocated` / `address already in use` na **5432** | Há um PostgreSQL local. Defina `DB_PORT=5433` no `.env` (a API e o `web` falam com o `db` pela rede interna, então nada mais muda). |
-| `3000` ou `8080` ocupadas | Pare o processo que as usa (`ss -ltnp \| grep -E ':(3000\|8080)'`). Ou mude `WEB_EXTERNAL_PORT` / `API_EXTERNAL_PORT` no `.env` (`PUBLIC_URL` e CORS acompanham a porta do frontend). |
+| `80` ocupada | Pare o processo que a usa (`ss -ltnp \| grep ':80 '`) ou defina `HAPROXY_PORT=8000` e `APP_URL=http://localhost:8000` no `.env` (e cadastre as novas URLs no Keycloak). |
 | Alterações em arquivos não recarregam (macOS/Windows) | `WATCHPACK_POLLING=true` para o frontend; para a API, defina `poll = true` em `[build]` do `backend/.air.toml`. |
 | `permission denied` em `tmp/`, `.next/` ou `go.sum` | Arquivos criados como root por uma execução anterior. `sudo chown -R $USER backend/tmp frontend/.next` e confira `UID`/`GID`. |
 | API não sobe: `JWKS_URI é obrigatório...` | Faltam as variáveis do MT Login no `.env` (veja a seção 4). |
@@ -378,11 +382,11 @@ O frontend ainda não tem suíte de testes automatizados; a verificação de pon
 │   │   ├── document/           # recurso de exemplo
 │   │   ├── audit/ httpapi/ ... # auditoria, roteador, middlewares, config, mailer
 │   │   └── database/           # migrações (goose) e queries (sqlc)
-│   ├── api/openapi.yaml        # contrato da API (servido em /docs)
+│   ├── api/openapi.yaml        # contrato da API (servido em /api/docs)
 │   ├── Dockerfile, Dockerfile.dev, docker-compose.yml, .air.toml, Makefile
 │   └── README.md, SEGURANCA.md
 ├── frontend/                   # painel Next.js
-│   ├── src/app/                # rotas: /auth/*, /dashboard/*, /api/backend/[...path]
+│   ├── src/app/                # rotas: /auth/*, /dashboard/*, /bff/[...path]
 │   ├── src/features/auth/      # logout, sessão, permissões no cliente, telas de acesso
 │   ├── src/lib/auth, src/lib/api, src/lib/api-client.ts
 │   ├── src/proxy.ts            # guarda de rotas e renovação de tokens
@@ -395,7 +399,7 @@ O frontend ainda não tem suíte de testes automatizados; a verificação de pon
 
 - API e controle de acesso: [`backend/README.md`](backend/README.md) (arquitetura, receitas para nova ação/condição/policy/recurso,
   decisões de projeto) e [`backend/SEGURANCA.md`](backend/SEGURANCA.md) (revisão de segurança e pendências).
-- Contrato da API: <http://localhost:8080/docs> com o ambiente no ar, ou [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
+- Contrato da API: <http://localhost/api/docs> com o ambiente no ar, ou [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
 - Frontend: [`frontend/CLAUDE.md`](frontend/CLAUDE.md), [`frontend/AGENTS.md`](frontend/AGENTS.md) e [`frontend/docs/`](frontend/docs/)
   (formulários e temas). Os Dockerfiles de **produção** do frontend e `frontend/docs/deployment.md` ainda mencionam o Clerk e
   precisam ser revisados antes do deploy.
