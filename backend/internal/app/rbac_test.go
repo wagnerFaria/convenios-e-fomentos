@@ -189,21 +189,24 @@ func TestAtivarDesativarEProtecaoDoUltimoSuperAdmin(t *testing.T) {
 	gestor, gestorID := e.newAdmin(boss, "gestor@exemplo.com", "gestor")
 	ana := e.adminID("ana@exemplo.com")
 
-	// O gestor tenta desativar o único Super Admin.
+	// O gestor não age sobre quem tem mais poder do que ele, como o Super Admin.
 	r := e.do("POST", "/api/admin/users/"+ana+"/deactivate", nil, gestor)
-	assert.Equal(t, 409, r.Status)
-	assert.Equal(t, "last_super_admin", r.errCode())
+	assert.Equal(t, 403, r.Status)
+	assert.Equal(t, "target_more_privileged", r.errCode())
 	assert.Equal(t, 200, e.do("GET", "/api/admin/auth/me", nil, boss).Status, "nada mudou")
 
-	// Quem não é Super Admin não concede a role Super Admin.
-	assert.Equal(t, 403, e.do("POST", "/api/admin/users/"+gestorID+"/roles", map[string]any{"roleIds": []string{e.roleID("super-admin")}}, gestor).Status)
+	// Quem não é Super Admin não concede a role Super Admin a ninguém, nem a si mesmo.
+	e.mkRole("redator")
+	_, bia := e.newAdmin(boss, "bia@exemplo.com", "redator")
+	assert.Equal(t, 403, e.do("POST", "/api/admin/users/"+bia+"/roles", map[string]any{"roleIds": []string{e.roleID("super-admin")}}, gestor).Status)
+	assert.Equal(t, "cannot_modify_self", e.do("POST", "/api/admin/users/"+gestorID+"/roles", map[string]any{"roleIds": []string{e.roleID("super-admin")}}, gestor).errCode())
 	// O Super Admin concede; agora existem dois.
 	assert.Equal(t, 200, e.do("POST", "/api/admin/users/"+gestorID+"/roles", map[string]any{"roleIds": []string{e.roleID("super-admin")}}, boss).Status)
 
-	// Auto-desativação é proibida.
+	// Auto-desativação é proibida, mesmo para Super Admin.
 	assert.Equal(t, "cannot_modify_self", e.do("POST", "/api/admin/users/"+gestorID+"/deactivate", nil, gestor).errCode())
 
-	// Desativar a Ana tira o acesso dela na requisição seguinte, mesmo com o token ainda válido.
+	// Agora Super Admin, o gestor pode agir sobre a Ana. Desativá-la tira o acesso dela na requisição seguinte, mesmo com o token ainda válido.
 	r = e.do("POST", "/api/admin/users/"+ana+"/deactivate", nil, gestor)
 	require.Equal(t, 200, r.Status, r.Body)
 	assert.Equal(t, "inactive", r.data()["status"])
@@ -226,12 +229,12 @@ func TestExclusaoIndividualEmLoteEUltimoSuperAdmin(t *testing.T) {
 	_, caio := e.newAdmin(boss, "caio@exemplo.com", "redator")
 	ana := e.adminID("ana@exemplo.com")
 
-	assert.Equal(t, "last_super_admin", e.do("DELETE", "/api/admin/users/"+ana, nil, gestor).errCode())
+	assert.Equal(t, "target_more_privileged", e.do("DELETE", "/api/admin/users/"+ana, nil, gestor).errCode())
 	assert.Equal(t, "cannot_modify_self", e.do("DELETE", "/api/admin/users/"+gestorID, nil, gestor).errCode())
 
 	// Lote é atômico: se um item viola a regra, nenhum é excluído.
 	r := e.do("POST", "/api/admin/users/batch-delete", map[string]any{"ids": []string{bia, ana}}, gestor)
-	assert.Equal(t, 409, r.Status)
+	assert.Equal(t, 403, r.Status)
 	assert.Equal(t, 200, e.do("GET", "/api/admin/users/"+bia, nil, boss).Status)
 
 	// Item inexistente derruba o lote inteiro.
@@ -294,33 +297,33 @@ func TestCadastroComSuperAdminSoPorSuperAdmin(t *testing.T) {
 func TestDesativacoesConcorrentesNaoRemovemTodosOsSuperAdmins(t *testing.T) {
 	e, boss := setup(t)
 	e.mkRole("gestor", usersAll...)
-	gestor, _ := e.newAdmin(boss, "gestor@exemplo.com", "gestor")
-	_, bruno := e.newAdmin(boss, "bruno@exemplo.com", "gestor")
+	bruno, brunoID := e.newAdmin(boss, "bruno@exemplo.com", "gestor")
 	ana := e.adminID("ana@exemplo.com")
-	require.Equal(t, 200, e.do("POST", "/api/admin/users/"+bruno+"/roles", map[string]any{"roleIds": []string{e.roleID("super-admin")}}, boss).Status)
+	require.Equal(t, 200, e.do("POST", "/api/admin/users/"+brunoID+"/roles", map[string]any{"roleIds": []string{e.roleID("super-admin")}}, boss).Status)
 
+	// Os dois Super Admins desativam um ao outro ao mesmo tempo.
 	var wg sync.WaitGroup
 	results := make(chan int, 2)
-	for _, id := range []string{ana, bruno} {
+	for _, c := range []struct{ token, target string }{{boss, brunoID}, {bruno, ana}} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results <- e.do("POST", "/api/admin/users/"+id+"/deactivate", nil, gestor).Status
+			results <- e.do("POST", "/api/admin/users/"+c.target+"/deactivate", nil, c.token).Status
 		}()
 	}
 	wg.Wait()
 	close(results)
-	var ok, conflict int
+	var ok int
 	for s := range results {
 		switch s {
 		case 200:
 			ok++
-		case 409:
-			conflict++
+		case 403, 409: // conta já desativada (403) ou proteção do último Super Admin (409)
+		default:
+			t.Errorf("status inesperado %d", s)
 		}
 	}
 	assert.Equal(t, 1, ok)
-	assert.Equal(t, 1, conflict)
 	var n int
 	require.NoError(t, e.pool.QueryRow(context.Background(), `SELECT count(*) FROM admins a JOIN admin_users_roles ur ON ur.admin_id=a.id JOIN admin_roles r ON r.id=ur.role_id WHERE r.code='super-admin' AND a.is_active`).Scan(&n))
 	assert.Equal(t, 1, n)
@@ -588,4 +591,90 @@ func TestApagarRoleInvalidaCache(t *testing.T) {
 	require.Equal(t, 204, e.do("DELETE", "/api/admin/users/"+id, nil, boss).Status)
 	assert.Equal(t, 204, e.do("DELETE", "/api/admin/roles/"+rid, nil, boss).Status)
 	assert.Equal(t, 404, e.do("GET", "/api/admin/roles/"+rid, nil, boss).Status)
+}
+
+func TestEscalonamentoDePrivilegioEBloqueado(t *testing.T) {
+	e, boss := setup(t)
+	e.mkRole("gestor", append([]string{"admin::settings.roles.read", "admin::settings.roles.create", "admin::settings.roles.update", "admin::settings.roles.delete"}, usersAll...)...)
+	e.mkRole("poderoso", "admin::settings.audit-logs.read")
+	e.mkRole("leve", "admin::settings.users.read")
+	gestor, gestorID := e.newAdmin(boss, "gestor@exemplo.com", "gestor")
+	_, podID := e.newAdmin(boss, "pod@exemplo.com", "poderoso")
+	_, leveID := e.newAdmin(boss, "leve@exemplo.com", "leve")
+	perms := func(p ...map[string]any) map[string]any {
+		return map[string]any{"permissions": append([]map[string]any{}, p...)}
+	}
+	auditRead := map[string]any{"action": "admin::settings.audit-logs.read"}
+	usersRead := map[string]any{"action": "admin::settings.users.read"}
+
+	t.Run("não altera as permissões de uma role que possui", func(t *testing.T) {
+		r := e.do("PUT", "/api/admin/roles/"+e.roleID("gestor")+"/permissions", perms(usersRead), gestor)
+		assert.Equal(t, 409, r.Status)
+		assert.Equal(t, "cannot_modify_own_role", r.errCode())
+	})
+
+	t.Run("só concede permissões que possui", func(t *testing.T) {
+		created := e.do("POST", "/api/admin/roles", map[string]any{"name": "Nova", "description": ""}, gestor)
+		require.Equal(t, 201, created.Status, created.Body)
+		nova := created.data()["id"].(string)
+
+		r := e.do("PUT", "/api/admin/roles/"+nova+"/permissions", perms(usersRead, auditRead), gestor)
+		assert.Equal(t, 403, r.Status)
+		assert.Equal(t, "privilege_escalation", r.errCode())
+		details := r.Body["error"].(map[string]any)["details"].(map[string]any)["permissions"].([]any)
+		require.Len(t, details, 1)
+		assert.Equal(t, "admin::settings.audit-logs.read", details[0].(map[string]any)["action"])
+		assert.Equal(t, 200, e.do("PUT", "/api/admin/roles/"+nova+"/permissions", perms(usersRead), gestor).Status)
+
+		// Reduzir ou manter o que já havia é sempre permitido; ampliar, não.
+		assert.Equal(t, 200, e.do("PUT", "/api/admin/roles/"+nova+"/permissions", perms(), gestor).Status)
+	})
+
+	t.Run("não duplica role com permissões que não possui", func(t *testing.T) {
+		r := e.do("POST", "/api/admin/roles/"+e.roleID("poderoso")+"/duplicate", nil, gestor)
+		assert.Equal(t, 403, r.Status)
+		assert.Equal(t, "privilege_escalation", r.errCode())
+		assert.Equal(t, 201, e.do("POST", "/api/admin/roles/"+e.roleID("leve")+"/duplicate", nil, gestor).Status)
+	})
+
+	t.Run("só atribui roles que cobre", func(t *testing.T) {
+		r := e.do("POST", "/api/admin/users/"+leveID+"/roles", map[string]any{"roleIds": []string{e.roleID("poderoso")}}, gestor)
+		assert.Equal(t, 403, r.Status)
+		assert.Equal(t, "privilege_escalation", r.errCode())
+
+		body := map[string]any{"cpf": cpfFor("novo@exemplo.com"), "roleIds": []string{e.roleID("poderoso")}}
+		assert.Equal(t, "privilege_escalation", e.do("POST", "/api/admin/users", body, gestor).errCode())
+		body["roleIds"] = []string{e.roleID("leve")}
+		assert.Equal(t, 201, e.do("POST", "/api/admin/users", body, gestor).Status)
+	})
+
+	t.Run("não age sobre quem tem mais poder", func(t *testing.T) {
+		roles := map[string]any{"roleIds": []string{e.roleID("leve")}}
+		for _, c := range []struct {
+			method, path string
+			body         any
+		}{
+			{"PUT", "/api/admin/users/" + podID, map[string]any{"departmentId": nil}}, {"DELETE", "/api/admin/users/" + podID, nil},
+			{"POST", "/api/admin/users/" + podID + "/deactivate", nil}, {"POST", "/api/admin/users/" + podID + "/roles", roles},
+			{"DELETE", "/api/admin/users/" + podID + "/roles/" + e.roleID("poderoso"), nil},
+		} {
+			r := e.do(c.method, c.path, c.body, gestor)
+			assert.Equal(t, 403, r.Status, c.method+" "+c.path)
+			assert.Equal(t, "target_more_privileged", r.errCode(), c.method+" "+c.path)
+		}
+		// Sobre quem tem menos poder, pode.
+		assert.Equal(t, 200, e.do("POST", "/api/admin/users/"+leveID+"/deactivate", nil, gestor).Status)
+	})
+
+	t.Run("não altera a própria conta", func(t *testing.T) {
+		assert.Equal(t, "cannot_modify_self", e.do("PUT", "/api/admin/users/"+gestorID, map[string]any{"departmentId": nil}, gestor).errCode())
+		assert.Equal(t, "cannot_modify_self", e.do("POST", "/api/admin/users/"+gestorID+"/roles", map[string]any{"roleIds": []string{e.roleID("leve")}}, gestor).errCode())
+		assert.Equal(t, "cannot_modify_self", e.do("DELETE", "/api/admin/users/"+gestorID+"/roles/"+e.roleID("gestor"), nil, gestor).errCode())
+	})
+
+	t.Run("Super Admin não tem essas restrições", func(t *testing.T) {
+		assert.Equal(t, 200, e.do("PUT", "/api/admin/roles/"+e.roleID("gestor")+"/permissions", perms(usersRead, auditRead), boss).Status)
+		assert.Equal(t, 201, e.do("POST", "/api/admin/roles/"+e.roleID("poderoso")+"/duplicate", nil, boss).Status)
+		assert.Equal(t, 200, e.do("POST", "/api/admin/users/"+podID+"/deactivate", nil, boss).Status)
+	})
 }

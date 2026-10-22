@@ -208,6 +208,9 @@ func (s *Service) ReplacePermissions(ctx context.Context, actor Actor, id uuid.U
 	if role.Code == SuperAdminCode {
 		return nil, errSuperAdminImmutable
 	}
+	if !actor.Subject.IsSuperAdmin() && ownsRole(actor, id) {
+		return nil, errCannotModifyOwnRole
+	}
 	perms, issues := s.engine.NormalizePermissions(in)
 	if len(issues) > 0 {
 		fields := make([]httpapi.FieldError, len(issues))
@@ -225,6 +228,10 @@ func (s *Service) ReplacePermissions(ctx context.Context, actor Actor, id uuid.U
 		}
 		before, err := authz.DBStore{Q: q}.RolePermissions(ctx, id)
 		if err != nil {
+			return err
+		}
+		// Só se concede ou amplia o que o próprio ator possui; reduzir é sempre permitido.
+		if err := s.ensureCovers(ctx, actor, s.engine.Widened(before, perms)); err != nil {
 			return err
 		}
 		if err := q.DeleteAdminPermissionsByRole(ctx, id); err != nil {
@@ -271,6 +278,9 @@ func (s *Service) DuplicateRole(ctx context.Context, actor Actor, id uuid.UUID) 
 		}
 		perms, err := authz.DBStore{Q: q}.RolePermissions(ctx, id)
 		if err != nil {
+			return err
+		}
+		if err := s.ensureCovers(ctx, actor, perms); err != nil {
 			return err
 		}
 		name := src.Name + " (cópia)"

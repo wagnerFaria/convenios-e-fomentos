@@ -214,12 +214,18 @@ func snapshotOf(a db.Admin) userSnapshot {
 
 // UpdateUser edita os dados do administrador.
 func (s *Service) UpdateUser(ctx context.Context, actor Actor, id uuid.UUID, in UpdateUserInput) (*UserView, error) {
+	if err := ensureNotOwnAccount(actor, id); err != nil {
+		return nil, err
+	}
 	var out *UserView
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		before, err := q.GetAdminByID(ctx, id)
 		if err != nil {
 			return notFound(err)
+		}
+		if err := s.ensureCanManage(ctx, q, actor, before); err != nil {
+			return err
 		}
 		after, err := q.UpdateAdmin(ctx, db.UpdateAdminParams{ID: id, DepartmentID: in.DepartmentID})
 		switch {
@@ -276,6 +282,9 @@ func (s *Service) SetActive(ctx context.Context, actor Actor, id uuid.UUID, acti
 		if err != nil {
 			return notFound(err)
 		}
+		if err := s.ensureCanManage(ctx, q, actor, before); err != nil {
+			return err
+		}
 		if err := q.SetAdminActive(ctx, db.SetAdminActiveParams{ID: id, IsActive: active}); err != nil {
 			return err
 		}
@@ -313,6 +322,9 @@ func (s *Service) DeleteUsers(ctx context.Context, actor Actor, ids []uuid.UUID)
 		}
 		if len(found) != len(ids) {
 			return httpapi.ErrNotFound()
+		}
+		if err := s.ensureCanManage(ctx, q, actor, found...); err != nil {
+			return err
 		}
 		if _, err := q.DeleteAdminsByIDs(ctx, ids); err != nil {
 			return err
@@ -353,11 +365,18 @@ func hasSuperRole(roles []db.AdminRole) bool {
 // AddRoles atribui roles ao administrador. Só um Super Admin concede a role Super Admin.
 func (s *Service) AddRoles(ctx context.Context, actor Actor, id uuid.UUID, roleIDs []uuid.UUID) (*UserView, error) {
 	roleIDs = uniqueIDs(roleIDs)
+	if err := ensureNotOwnAccount(actor, id); err != nil {
+		return nil, err
+	}
 	var out *UserView
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if _, err := q.GetAdminByID(ctx, id); err != nil {
+		target, err := q.GetAdminByID(ctx, id)
+		if err != nil {
 			return notFound(err)
+		}
+		if err := s.ensureCanManage(ctx, q, actor, target); err != nil {
+			return err
 		}
 		roles, err := q.GetAdminRolesByIDs(ctx, roleIDs)
 		if err != nil {
@@ -368,6 +387,9 @@ func (s *Service) AddRoles(ctx context.Context, actor Actor, id uuid.UUID, roleI
 		}
 		if hasSuperRole(roles) && !actor.Subject.IsSuperAdmin() {
 			return httpapi.ErrForbidden()
+		}
+		if err := s.ensureCoversRoles(ctx, actor, roleIDs); err != nil {
+			return err
 		}
 		current, err := q.ListRolesForAdmin(ctx, id)
 		if err != nil {
@@ -399,10 +421,17 @@ func codesOfView(rs []RoleView) []string {
 // RemoveRole retira uma role do administrador. Ele precisa manter ao menos uma
 // role, e o último Super Admin ativo não pode perder a role Super Admin.
 func (s *Service) RemoveRole(ctx context.Context, actor Actor, id, roleID uuid.UUID) (*UserView, error) {
+	if err := ensureNotOwnAccount(actor, id); err != nil {
+		return nil, err
+	}
 	var out *UserView
 	err := s.withSuperGuard(ctx, func(q *db.Queries) error {
-		if _, err := q.GetAdminByID(ctx, id); err != nil {
+		target, err := q.GetAdminByID(ctx, id)
+		if err != nil {
 			return notFound(err)
+		}
+		if err := s.ensureCanManage(ctx, q, actor, target); err != nil {
+			return err
 		}
 		role, err := q.GetAdminRole(ctx, roleID)
 		if err != nil {
