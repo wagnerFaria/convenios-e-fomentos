@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 };
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  // O proxy.ts renova tokens expirados; aqui a sessão é validada no backend (/admin/auth/me).
+  // O proxy.ts renova tokens expirados; aqui a sessão é validada no backend (/api/admin/auth/me).
   // Layouts nem sempre re-renderizam junto com as páginas, então páginas sensíveis também
   // devem chamar getSession().
   const session = await getSession();

@@ -23,7 +23,7 @@ function parseFlow(raw: string | undefined): LoginFlow | null {
 /**
  * Volta do MT Login: confere o state, troca o `code` pelos tokens (PKCE) e abre a sessão gravando
  * os tokens em cookies httpOnly. O administrador é criado/atualizado no backend na primeira chamada
- * autenticada (/admin/auth/me), feita pelo layout do dashboard.
+ * autenticada (/api/admin/auth/me), feita pelo layout do dashboard.
  */
 export async function GET(req: NextRequest) {
   const origin = appOriginOr(req.nextUrl.origin);

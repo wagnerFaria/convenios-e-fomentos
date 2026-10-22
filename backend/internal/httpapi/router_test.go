@@ -39,12 +39,12 @@ func TestRotasDeInfraestrutura(t *testing.T) {
 		status     int
 		codigoErro string
 	}{
-		{"health", fakeDB{}, "/health", 200, ""},
-		{"ready ok", fakeDB{}, "/ready", 200, ""},
-		{"ready sem banco", fakeDB{errors.New("falhou")}, "/ready", 503, "not_ready"},
+		{"health", fakeDB{}, "/api/health", 200, ""},
+		{"ready ok", fakeDB{}, "/api/ready", 200, ""},
+		{"ready sem banco", fakeDB{errors.New("falhou")}, "/api/ready", 503, "not_ready"},
 		{"rota inexistente", fakeDB{}, "/nao-existe", 404, "not_found"},
-		{"docs", fakeDB{}, "/docs", 200, ""},
-		{"spec", fakeDB{}, "/docs/openapi.yaml", 200, ""},
+		{"docs", fakeDB{}, "/api/docs", 200, ""},
+		{"spec", fakeDB{}, "/api/docs/openapi.yaml", 200, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.nome, func(t *testing.T) {
@@ -108,7 +108,7 @@ func TestRequestIDDoClienteESanitizado(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.nome, func(t *testing.T) {
-			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/health", nil)
 			if tt.enviado != "" {
 				req.Header["X-Request-Id"] = []string{tt.enviado}
 			}

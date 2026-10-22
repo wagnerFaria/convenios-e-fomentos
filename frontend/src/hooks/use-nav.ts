@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Filtra a navegação pelas permissões efetivas do administrador (`/admin/auth/me`).
+ * Filtra a navegação pelas permissões efetivas do administrador (`/api/admin/auth/me`).
  * Afeta apenas a visibilidade: a autorização real é feita pelo backend em cada requisição.
  */
 

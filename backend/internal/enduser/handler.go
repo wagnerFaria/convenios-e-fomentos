@@ -33,7 +33,7 @@ func meta(r *http.Request) auth.SessionMeta {
 
 // Routes registra as rotas. As de autenticação são públicas e limitadas por taxa.
 func (h *Handler) Routes(r chi.Router) {
-	r.Route("/api/auth", func(r chi.Router) {
+	r.Route("/auth", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(httpapi.RateLimitByIPAndField(h.ratePerMinute, "identifier"))
 			r.Post("/local", h.login)
@@ -56,7 +56,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/change-password", h.changePassword)
 		})
 	})
-	r.With(h.id.Identify, RequireUser).Get("/api/users/me", h.me)
+	r.With(h.id.Identify, RequireUser).Get("/users/me", h.me)
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {

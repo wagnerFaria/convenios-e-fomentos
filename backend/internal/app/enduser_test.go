@@ -23,7 +23,7 @@ const userPass = "senha-de-usuario-1"
 
 func (e *env) settingsPatch(boss string, patch map[string]any) resp {
 	e.t.Helper()
-	cur := e.do("GET", "/admin/end-user-settings", nil, boss)
+	cur := e.do("GET", "/api/admin/end-user-settings", nil, boss)
 	require.Equal(e.t, 200, cur.Status, cur.Body)
 	body := map[string]any{}
 	for k, v := range cur.data() {
@@ -32,7 +32,7 @@ func (e *env) settingsPatch(boss string, patch map[string]any) resp {
 	for k, v := range patch {
 		body[k] = v
 	}
-	return e.do("PUT", "/admin/end-user-settings", body, boss)
+	return e.do("PUT", "/api/admin/end-user-settings", body, boss)
 }
 
 func (e *env) register(username, email string) resp {
@@ -66,18 +66,18 @@ func (e *env) registerAPIActions() {}
 func TestPadroesDeUsuariosFinais(t *testing.T) {
 	e, boss := setup(t)
 	var types []string
-	for _, r := range e.do("GET", "/admin/end-user-roles", nil, boss).list() {
+	for _, r := range e.do("GET", "/api/admin/end-user-roles", nil, boss).list() {
 		types = append(types, r.(map[string]any)["type"].(string))
 	}
 	assert.Equal(t, []string{"authenticated", "public"}, types)
 
-	st := e.do("GET", "/admin/end-user-settings", nil, boss).data()
+	st := e.do("GET", "/api/admin/end-user-settings", nil, boss).data()
 	assert.Equal(t, e.endRoleID("authenticated"), st["defaultRoleId"])
 	assert.Equal(t, true, st["oneAccountPerEmail"])
 	assert.Equal(t, true, st["registrationEnabled"])
 	assert.Equal(t, false, st["emailConfirmationRequired"])
 
-	tpls := e.do("GET", "/admin/email-templates", nil, boss).list()
+	tpls := e.do("GET", "/api/admin/email-templates", nil, boss).list()
 	require.Len(t, tpls, 2)
 	assert.Equal(t, "email-confirmation", tpls[0].(map[string]any)["key"])
 	assert.Contains(t, tpls[0].(map[string]any)["bodyHtml"], "{{.URL}}")
@@ -88,7 +88,7 @@ func TestPadroesDeUsuariosFinais(t *testing.T) {
 	require.NoError(t, e.app.Start(startCtx))
 	e.settingsPatch(boss, map[string]any{"registrationEnabled": false})
 	require.NoError(t, e.app.EndUsers.EnsureDefaults(context.Background()))
-	assert.Equal(t, false, e.do("GET", "/admin/end-user-settings", nil, boss).data()["registrationEnabled"])
+	assert.Equal(t, false, e.do("GET", "/api/admin/end-user-settings", nil, boss).data()["registrationEnabled"])
 }
 
 func TestCadastroELogin(t *testing.T) {
@@ -169,7 +169,7 @@ func TestCamposExtrasNoCadastro(t *testing.T) {
 	assert.Equal(t, 422, e.settingsPatch(boss, map[string]any{"registerAllowedFields": []string{"role"}}).Status)
 	assert.Equal(t, 422, e.settingsPatch(boss, map[string]any{"registerAllowedFields": []string{"a b"}}).Status)
 	require.Equal(t, 200, e.settingsPatch(boss, map[string]any{"registerAllowedFields": []string{"telefone", "idade", "idade"}}).Status)
-	assert.Equal(t, []any{"idade", "telefone"}, e.do("GET", "/admin/end-user-settings", nil, boss).data()["registerAllowedFields"])
+	assert.Equal(t, []any{"idade", "telefone"}, e.do("GET", "/api/admin/end-user-settings", nil, boss).data()["registerAllowedFields"])
 
 	r = e.do("POST", "/api/auth/local/register", body, "")
 	require.Equal(t, 201, r.Status, r.Body)
@@ -258,7 +258,7 @@ func TestRefreshLogoutEBloqueio(t *testing.T) {
 	tk := e.userLogin("maria", userPass).data()["tokens"].(map[string]any)
 	a3, r3 := tk["accessToken"].(string), tk["refreshToken"].(string)
 	assert.Equal(t, 200, e.do("GET", "/api/users/me", nil, a3).Status)
-	blocked := e.do("POST", "/admin/end-users/"+id+"/block", nil, boss)
+	blocked := e.do("POST", "/api/admin/end-users/"+id+"/block", nil, boss)
 	require.Equal(t, 200, blocked.Status, blocked.Body)
 	assert.Equal(t, true, blocked.data()["blocked"])
 	assert.Equal(t, 401, e.do("GET", "/api/users/me", nil, a3).Status)
@@ -268,7 +268,7 @@ func TestRefreshLogoutEBloqueio(t *testing.T) {
 	assert.Equal(t, "account_blocked", bl.errCode())
 	assert.Equal(t, 401, e.userLogin("maria", "errada-errada-1").Status, "senha errada continua genérica")
 
-	assert.Equal(t, 200, e.do("POST", "/admin/end-users/"+id+"/unblock", nil, boss).Status)
+	assert.Equal(t, 200, e.do("POST", "/api/admin/end-users/"+id+"/unblock", nil, boss).Status)
 	assert.Equal(t, 200, e.userLogin("maria", userPass).Status)
 }
 
@@ -314,12 +314,12 @@ func TestTokensDeAdminEUsuarioFinalNaoSeMisturam(t *testing.T) {
 	e, boss := setup(t)
 	userAccess, _, _ := e.userToken("maria", "maria@exemplo.com")
 	assert.Equal(t, 401, e.do("GET", "/api/users/me", nil, boss).Status, "token do MT Login na API pública")
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, userAccess).Status, "JWT de usuário final na API admin")
-	assert.Equal(t, 401, e.do("GET", "/admin/roles", nil, userAccess).Status)
+	assert.Equal(t, 401, e.do("GET", "/api/admin/auth/me", nil, userAccess).Status, "JWT de usuário final na API admin")
+	assert.Equal(t, 401, e.do("GET", "/api/admin/roles", nil, userAccess).Status)
 	// Mesmo forjado com o segredo da API: o painel só aceita RS256 do MT Login.
 	id := uuid.New()
 	forged, _ := auth.NewJWTIssuer(e.cfg.JWTAPISecret, "admin", 60e9).Issue(id, uuid.New())
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, forged).Status)
+	assert.Equal(t, 401, e.do("GET", "/api/admin/auth/me", nil, forged).Status)
 }
 
 func newRecorder() *recorder { return &recorder{ResponseRecorder: newHTTPRecorder()} }
@@ -328,7 +328,7 @@ func TestRolesDeUsuarioFinal(t *testing.T) {
 	e, boss := setup(t)
 	e.registerAPIActions()
 
-	r := e.do("POST", "/admin/end-user-roles", map[string]any{"name": "Moderadores", "description": "Moderam", "permissions": []string{"api::document.update", "api::document.find"}}, boss)
+	r := e.do("POST", "/api/admin/end-user-roles", map[string]any{"name": "Moderadores", "description": "Moderam", "permissions": []string{"api::document.update", "api::document.find"}}, boss)
 	require.Equal(t, 201, r.Status, r.Body)
 	id := r.data()["id"].(string)
 	assert.Equal(t, "custom-moderadores", r.data()["type"])
@@ -339,44 +339,44 @@ func TestRolesDeUsuarioFinal(t *testing.T) {
 	assert.Equal(t, "api::document.find", first["action"])
 	assert.Equal(t, "GET", first["method"], "devolve a rota vinculada")
 	assert.Equal(t, "/api/documents", first["route"])
-	assert.Equal(t, "custom-moderadores-2", e.do("POST", "/admin/end-user-roles", map[string]any{"name": "Moderadores"}, boss).data()["type"])
+	assert.Equal(t, "custom-moderadores-2", e.do("POST", "/api/admin/end-user-roles", map[string]any{"name": "Moderadores"}, boss).data()["type"])
 
 	bad := func(perm ...string) resp {
-		return e.do("POST", "/admin/end-user-roles", map[string]any{"name": "X", "permissions": perm}, boss)
+		return e.do("POST", "/api/admin/end-user-roles", map[string]any{"name": "X", "permissions": perm}, boss)
 	}
 	assert.Equal(t, 422, bad("api::nao.existe").Status)
 	assert.Equal(t, 422, bad("admin::settings.users.read").Status, "ação de admin não é permitida")
-	assert.Equal(t, 422, e.do("POST", "/admin/end-user-roles", map[string]any{"name": ""}, boss).Status)
+	assert.Equal(t, 422, e.do("POST", "/api/admin/end-user-roles", map[string]any{"name": ""}, boss).Status)
 
 	// Editar: sem "permissions" não altera; com a lista, substitui.
-	u := e.do("PUT", "/admin/end-user-roles/"+id, map[string]any{"name": "Moderação", "description": "x"}, boss)
+	u := e.do("PUT", "/api/admin/end-user-roles/"+id, map[string]any{"name": "Moderação", "description": "x"}, boss)
 	require.Equal(t, 200, u.Status)
 	assert.Len(t, u.data()["permissions"], 2)
 	assert.Equal(t, "custom-moderadores", u.data()["type"], "o tipo é imutável")
-	u = e.do("PUT", "/admin/end-user-roles/"+id, map[string]any{"name": "Moderação", "permissions": []string{"api::document.findOne"}}, boss)
+	u = e.do("PUT", "/api/admin/end-user-roles/"+id, map[string]any{"name": "Moderação", "permissions": []string{"api::document.findOne"}}, boss)
 	assert.Len(t, u.data()["permissions"], 1)
-	assert.Equal(t, 422, e.do("PUT", "/admin/end-user-roles/"+id, map[string]any{"name": "M", "permissions": []string{"nada"}}, boss).Status)
-	assert.Equal(t, 404, e.do("PUT", "/admin/end-user-roles/"+uuid.NewString(), map[string]any{"name": "M"}, boss).Status)
+	assert.Equal(t, 422, e.do("PUT", "/api/admin/end-user-roles/"+id, map[string]any{"name": "M", "permissions": []string{"nada"}}, boss).Status)
+	assert.Equal(t, 404, e.do("PUT", "/api/admin/end-user-roles/"+uuid.NewString(), map[string]any{"name": "M"}, boss).Status)
 
 	// Excluir uma role move os usuários para a Public (na mesma transação).
 	_, _, uid := e.userToken("maria", "maria@exemplo.com")
-	require.Equal(t, 200, e.do("PUT", "/admin/end-users/"+uid+"/role", map[string]any{"roleId": id}, boss).Status)
-	assert.EqualValues(t, 1, e.do("GET", "/admin/end-user-roles/"+id, nil, boss).data()["userCount"])
-	require.Equal(t, 204, e.do("DELETE", "/admin/end-user-roles/"+id, nil, boss).Status)
-	moved := e.do("GET", "/admin/end-users/"+uid, nil, boss)
+	require.Equal(t, 200, e.do("PUT", "/api/admin/end-users/"+uid+"/role", map[string]any{"roleId": id}, boss).Status)
+	assert.EqualValues(t, 1, e.do("GET", "/api/admin/end-user-roles/"+id, nil, boss).data()["userCount"])
+	require.Equal(t, 204, e.do("DELETE", "/api/admin/end-user-roles/"+id, nil, boss).Status)
+	moved := e.do("GET", "/api/admin/end-users/"+uid, nil, boss)
 	assert.Equal(t, "public", moved.data()["role"].(map[string]any)["type"])
-	assert.Equal(t, 404, e.do("GET", "/admin/end-user-roles/"+id, nil, boss).Status)
-	logs := e.do("GET", "/admin/audit-logs?action=end-user-role.delete", nil, boss)
+	assert.Equal(t, 404, e.do("GET", "/api/admin/end-user-roles/"+id, nil, boss).Status)
+	logs := e.do("GET", "/api/admin/audit-logs?action=end-user-role.delete", nil, boss)
 	require.NotEmpty(t, logs.list())
 	assert.EqualValues(t, 1, logs.list()[0].(map[string]any)["payload"].(map[string]any)["after"].(map[string]any)["usersMovedToPublic"])
 
 	// Public e Authenticated não são excluídas; a role padrão também não.
-	assert.Equal(t, "role_protected", e.do("DELETE", "/admin/end-user-roles/"+e.endRoleID("public"), nil, boss).errCode())
-	assert.Equal(t, "role_protected", e.do("DELETE", "/admin/end-user-roles/"+e.endRoleID("authenticated"), nil, boss).errCode())
-	mod := e.do("POST", "/admin/end-user-roles", map[string]any{"name": "Padrão novo"}, boss).data()["id"].(string)
+	assert.Equal(t, "role_protected", e.do("DELETE", "/api/admin/end-user-roles/"+e.endRoleID("public"), nil, boss).errCode())
+	assert.Equal(t, "role_protected", e.do("DELETE", "/api/admin/end-user-roles/"+e.endRoleID("authenticated"), nil, boss).errCode())
+	mod := e.do("POST", "/api/admin/end-user-roles", map[string]any{"name": "Padrão novo"}, boss).data()["id"].(string)
 	require.Equal(t, 200, e.settingsPatch(boss, map[string]any{"defaultRoleId": mod}).Status)
-	assert.Equal(t, "role_is_default", e.do("DELETE", "/admin/end-user-roles/"+mod, nil, boss).errCode())
-	assert.Equal(t, "custom-padrao-novo", e.do("GET", "/admin/end-user-roles/"+mod, nil, boss).data()["type"])
+	assert.Equal(t, "role_is_default", e.do("DELETE", "/api/admin/end-user-roles/"+mod, nil, boss).errCode())
+	assert.Equal(t, "custom-padrao-novo", e.do("GET", "/api/admin/end-user-roles/"+mod, nil, boss).data()["type"])
 	// Novos cadastros recebem a role padrão configurada.
 	r2 := e.register("joao", "j@exemplo.com")
 	assert.Equal(t, mod, r2.data()["user"].(map[string]any)["role"].(map[string]any)["id"])
@@ -413,7 +413,7 @@ func TestAutorizacaoNaAPIPublicaEPolicyIsOwner(t *testing.T) {
 	// Public libera a leitura para anônimos; Authenticated cria e atualiza.
 	put := func(role string, actions ...string) {
 		rid := e.endRoleID(role)
-		r := e.do("PUT", "/admin/end-user-roles/"+rid, map[string]any{"name": role, "permissions": actions}, boss)
+		r := e.do("PUT", "/api/admin/end-user-roles/"+rid, map[string]any{"name": role, "permissions": actions}, boss)
 		require.Equal(t, 200, r.Status, r.Body)
 	}
 	put("public", "api::document.find")
@@ -451,7 +451,7 @@ func TestAutorizacaoNaAPIPublicaEPolicyIsOwner(t *testing.T) {
 	// Usuário movido para a Public perde as permissões de Authenticated.
 	put("authenticated", "api::document.find", "api::document.create")
 	jid := e.do("GET", "/api/users/me", nil, joao).data()["id"].(string)
-	require.Equal(t, 200, e.do("PUT", "/admin/end-users/"+jid+"/role", map[string]any{"roleId": e.endRoleID("public")}, boss).Status)
+	require.Equal(t, 200, e.do("PUT", "/api/admin/end-users/"+jid+"/role", map[string]any{"roleId": e.endRoleID("public")}, boss).Status)
 	assert.Equal(t, 403, e.do("POST", "/api/t/documents", map[string]any{}, joao).Status)
 }
 
@@ -474,48 +474,48 @@ func TestAdministracaoDeUsuariosFinais(t *testing.T) {
 	for _, n := range []string{"ana", "bia", "caio"} {
 		e.userToken(n, n+"@exemplo.com")
 	}
-	list := e.do("GET", "/admin/end-users", nil, boss)
+	list := e.do("GET", "/api/admin/end-users", nil, boss)
 	require.Equal(t, 200, list.Status)
 	assert.Len(t, list.list(), 3)
 	assert.EqualValues(t, 3, list.meta()["total"])
-	count := func(q string) int { return len(e.do("GET", "/admin/end-users?"+q, nil, boss).list()) }
+	count := func(q string) int { return len(e.do("GET", "/api/admin/end-users?"+q, nil, boss).list()) }
 	assert.Equal(t, 1, count("q=bia"))
 	assert.Equal(t, 3, count("confirmed=true"))
 	assert.Equal(t, 0, count("blocked=true"))
 	assert.Equal(t, 3, count("roleId="+e.endRoleID("authenticated")))
 	assert.Equal(t, 2, count("pageSize=2"))
-	assert.Equal(t, "caio", e.do("GET", "/admin/end-users?sort=username:desc", nil, boss).list()[0].(map[string]any)["username"])
+	assert.Equal(t, "caio", e.do("GET", "/api/admin/end-users?sort=username:desc", nil, boss).list()[0].(map[string]any)["username"])
 	for _, bad := range []string{"sort=password_hash", "confirmed=talvez", "roleId=x", "page=0"} {
-		assert.Equal(t, 422, e.do("GET", "/admin/end-users?"+bad, nil, boss).Status, bad)
+		assert.Equal(t, 422, e.do("GET", "/api/admin/end-users?"+bad, nil, boss).Status, bad)
 	}
 
 	// CRUD.
-	c := e.do("POST", "/admin/end-users", map[string]any{"username": "dora", "email": "dora@exemplo.com", "password": userPass, "confirmed": true}, boss)
+	c := e.do("POST", "/api/admin/end-users", map[string]any{"username": "dora", "email": "dora@exemplo.com", "password": userPass, "confirmed": true}, boss)
 	require.Equal(t, 201, c.Status, c.Body)
 	id := c.data()["id"].(string)
 	assert.Equal(t, 200, e.userLogin("dora", userPass).Status)
-	assert.Equal(t, 409, e.do("POST", "/admin/end-users", map[string]any{"username": "dora2", "email": "dora@exemplo.com", "password": userPass}, boss).Status)
-	assert.Equal(t, 422, e.do("POST", "/admin/end-users", map[string]any{"username": "x1", "email": "x@exemplo.com", "password": userPass, "roleId": uuid.NewString()}, boss).Status)
+	assert.Equal(t, 409, e.do("POST", "/api/admin/end-users", map[string]any{"username": "dora2", "email": "dora@exemplo.com", "password": userPass}, boss).Status)
+	assert.Equal(t, 422, e.do("POST", "/api/admin/end-users", map[string]any{"username": "x1", "email": "x@exemplo.com", "password": userPass, "roleId": uuid.NewString()}, boss).Status)
 
-	u := e.do("PUT", "/admin/end-users/"+id, map[string]any{"username": "dora_s", "email": "dora.s@exemplo.com", "password": "senha-nova-forte-1"}, boss)
+	u := e.do("PUT", "/api/admin/end-users/"+id, map[string]any{"username": "dora_s", "email": "dora.s@exemplo.com", "password": "senha-nova-forte-1"}, boss)
 	require.Equal(t, 200, u.Status, u.Body)
 	assert.Equal(t, 401, e.userLogin("dora", userPass).Status)
 	assert.Equal(t, 200, e.userLogin("dora_s", "senha-nova-forte-1").Status)
-	assert.Equal(t, 409, e.do("PUT", "/admin/end-users/"+id, map[string]any{"username": "ana", "email": "dora.s@exemplo.com"}, boss).Status)
-	assert.Equal(t, 409, e.do("PUT", "/admin/end-users/"+id, map[string]any{"username": "dora_s", "email": "ana@exemplo.com"}, boss).Status)
-	assert.Equal(t, 404, e.do("PUT", "/admin/end-users/"+uuid.NewString(), map[string]any{"username": "abc", "email": "a@b.com"}, boss).Status)
+	assert.Equal(t, 409, e.do("PUT", "/api/admin/end-users/"+id, map[string]any{"username": "ana", "email": "dora.s@exemplo.com"}, boss).Status)
+	assert.Equal(t, 409, e.do("PUT", "/api/admin/end-users/"+id, map[string]any{"username": "dora_s", "email": "ana@exemplo.com"}, boss).Status)
+	assert.Equal(t, 404, e.do("PUT", "/api/admin/end-users/"+uuid.NewString(), map[string]any{"username": "abc", "email": "a@b.com"}, boss).Status)
 
 	// Marcar como confirmado e alterar role.
-	pend := e.do("POST", "/admin/end-users", map[string]any{"username": "edu", "email": "edu@exemplo.com", "password": userPass}, boss).data()["id"].(string)
-	assert.Equal(t, true, e.do("POST", "/admin/end-users/"+pend+"/confirm", nil, boss).data()["confirmed"])
-	assert.Equal(t, 422, e.do("PUT", "/admin/end-users/"+pend+"/role", map[string]any{"roleId": uuid.NewString()}, boss).Status)
+	pend := e.do("POST", "/api/admin/end-users", map[string]any{"username": "edu", "email": "edu@exemplo.com", "password": userPass}, boss).data()["id"].(string)
+	assert.Equal(t, true, e.do("POST", "/api/admin/end-users/"+pend+"/confirm", nil, boss).data()["confirmed"])
+	assert.Equal(t, 422, e.do("PUT", "/api/admin/end-users/"+pend+"/role", map[string]any{"roleId": uuid.NewString()}, boss).Status)
 
-	assert.Equal(t, 204, e.do("DELETE", "/admin/end-users/"+id, nil, boss).Status)
-	assert.Equal(t, 404, e.do("GET", "/admin/end-users/"+id, nil, boss).Status)
-	assert.Equal(t, 404, e.do("DELETE", "/admin/end-users/"+id, nil, boss).Status)
+	assert.Equal(t, 204, e.do("DELETE", "/api/admin/end-users/"+id, nil, boss).Status)
+	assert.Equal(t, 404, e.do("GET", "/api/admin/end-users/"+id, nil, boss).Status)
+	assert.Equal(t, 404, e.do("DELETE", "/api/admin/end-users/"+id, nil, boss).Status)
 
 	// Auditoria sem a senha.
-	logs := e.do("GET", "/admin/audit-logs?entity=end_user&action=end-user.update", nil, boss)
+	logs := e.do("GET", "/api/admin/audit-logs?entity=end_user&action=end-user.update", nil, boss)
 	require.Len(t, logs.list(), 1)
 	raw := logs.list()[0].(map[string]any)["payload"]
 	assert.NotContains(t, strings.ToLower(toJSON(raw)), "password")
@@ -526,7 +526,7 @@ func TestConfiguracoesETemplatesDeEmail(t *testing.T) {
 	assert.Equal(t, 422, e.settingsPatch(boss, map[string]any{"resetPasswordUrl": "javascript:alert(1)"}).Status)
 	assert.Equal(t, 422, e.settingsPatch(boss, map[string]any{"emailConfirmationRedirectUrl": "/relativa"}).Status)
 	assert.Equal(t, 200, e.settingsPatch(boss, map[string]any{"resetPasswordUrl": "http://localhost:3000/reset"}).Status)
-	logs := e.do("GET", "/admin/audit-logs?action=end-user-settings.update", nil, boss)
+	logs := e.do("GET", "/api/admin/audit-logs?action=end-user-settings.update", nil, boss)
 	require.NotEmpty(t, logs.list())
 	p := logs.list()[0].(map[string]any)["payload"].(map[string]any)
 	assert.Equal(t, "", p["before"].(map[string]any)["resetPasswordUrl"])
@@ -534,9 +534,9 @@ func TestConfiguracoesETemplatesDeEmail(t *testing.T) {
 
 	tpl := map[string]any{"senderName": "Equipe", "senderEmail": "equipe@exemplo.com", "replyTo": "ajuda@exemplo.com",
 		"subject": "Olá {{.User.Username}}", "bodyHtml": `<p>Oi {{.User.Username}} ({{.User.Email}}) — <a href="{{.URL}}">link</a> {{.ServerURL}} {{.Token}}</p>`}
-	r := e.do("PUT", "/admin/email-templates/reset-password", tpl, boss)
+	r := e.do("PUT", "/api/admin/email-templates/reset-password", tpl, boss)
 	require.Equal(t, 200, r.Status, r.Body)
-	assert.Equal(t, "Olá {{.User.Username}}", e.do("GET", "/admin/email-templates/reset-password", nil, boss).data()["subject"])
+	assert.Equal(t, "Olá {{.User.Username}}", e.do("GET", "/api/admin/email-templates/reset-password", nil, boss).data()["subject"])
 
 	invalid := map[string]map[string]any{
 		"sintaxe":              {"bodyHtml": "<p>{{.User.Username</p>"},
@@ -553,10 +553,10 @@ func TestConfiguracoesETemplatesDeEmail(t *testing.T) {
 		for k, v := range patch {
 			body[k] = v
 		}
-		assert.Equal(t, 422, e.do("PUT", "/admin/email-templates/reset-password", body, boss).Status, name)
+		assert.Equal(t, 422, e.do("PUT", "/api/admin/email-templates/reset-password", body, boss).Status, name)
 	}
-	assert.Equal(t, 404, e.do("GET", "/admin/email-templates/nao-existe", nil, boss).Status)
-	assert.Equal(t, 404, e.do("PUT", "/admin/email-templates/nao-existe", tpl, boss).Status)
+	assert.Equal(t, 404, e.do("GET", "/api/admin/email-templates/nao-existe", nil, boss).Status)
+	assert.Equal(t, 404, e.do("PUT", "/api/admin/email-templates/nao-existe", tpl, boss).Status)
 
 	// O e-mail enviado usa o template editado.
 	e.userToken("maria", "maria@exemplo.com")
@@ -577,13 +577,13 @@ func TestRotasAdminDeUsuariosFinaisExigemPermissao(t *testing.T) {
 	nobody, _ := e.newAdmin(boss, "nobody@exemplo.com", "vazio")
 	id, rid := uuid.NewString(), uuid.NewString()
 	routes := []struct{ method, path string }{
-		{"GET", "/admin/end-user-roles"}, {"POST", "/admin/end-user-roles"}, {"GET", "/admin/end-user-roles/" + rid},
-		{"PUT", "/admin/end-user-roles/" + rid}, {"DELETE", "/admin/end-user-roles/" + rid},
-		{"GET", "/admin/end-users"}, {"POST", "/admin/end-users"}, {"GET", "/admin/end-users/" + id}, {"PUT", "/admin/end-users/" + id},
-		{"DELETE", "/admin/end-users/" + id}, {"POST", "/admin/end-users/" + id + "/block"}, {"POST", "/admin/end-users/" + id + "/unblock"},
-		{"PUT", "/admin/end-users/" + id + "/role"}, {"POST", "/admin/end-users/" + id + "/confirm"},
-		{"GET", "/admin/end-user-settings"}, {"PUT", "/admin/end-user-settings"},
-		{"GET", "/admin/email-templates"}, {"GET", "/admin/email-templates/reset-password"}, {"PUT", "/admin/email-templates/reset-password"},
+		{"GET", "/api/admin/end-user-roles"}, {"POST", "/api/admin/end-user-roles"}, {"GET", "/api/admin/end-user-roles/" + rid},
+		{"PUT", "/api/admin/end-user-roles/" + rid}, {"DELETE", "/api/admin/end-user-roles/" + rid},
+		{"GET", "/api/admin/end-users"}, {"POST", "/api/admin/end-users"}, {"GET", "/api/admin/end-users/" + id}, {"PUT", "/api/admin/end-users/" + id},
+		{"DELETE", "/api/admin/end-users/" + id}, {"POST", "/api/admin/end-users/" + id + "/block"}, {"POST", "/api/admin/end-users/" + id + "/unblock"},
+		{"PUT", "/api/admin/end-users/" + id + "/role"}, {"POST", "/api/admin/end-users/" + id + "/confirm"},
+		{"GET", "/api/admin/end-user-settings"}, {"PUT", "/api/admin/end-user-settings"},
+		{"GET", "/api/admin/email-templates"}, {"GET", "/api/admin/email-templates/reset-password"}, {"PUT", "/api/admin/email-templates/reset-password"},
 	}
 	for _, rt := range routes {
 		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
@@ -593,8 +593,8 @@ func TestRotasAdminDeUsuariosFinaisExigemPermissao(t *testing.T) {
 	}
 	// Permissão parcial: só leitura de templates.
 	e.grant("vazio", "admin::settings.email-templates.read", "", "[]")
-	assert.Equal(t, 200, e.do("GET", "/admin/email-templates", nil, nobody).Status)
-	assert.Equal(t, 403, e.do("PUT", "/admin/email-templates/reset-password", map[string]any{}, nobody).Status)
+	assert.Equal(t, 200, e.do("GET", "/api/admin/email-templates", nil, nobody).Status)
+	assert.Equal(t, 403, e.do("PUT", "/api/admin/email-templates/reset-password", map[string]any{}, nobody).Status)
 }
 
 func TestLimiteDeRequisicoesNaAPIPublica(t *testing.T) {

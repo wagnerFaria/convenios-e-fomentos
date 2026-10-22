@@ -24,7 +24,7 @@ func (e *env) createToken(boss, name, typ, lifespan string, perms ...string) res
 	if perms != nil {
 		body["permissions"] = perms
 	}
-	return e.do("POST", "/admin/api-tokens", body, boss)
+	return e.do("POST", "/api/admin/api-tokens", body, boss)
 }
 
 // tokenFixture registra ações e rotas públicas de teste protegidas por ação.
@@ -58,7 +58,7 @@ func TestCriarTokenMostraOValorUmaVezESoGuardaOHMAC(t *testing.T) {
 	assert.Len(t, raw, 4+43)
 	assert.Equal(t, "active", r.data()["status"])
 	assert.Equal(t, "30d", r.data()["lifespan"])
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/admin/api-tokens", strings.NewReader(`{"name":"cache","type":"read-only","lifespan":"7d"}`))
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/admin/api-tokens", strings.NewReader(`{"name":"cache","type":"read-only","lifespan":"7d"}`))
 	req.Header.Set("Authorization", "Bearer "+boss)
 	req.RemoteAddr = "10.0.0.1:1"
 	rec := newRecorder()
@@ -82,7 +82,7 @@ func TestCriarTokenMostraOValorUmaVezESoGuardaOHMAC(t *testing.T) {
 	assert.Zero(t, leaked)
 
 	// Depois da criação o valor nunca mais aparece.
-	for _, resp := range []resp{e.do("GET", "/admin/api-tokens/"+id, nil, boss), e.do("GET", "/admin/api-tokens", nil, boss), e.do("GET", "/admin/api-tokens/"+id, nil, boss)} {
+	for _, resp := range []resp{e.do("GET", "/api/admin/api-tokens/"+id, nil, boss), e.do("GET", "/api/admin/api-tokens", nil, boss), e.do("GET", "/api/admin/api-tokens/"+id, nil, boss)} {
 		body := toJSON(resp.Body)
 		assert.NotContains(t, body, raw)
 		assert.NotContains(t, body, hash)
@@ -107,7 +107,7 @@ func TestDuracoesEValidacaoNaCriacao(t *testing.T) {
 	}
 	cases := map[string]resp{
 		"duração inválida":         e.createToken(boss, "a", "read-only", "15d"),
-		"duração ausente":          e.do("POST", "/admin/api-tokens", map[string]any{"name": "b", "type": "read-only"}, boss),
+		"duração ausente":          e.do("POST", "/api/admin/api-tokens", map[string]any{"name": "b", "type": "read-only"}, boss),
 		"tipo inválido":            e.createToken(boss, "c", "super", "7d"),
 		"sem nome":                 e.createToken(boss, "", "read-only", "7d"),
 		"custom sem ações":         e.createToken(boss, "d", "custom", "7d"),
@@ -149,8 +149,8 @@ func TestTiposDeTokenNaAPIPublica(t *testing.T) {
 	assert.Equal(t, 403, e.do("PUT", "/api/t/documents/"+uuid.NewString(), map[string]any{}, full).Status)
 
 	// Token de API não acessa a API administrativa nem /api/users/me.
-	assert.Equal(t, 401, e.do("GET", "/admin/roles", nil, full).Status)
-	assert.Equal(t, 401, e.do("GET", "/admin/auth/me", nil, full).Status)
+	assert.Equal(t, 401, e.do("GET", "/api/admin/roles", nil, full).Status)
+	assert.Equal(t, 401, e.do("GET", "/api/admin/auth/me", nil, full).Status)
 	assert.Equal(t, 401, e.do("GET", "/api/users/me", nil, full).Status)
 }
 
@@ -188,37 +188,37 @@ func TestExpiracaoERevogacao(t *testing.T) {
 	_, err := e.pool.Exec(context.Background(), "UPDATE api_tokens SET expires_at = now() - interval '1 second' WHERE id=$1", id)
 	require.NoError(t, err)
 	assert.Equal(t, 401, e.do("GET", "/api/t/documents", nil, tok).Status, "expirado")
-	assert.Equal(t, "expired", e.do("GET", "/admin/api-tokens/"+id, nil, boss).data()["status"])
+	assert.Equal(t, "expired", e.do("GET", "/api/admin/api-tokens/"+id, nil, boss).data()["status"])
 
 	// Revogar vale na hora.
 	r = e.createToken(boss, "revogável", "full-access", "unlimited")
 	tok2, id2 := r.data()["token"].(string), r.data()["id"].(string)
 	assert.Equal(t, 200, e.do("GET", "/api/t/documents", nil, tok2).Status)
-	assert.Equal(t, 204, e.do("DELETE", "/admin/api-tokens/"+id2, nil, boss).Status)
+	assert.Equal(t, 204, e.do("DELETE", "/api/admin/api-tokens/"+id2, nil, boss).Status)
 	assert.Equal(t, 401, e.do("GET", "/api/t/documents", nil, tok2).Status)
-	assert.Equal(t, 404, e.do("DELETE", "/admin/api-tokens/"+id2, nil, boss).Status, "já revogado")
-	assert.Equal(t, 404, e.do("DELETE", "/admin/api-tokens/"+uuid.NewString(), nil, boss).Status)
+	assert.Equal(t, 404, e.do("DELETE", "/api/admin/api-tokens/"+id2, nil, boss).Status, "já revogado")
+	assert.Equal(t, 404, e.do("DELETE", "/api/admin/api-tokens/"+uuid.NewString(), nil, boss).Status)
 
 	// Some da lista, mas segue consultável e pode ser listado explicitamente.
-	for _, it := range e.do("GET", "/admin/api-tokens", nil, boss).list() {
+	for _, it := range e.do("GET", "/api/admin/api-tokens", nil, boss).list() {
 		assert.NotEqual(t, id2, it.(map[string]any)["id"])
 	}
 	found := false
-	for _, it := range e.do("GET", "/admin/api-tokens?includeRevoked=true", nil, boss).list() {
+	for _, it := range e.do("GET", "/api/admin/api-tokens?includeRevoked=true", nil, boss).list() {
 		if it.(map[string]any)["id"] == id2 {
 			found = true
 			assert.Equal(t, "revoked", it.(map[string]any)["status"])
 		}
 	}
 	assert.True(t, found)
-	d := e.do("GET", "/admin/api-tokens/"+id2, nil, boss)
+	d := e.do("GET", "/api/admin/api-tokens/"+id2, nil, boss)
 	assert.Equal(t, "revoked", d.data()["status"])
 	assert.NotNil(t, d.data()["revokedAt"])
 
 	// Revogado não é editado nem regenerado, e o nome fica livre de novo.
 	body := map[string]any{"name": "x", "type": "read-only"}
-	assert.Equal(t, "token_revoked", e.do("PUT", "/admin/api-tokens/"+id2, body, boss).errCode())
-	assert.Equal(t, "token_revoked", e.do("POST", "/admin/api-tokens/"+id2+"/regenerate", nil, boss).errCode())
+	assert.Equal(t, "token_revoked", e.do("PUT", "/api/admin/api-tokens/"+id2, body, boss).errCode())
+	assert.Equal(t, "token_revoked", e.do("POST", "/api/admin/api-tokens/"+id2+"/regenerate", nil, boss).errCode())
 	assert.Equal(t, 201, e.createToken(boss, "revogável", "read-only", "7d").Status)
 }
 
@@ -234,7 +234,7 @@ func TestRegenerarTokenInvalidaOAnterior(t *testing.T) {
 	_, err := e.pool.Exec(context.Background(), "UPDATE api_tokens SET expires_at = now() + interval '1 day' WHERE id=$1", id)
 	require.NoError(t, err)
 
-	n := e.do("POST", "/admin/api-tokens/"+id+"/regenerate", nil, boss)
+	n := e.do("POST", "/api/admin/api-tokens/"+id+"/regenerate", nil, boss)
 	require.Equal(t, 200, n.Status, n.Body)
 	fresh := n.data()["token"].(string)
 	assert.NotEqual(t, old, fresh)
@@ -248,8 +248,8 @@ func TestRegenerarTokenInvalidaOAnterior(t *testing.T) {
 
 	assert.Equal(t, 401, e.do("GET", "/api/t/documents", nil, old).Status, "o valor anterior morre na hora")
 	assert.Equal(t, 200, e.do("GET", "/api/t/documents", nil, fresh).Status)
-	assert.Equal(t, 404, e.do("POST", "/admin/api-tokens/"+uuid.NewString()+"/regenerate", nil, boss).Status)
-	assert.NotContains(t, toJSON(e.do("GET", "/admin/api-tokens/"+id, nil, boss).Body), fresh)
+	assert.Equal(t, 404, e.do("POST", "/api/admin/api-tokens/"+uuid.NewString()+"/regenerate", nil, boss).Status)
+	assert.NotContains(t, toJSON(e.do("GET", "/api/admin/api-tokens/"+id, nil, boss).Body), fresh)
 }
 
 func TestEditarTokenValeNaProximaRequisicao(t *testing.T) {
@@ -260,7 +260,7 @@ func TestEditarTokenValeNaProximaRequisicao(t *testing.T) {
 	other := e.createToken(boss, "outro", "read-only", "7d").data()["id"].(string)
 	assert.Equal(t, 403, e.do("POST", "/api/t/documents", map[string]any{}, tok).Status)
 
-	u := e.do("PUT", "/admin/api-tokens/"+id, map[string]any{"name": "editado", "description": "agora cria", "type": "custom", "permissions": []string{"api::document.create"}}, boss)
+	u := e.do("PUT", "/api/admin/api-tokens/"+id, map[string]any{"name": "editado", "description": "agora cria", "type": "custom", "permissions": []string{"api::document.create"}}, boss)
 	require.Equal(t, 200, u.Status, u.Body)
 	assert.Equal(t, "custom", u.data()["type"])
 	assert.Equal(t, []any{"api::document.create"}, u.data()["permissions"])
@@ -269,15 +269,15 @@ func TestEditarTokenValeNaProximaRequisicao(t *testing.T) {
 	assert.Equal(t, 403, e.do("GET", "/api/t/documents", nil, tok).Status)
 
 	// Voltar para um tipo sem lista limpa as ações.
-	u = e.do("PUT", "/admin/api-tokens/"+id, map[string]any{"name": "editado", "type": "read-only"}, boss)
+	u = e.do("PUT", "/api/admin/api-tokens/"+id, map[string]any{"name": "editado", "type": "read-only"}, boss)
 	assert.Equal(t, []any{}, u.data()["permissions"])
 	assert.Equal(t, 200, e.do("GET", "/api/t/documents", nil, tok).Status)
 
-	assert.Equal(t, 409, e.do("PUT", "/admin/api-tokens/"+other, map[string]any{"name": "Editado", "type": "read-only"}, boss).Status)
-	assert.Equal(t, 422, e.do("PUT", "/admin/api-tokens/"+id, map[string]any{"name": "x", "type": "custom"}, boss).Status)
-	assert.Equal(t, 422, e.do("PUT", "/admin/api-tokens/"+id, map[string]any{"name": "x", "type": "custom", "permissions": []string{"api::nada"}}, boss).Status)
-	assert.Equal(t, 404, e.do("PUT", "/admin/api-tokens/"+uuid.NewString(), map[string]any{"name": "x", "type": "read-only"}, boss).Status)
-	assert.Equal(t, 404, e.do("GET", "/admin/api-tokens/xyz", nil, boss).Status)
+	assert.Equal(t, 409, e.do("PUT", "/api/admin/api-tokens/"+other, map[string]any{"name": "Editado", "type": "read-only"}, boss).Status)
+	assert.Equal(t, 422, e.do("PUT", "/api/admin/api-tokens/"+id, map[string]any{"name": "x", "type": "custom"}, boss).Status)
+	assert.Equal(t, 422, e.do("PUT", "/api/admin/api-tokens/"+id, map[string]any{"name": "x", "type": "custom", "permissions": []string{"api::nada"}}, boss).Status)
+	assert.Equal(t, 404, e.do("PUT", "/api/admin/api-tokens/"+uuid.NewString(), map[string]any{"name": "x", "type": "read-only"}, boss).Status)
+	assert.Equal(t, 404, e.do("GET", "/api/admin/api-tokens/xyz", nil, boss).Status)
 }
 
 func TestUltimoUsoEAtualizadoDeFormaLimitada(t *testing.T) {
@@ -325,7 +325,7 @@ func TestUltimoUsoEAtualizadoDeFormaLimitada(t *testing.T) {
 	assert.Equal(t, stamp, *same)
 
 	// O valor aparece na API admin.
-	d := e.do("GET", "/admin/api-tokens/"+id, nil, boss)
+	d := e.do("GET", "/api/admin/api-tokens/"+id, nil, boss)
 	assert.NotNil(t, d.data()["lastUsedAt"])
 }
 
@@ -335,11 +335,11 @@ func TestAuditoriaDeTokensNaoVazaSegredos(t *testing.T) {
 	r := e.createToken(boss, "auditado", "custom", "30d", "api::document.find")
 	raw, id := r.data()["token"].(string), r.data()["id"].(string)
 	hash, _, _, _ := e.tokenRow(id)
-	e.do("PUT", "/admin/api-tokens/"+id, map[string]any{"name": "auditado 2", "type": "read-only"}, boss)
-	regen := e.do("POST", "/admin/api-tokens/"+id+"/regenerate", nil, boss).data()["token"].(string)
-	e.do("DELETE", "/admin/api-tokens/"+id, nil, boss)
+	e.do("PUT", "/api/admin/api-tokens/"+id, map[string]any{"name": "auditado 2", "type": "read-only"}, boss)
+	regen := e.do("POST", "/api/admin/api-tokens/"+id+"/regenerate", nil, boss).data()["token"].(string)
+	e.do("DELETE", "/api/admin/api-tokens/"+id, nil, boss)
 
-	logs := e.do("GET", "/admin/audit-logs?entity=api_token&entityId="+id+"&pageSize=100", nil, boss)
+	logs := e.do("GET", "/api/admin/audit-logs?entity=api_token&entityId="+id+"&pageSize=100", nil, boss)
 	actions := map[string]bool{}
 	for _, l := range logs.list() {
 		m := l.(map[string]any)
@@ -353,7 +353,7 @@ func TestAuditoriaDeTokensNaoVazaSegredos(t *testing.T) {
 	for _, a := range []string{"api-token.create", "api-token.update", "api-token.regenerate", "api-token.revoke"} {
 		assert.True(t, actions[a], a)
 	}
-	upd := e.do("GET", "/admin/audit-logs?action=api-token.update", nil, boss).list()[0].(map[string]any)["payload"].(map[string]any)
+	upd := e.do("GET", "/api/admin/audit-logs?action=api-token.update", nil, boss).list()[0].(map[string]any)["payload"].(map[string]any)
 	assert.Equal(t, "custom", upd["before"].(map[string]any)["type"])
 	assert.Equal(t, "read-only", upd["after"].(map[string]any)["type"])
 	var createdBy uuid.UUID
@@ -367,8 +367,8 @@ func TestRotasDeTokensExigemPermissao(t *testing.T) {
 	nobody, _ := e.newAdmin(boss, "nobody@exemplo.com", "vazio")
 	id := uuid.NewString()
 	routes := []struct{ method, path string }{
-		{"GET", "/admin/api-tokens"}, {"POST", "/admin/api-tokens"}, {"GET", "/admin/api-tokens/" + id},
-		{"PUT", "/admin/api-tokens/" + id}, {"POST", "/admin/api-tokens/" + id + "/regenerate"}, {"DELETE", "/admin/api-tokens/" + id},
+		{"GET", "/api/admin/api-tokens"}, {"POST", "/api/admin/api-tokens"}, {"GET", "/api/admin/api-tokens/" + id},
+		{"PUT", "/api/admin/api-tokens/" + id}, {"POST", "/api/admin/api-tokens/" + id + "/regenerate"}, {"DELETE", "/api/admin/api-tokens/" + id},
 	}
 	for _, rt := range routes {
 		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
@@ -380,8 +380,8 @@ func TestRotasDeTokensExigemPermissao(t *testing.T) {
 	e.grant("vazio", "admin::settings.api-tokens.read", "", "[]")
 	e.grant("vazio", "admin::settings.api-tokens.update", "", "[]")
 	tok := e.createToken(boss, "p", "read-only", "7d").data()["id"].(string)
-	assert.Equal(t, 200, e.do("GET", "/admin/api-tokens/"+tok, nil, nobody).Status)
-	assert.Equal(t, 403, e.do("POST", "/admin/api-tokens/"+tok+"/regenerate", nil, nobody).Status)
-	assert.Equal(t, 403, e.do("DELETE", "/admin/api-tokens/"+tok, nil, nobody).Status)
-	assert.Equal(t, 200, e.do("PUT", "/admin/api-tokens/"+tok, map[string]any{"name": "p2", "type": "read-only"}, nobody).Status)
+	assert.Equal(t, 200, e.do("GET", "/api/admin/api-tokens/"+tok, nil, nobody).Status)
+	assert.Equal(t, 403, e.do("POST", "/api/admin/api-tokens/"+tok+"/regenerate", nil, nobody).Status)
+	assert.Equal(t, 403, e.do("DELETE", "/api/admin/api-tokens/"+tok, nil, nobody).Status)
+	assert.Equal(t, 200, e.do("PUT", "/api/admin/api-tokens/"+tok, map[string]any{"name": "p2", "type": "read-only"}, nobody).Status)
 }

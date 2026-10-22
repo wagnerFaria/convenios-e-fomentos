@@ -7,6 +7,7 @@ import {
   clearedSessionCookies,
   sessionCookies
 } from '@/lib/auth/cookies';
+import { appOriginOr } from '@/lib/auth/oidc';
 import { refreshTokenPair } from '@/lib/auth/refresh';
 import type { TokenPair } from '@/lib/api/types';
 
@@ -26,12 +27,22 @@ function targetPath(segments: string[]): string | null {
   if (segments.some((s) => s === '' || s === '.' || s === '..' || s.includes('/'))) return null;
   const path = segments.join('/');
   if (!path.startsWith('admin/')) return null;
-  return `/${path}`;
+  return `/api/${path}`;
 }
 
+/**
+ * Defesa contra CSRF: o `Origin` de uma mutação precisa ser o do próprio site. Atrás do HAProxy
+ * `req.nextUrl.origin` é o host interno (web:3000), então a origem pública vem do Host original
+ * (X-Forwarded-Host/Proto, que o navegador de outro site não consegue forjar) e da URL de retorno.
+ */
 function sameOrigin(req: NextRequest): boolean {
   const origin = req.headers.get('origin');
-  return !origin || origin === req.nextUrl.origin;
+  if (!origin) return true;
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
+  const proto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(':', '');
+  const allowed = new Set([req.nextUrl.origin, appOriginOr(req.nextUrl.origin)]);
+  if (host) allowed.add(`${proto}://${host}`);
+  return allowed.has(origin);
 }
 
 async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {

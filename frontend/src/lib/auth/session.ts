@@ -21,7 +21,7 @@ export const getSession = cache(async (): Promise<AdminMe | null> => {
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
   if (!token) return null;
   try {
-    const res = await backendJson<ApiResponse<AdminMe>>('/admin/auth/me', {
+    const res = await backendJson<ApiResponse<AdminMe>>('/api/admin/auth/me', {
       token,
       headers: await headers()
     });

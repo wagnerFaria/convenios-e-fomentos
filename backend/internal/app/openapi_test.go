@@ -25,7 +25,7 @@ func TestOpenAPIEstaCoerenteComAsRotas(t *testing.T) {
 			route = "/"
 		}
 		// A UI e o arquivo da especificação não fazem parte da especificação.
-		if route == "/docs" || route == "/docs/openapi.yaml" {
+		if route == "/api/docs" || route == "/api/docs/openapi.yaml" {
 			return nil
 		}
 		implemented[strings.ToLower(method)+" "+route] = true

@@ -1,7 +1,7 @@
 import { apiErrorFromResponse } from '@/lib/api/errors';
 
 /** Todas as chamadas do navegador passam pelo proxy autenticado do Next (cookies httpOnly). */
-const BASE_URL = '/api/backend';
+const BASE_URL = '/bff';
 
 export async function apiClient<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {

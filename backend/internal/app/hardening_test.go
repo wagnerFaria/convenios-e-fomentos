@@ -13,7 +13,7 @@ import (
 
 func TestCabecalhosDeSeguranca(t *testing.T) {
 	e := newEnv(t)
-	for _, path := range []string{"/health", "/api/documents", "/admin/roles", "/nao-existe"} {
+	for _, path := range []string{"/api/health", "/api/documents", "/api/admin/roles", "/nao-existe"} {
 		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
 		req.RemoteAddr = "10.0.0.1:1"
 		rec := httptest.NewRecorder()
@@ -33,13 +33,13 @@ func TestCabecalhosDeSeguranca(t *testing.T) {
 func TestLimiteGeralPorIP(t *testing.T) {
 	e := newEnv(t, func(c *config.Config) { c.RateLimitGlobalPerMin = 5 })
 	for range 5 {
-		assert.Equal(t, 200, e.do("GET", "/health", nil, "").Status)
+		assert.Equal(t, 200, e.do("GET", "/api/health", nil, "").Status)
 	}
-	r := e.do("GET", "/health", nil, "")
+	r := e.do("GET", "/api/health", nil, "")
 	assert.Equal(t, 429, r.Status)
 	assert.Equal(t, "rate_limited", r.errCode())
 	// Outro IP tem contagem própria.
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/health", nil)
 	req.RemoteAddr = "10.0.0.99:1"
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, req)
