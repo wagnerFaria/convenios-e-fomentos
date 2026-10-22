@@ -29,7 +29,7 @@ x-api: &api
     APP_ENV: ${APP_ENV:-development}
     LOG_LEVEL: ${LOG_LEVEL:-info}
     # Padrão montado a partir de POSTGRES_*; defina DATABASE_URL para usar outro banco.
-    DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}?sslmode=disable}
+    DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-sedec}:${POSTGRES_PASSWORD:-adminadmin}@db:5432/${POSTGRES_DB:-convenios_e_fomento}?sslmode=disable}
     # Os links de e-mail (convite, redefinição de senha) devem abrir o frontend.
     PUBLIC_URL: ${PUBLIC_URL:-${APP_URL:-http://localhost}}
     CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-${APP_URL:-http://localhost}}
@@ -79,7 +79,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sedec} -d ${POSTGRES_DB:-convenios_e_fomento}"]
       interval: 3s
       timeout: 3s
       retries: 10

@@ -147,7 +147,7 @@ O arquivo [`docker-compose.dev.yml`](docker-compose.dev.yml) define cinco servi�
 
 | Serviço | Imagem / build | O que faz |
 |---|---|---|
-| `db` | `postgres:16-alpine` | Banco `app` (usuário/senha `app`), dados no volume `pgdata`. Credenciais por `POSTGRES_*`; porta publicada em `DB_PORT` (padrão 5432). |
+| `db` | `postgres:16-alpine` | Banco `convenios_e_fomento` (usuário `sedec`, senha `adminadmin`), dados no volume `pgdata`. Credenciais por `POSTGRES_*`; porta publicada em `DB_PORT` (padrão 5432). |
 | `migrate` | [`backend/Dockerfile.dev`](backend/Dockerfile.dev) | Aplica as migrações (`migrate:up`) e termina. A API só sobe depois que ele conclui. |
 | `api` | [`backend/Dockerfile.dev`](backend/Dockerfile.dev) | Go com [air](https://github.com/air-verse/air): recompila e reinicia a cada alteração em `.go`, `.sql` ou `.yaml`. |
 | `web` | [`frontend/Dockerfile.dev`](frontend/Dockerfile.dev) | `bun install` + `next dev` (Turbopack) com HMR. |
@@ -219,9 +219,9 @@ docker compose exec web bun run format
 **Banco de dados**
 
 ```bash
-docker compose exec db psql -U app -d app            # console SQL
+docker compose exec db psql -U sedec -d convenios_e_fomento           # console SQL
 # ou, do host, com a porta publicada:
-psql "postgres://app:app@localhost:5432/app"
+psql "postgres://sedec:adminadmin@localhost:5432/convenios_e_fomento"
 docker compose down -v                                # recomeçar do zero (apaga TODOS os dados locais)
 ```
 
