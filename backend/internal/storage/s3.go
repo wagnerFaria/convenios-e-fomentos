@@ -153,3 +153,28 @@ func (s *S3) Delete(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+func (s *S3) Copy(ctx context.Context, src, dst string) error {
+	_, err := s.internal.CopyObject(ctx,
+		minio.CopyDestOptions{Bucket: s.bucket, Object: dst},
+		minio.CopySrcOptions{Bucket: s.bucket, Object: src})
+	if err != nil {
+		if isNotFound(err) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("storage: copiando: %w", err)
+	}
+	return nil
+}
+
+func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	// GetObject é preguiçoso: sem o Stat, um objeto inexistente só apareceria no primeiro Read.
+	if _, err := s.Stat(ctx, key); err != nil {
+		return nil, err
+	}
+	obj, err := s.internal.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("storage: lendo: %w", err)
+	}
+	return obj, nil
+}

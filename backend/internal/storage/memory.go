@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"sync"
 	"time"
 )
@@ -87,4 +89,25 @@ func (m *Memory) Delete(_ context.Context, key string) error {
 	defer m.mu.Unlock()
 	delete(m.objects, key)
 	return nil
+}
+
+func (m *Memory) Copy(_ context.Context, src, dst string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.objects[src]
+	if !ok {
+		return ErrNotFound
+	}
+	m.objects[dst] = memObject{data: append([]byte(nil), o.data...), contentType: o.contentType}
+	return nil
+}
+
+func (m *Memory) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.objects[key]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return io.NopCloser(bytes.NewReader(append([]byte(nil), o.data...))), nil
 }

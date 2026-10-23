@@ -1,16 +1,12 @@
 package document
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"path"
-	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -20,6 +16,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/storage"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/upload"
 )
 
 // Valores do campo status do arquivo.
@@ -29,32 +26,12 @@ const (
 )
 
 const (
-	maxFilenameLen   = 255
 	maxFilesPerDoc   = 50
-	mb               = int64(1) << 20
-	maxDocumentSize  = 200 * mb // PDF e DOCX
-	maxImageSize     = 25 * mb
 	pendingGraceHour = 24
 )
 
-// fileRule é a regra de um tipo de arquivo aceito.
-type fileRule struct {
-	exts    []string
-	maxSize int64
-	// magic confere os primeiros bytes: o Content-Type enviado pelo cliente não basta.
-	magic func(head []byte) bool
-}
-
-var fileRules = map[string]fileRule{
-	"application/pdf": {[]string{".pdf"}, maxDocumentSize, func(b []byte) bool { return bytes.HasPrefix(b, []byte("%PDF-")) }},
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": {[]string{".docx"}, maxDocumentSize,
-		func(b []byte) bool { return bytes.HasPrefix(b, []byte("PK\x03\x04")) }},
-	"image/png":  {[]string{".png"}, maxImageSize, func(b []byte) bool { return bytes.HasPrefix(b, []byte("\x89PNG\r\n\x1a\n")) }},
-	"image/jpeg": {[]string{".jpg", ".jpeg"}, maxImageSize, func(b []byte) bool { return bytes.HasPrefix(b, []byte{0xFF, 0xD8, 0xFF}) }},
-	"image/webp": {[]string{".webp"}, maxImageSize, func(b []byte) bool {
-		return len(b) >= 12 && bytes.Equal(b[:4], []byte("RIFF")) && bytes.Equal(b[8:12], []byte("WEBP"))
-	}},
-}
+// fileRules são os tipos de arquivo aceitos (regras compartilhadas com os anexos dos projetos).
+var fileRules = upload.Rules
 
 // File é o arquivo anexado a um documento. A chave do objeto nunca sai da API.
 type File struct {
@@ -82,45 +59,12 @@ type FileInput struct {
 }
 
 func (in FileInput) validate() (FileInput, error) {
-	var issues []httpapi.FieldError
-	bad := func(f, m string) { issues = append(issues, httpapi.FieldError{Field: f, Message: m}) }
-
-	// Só o nome base: caminhos enviados pelo cliente não têm significado aqui.
-	name := strings.TrimSpace(path.Base(strings.ReplaceAll(in.Filename, `\`, "/")))
-	switch {
-	case name == "" || name == "." || name == "/":
-		bad("filename", "Informe o nome do arquivo.")
-	case utf8.RuneCountInString(name) > maxFilenameLen || !utf8.ValidString(name) || strings.ContainsFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }):
-		bad("filename", fmt.Sprintf("Nome inválido ou maior que %d caracteres.", maxFilenameLen))
-	}
+	name, issues := upload.Check(in.Filename, in.ContentType, in.SizeBytes, upload.FieldNames{Filename: "filename", ContentType: "content_type", Size: "size_bytes"})
 	in.Filename = name
-
-	rule, ok := fileRules[in.ContentType]
-	switch {
-	case !ok:
-		bad("content_type", "Tipo não permitido. Use PDF, DOCX, PNG, JPEG ou WebP.")
-	default:
-		if name != "" && !hasExt(name, rule.exts) {
-			bad("filename", "A extensão do arquivo não corresponde ao tipo informado ("+strings.Join(rule.exts, ", ")+").")
-		}
-		if in.SizeBytes < 1 || in.SizeBytes > rule.maxSize {
-			bad("size_bytes", fmt.Sprintf("Tamanho deve ficar entre 1 byte e %d MB para este tipo.", rule.maxSize/mb))
-		}
-	}
 	if len(issues) > 0 {
 		return in, fieldErrors(issues...)
 	}
 	return in, nil
-}
-
-func hasExt(name string, exts []string) bool {
-	e := strings.ToLower(filepath.Ext(name))
-	for _, x := range exts {
-		if e == x {
-			return true
-		}
-	}
-	return false
 }
 
 var errStorageUnavailable = &httpapi.APIError{Status: 503, Code: "storage_unavailable", Message: "O armazenamento de arquivos não está configurado."}
@@ -233,7 +177,7 @@ func (s *Service) CreateFile(ctx context.Context, actor AdminActor, docID uuid.U
 	if err != nil {
 		return File{}, storage.Upload{}, err
 	}
-	up, err := s.store.PresignUpload(ctx, key, in.ContentType, fileRules[in.ContentType].maxSize, s.uploadTTL)
+	up, err := s.store.PresignUpload(ctx, key, in.ContentType, fileRules[in.ContentType].MaxSize, s.uploadTTL)
 	if err != nil {
 		_ = s.q.DeleteDocumentFileByID(ctx, id)
 		return File{}, storage.Upload{}, err
@@ -274,7 +218,7 @@ func (s *Service) ConfirmFile(ctx context.Context, docID, fileID uuid.UUID, dec 
 		_ = s.q.DeleteDocumentFileByID(ctx, f.ID)
 		return File{}, unprocessable("file", msg)
 	}
-	if info.Size < 1 || info.Size > rule.maxSize {
+	if info.Size < 1 || info.Size > rule.MaxSize {
 		return reject("O arquivo enviado excede o tamanho permitido para o tipo.")
 	}
 	if !strings.EqualFold(strings.TrimSpace(strings.SplitN(info.ContentType, ";", 2)[0]), f.ContentType) {
@@ -284,7 +228,7 @@ func (s *Service) ConfirmFile(ctx context.Context, docID, fileID uuid.UUID, dec 
 	if err != nil {
 		return File{}, err
 	}
-	if !rule.magic(head) {
+	if !rule.Magic(head) {
 		return reject("O conteúdo do arquivo não corresponde ao formato informado.")
 	}
 	row, err := s.q.ConfirmDocumentFile(ctx, db.ConfirmDocumentFileParams{ID: f.ID, SizeBytes: info.Size})

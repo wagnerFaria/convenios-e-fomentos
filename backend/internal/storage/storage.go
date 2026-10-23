@@ -6,6 +6,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 )
 
@@ -37,6 +38,10 @@ type Store interface {
 	Stat(ctx context.Context, key string) (ObjectInfo, error)
 	// Head lê até n bytes iniciais do objeto (para conferir a assinatura do formato).
 	Head(ctx context.Context, key string, n int64) ([]byte, error)
+	// Get abre o objeto para leitura em sequência (hash, verificação de vírus). Quem chama fecha o leitor. Inexistente: ErrNotFound.
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	// Copy duplica o objeto src em dst (mesmo conteúdo e tipo), sem passar os bytes pela API. src inexistente: ErrNotFound.
+	Copy(ctx context.Context, src, dst string) error
 	// Delete remove o objeto; remover um objeto inexistente não é erro.
 	Delete(ctx context.Context, key string) error
 }
