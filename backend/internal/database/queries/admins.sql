@@ -74,3 +74,17 @@ FROM admins a
 JOIN admin_users_roles ur ON ur.admin_id = a.id
 JOIN admin_roles r ON r.id = ur.role_id
 WHERE r.code = $1 AND a.is_active AND NOT a.blocked;
+
+-- Atribui a role pelo código (sem efeito se a role não existir ou já estiver atribuída).
+-- name: AssignAdminRoleByCode :execrows
+INSERT INTO admin_users_roles (admin_id, role_id)
+SELECT $1, r.id FROM admin_roles r WHERE r.code = $2
+ON CONFLICT DO NOTHING;
+
+-- Dá a role a todo administrador ativo que não tem nenhuma (usado ao introduzir a role de proponente).
+-- name: AssignRoleToAdminsWithoutRoles :execrows
+INSERT INTO admin_users_roles (admin_id, role_id)
+SELECT a.id, r.id FROM admins a, admin_roles r
+WHERE r.code = $1
+  AND NOT EXISTS (SELECT 1 FROM admin_users_roles ur WHERE ur.admin_id = a.id)
+ON CONFLICT DO NOTHING;

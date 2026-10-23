@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,6 +16,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/audit"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/auth"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/authz"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/catalog"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/config"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/department"
@@ -22,6 +24,9 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/enduser"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/project"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/scan"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/storage"
 )
 
@@ -48,6 +53,9 @@ type App struct {
 	EndUsers   *enduser.Service
 	APITokens  *apitoken.Service
 	Documents  *document.Service
+	Catalog    *catalog.Service
+	Rules      *rules.Service
+	Projects   *project.Service
 
 	log  *slog.Logger
 	pool *pgxpool.Pool
@@ -93,9 +101,13 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 	actions := authz.NewRegistry()
 	authz.RegisterCoreActions(actions)
 	document.Register(actions) // recurso de exemplo
+	catalog.Register(actions)
+	rules.Register(actions)
+	project.Register(actions)
 	conds := authz.NewConditionRegistry()
 	store := authz.DBStore{Q: q}
 	authz.RegisterStandardConditions(conds, store)
+	project.RegisterConditions(conds, q)
 	engine := authz.NewEngine(actions, conds, store, authz.PGBroadcaster{Pool: pool, Log: log}, log)
 	engine.SetEndUserStore(authz.EndUserStore{Q: q})
 
@@ -130,6 +142,16 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 	if o.store != nil {
 		documentSvc.SetStorage(o.store, cfg.StorageUploadTTL, cfg.StorageDownloadTTL, log)
 	}
+	catalogSvc := catalog.NewService(pool)
+	rulesSvc := rules.NewService(pool)
+	projectSvc := project.NewService(pool, rulesSvc)
+	projectSvc.SetNotifier(mail, cfg.PublicURL, log)
+	if cfg.ClamAVAddr != "" {
+		projectSvc.SetScanner(scan.ClamAV{Addr: cfg.ClamAVAddr})
+	}
+	if o.store != nil {
+		projectSvc.SetStorage(o.store, cfg.StorageUploadTTL, cfg.StorageDownloadTTL, log)
+	}
 	documentAdmin := document.NewAdminHandler(documentSvc, engine, adminHandler.Guard)
 	documentPublic := document.NewPublicHandler(documentSvc, identifier)
 
@@ -143,12 +165,15 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 			tokenAdmin.Routes(r)
 			departmentAdmin.Routes(r)
 			documentAdmin.Routes(r)
+			catalog.NewHandler(catalogSvc, adminHandler.Guard).Routes(r)
+			rules.NewHandler(rulesSvc, adminHandler.Guard).Routes(r)
+			project.NewHandler(projectSvc, adminHandler.Guard, project.Limits{Upload: cfg.RateLimitUploadPerMin, Heavy: project.DefaultHeavyLimit}).Routes(r)
 			documentPublic.Routes(r)
 			endUserHandler.Routes(r)
 		},
 	})
 	mux := r.(*chi.Mux)
-	return &App{Handler: mux, Router: mux, Authz: engine, Actions: actions, Identifier: identifier, EndUsers: endUserSvc, APITokens: tokenSvc, Documents: documentSvc, log: log, pool: pool}, nil
+	return &App{Handler: mux, Router: mux, Authz: engine, Actions: actions, Identifier: identifier, EndUsers: endUserSvc, APITokens: tokenSvc, Documents: documentSvc, Catalog: catalogSvc, Rules: rulesSvc, Projects: projectSvc, log: log, pool: pool}, nil
 }
 
 // Start sincroniza o registro de ações com o banco e passa a escutar as
@@ -157,16 +182,52 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.EndUsers.EnsureDefaults(ctx); err != nil {
 		return err
 	}
+	if err := a.Catalog.EnsureDefaults(ctx); err != nil {
+		return err
+	}
+	if err := a.Rules.EnsureDefaults(ctx); err != nil {
+		return err
+	}
+	if err := a.Projects.EnsureDefaults(ctx); err != nil {
+		return err
+	}
 	if err := authz.SyncEndUserActions(ctx, db.New(a.pool), a.Actions, a.Authz, a.log); err != nil {
 		return err
 	}
 	if err := authz.SyncActions(ctx, db.New(a.pool), a.Actions, a.Authz, a.log); err != nil {
 		return err
 	}
+	go a.expireComplements(ctx)
 	go func() {
 		if err := a.Authz.Listen(ctx); err != nil {
 			a.log.ErrorContext(ctx, "escuta de invalidações encerrada", "error", err)
 		}
 	}()
 	return nil
+}
+
+// expireInterval é a frequência com que a rotina arquiva projetos com o prazo de complementação vencido.
+const expireInterval = 5 * time.Minute
+
+// expireComplements roda até o contexto terminar. Várias instâncias da API podem rodá-la ao mesmo tempo: cada pedido é
+// travado por quem o processa. Além dela, o prazo também é conferido na hora em que o proponente abre ou altera o projeto.
+func (a *App) expireComplements(ctx context.Context) {
+	run := func() {
+		if n, err := a.Projects.ExpireComplements(ctx); err != nil {
+			a.log.ErrorContext(ctx, "arquivando projetos com prazo de complementação vencido", "error", err)
+		} else if n > 0 {
+			a.log.InfoContext(ctx, "projetos arquivados por prazo de complementação vencido", "quantidade", n)
+		}
+	}
+	run()
+	t := time.NewTicker(expireInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			run()
+		}
+	}
 }

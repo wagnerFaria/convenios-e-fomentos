@@ -104,7 +104,7 @@ func TestSeedIdempotenteEEstrutura(t *testing.T) {
 		}
 	}
 	before := snapshot()
-	assert.Equal(t, []int{4, 19, 2, 5, 1, 11, 2, 2}, before)
+	assert.Equal(t, []int{5, 32, 2, 5, 1, 11, 2, 2}, before, "5 roles de admin (inclui Proponente) e 32 permissões")
 
 	// Segunda execução: nada novo, e as senhas não são repetidas no log.
 	assert.Empty(t, e.runSeed(true))
@@ -157,7 +157,7 @@ func TestSeedIdempotenteEEstrutura(t *testing.T) {
 	require.NoError(t, e2.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
 	assert.Equal(t, 1, n)
 	require.NoError(t, e2.pool.QueryRow(context.Background(), "SELECT count(*) FROM admin_roles").Scan(&n))
-	assert.Equal(t, 4, n)
+	assert.Equal(t, 5, n)
 }
 
 func TestUsuariosDeDesenvolvimentoFuncionam(t *testing.T) {

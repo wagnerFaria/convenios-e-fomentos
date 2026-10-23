@@ -96,15 +96,22 @@ Comandos do `Makefile`: `run`, `dev`, `build`, `test`, `test-unit`, `cover-authz
 
 Idempotente e **não destrutivo**: rodar de novo não duplica nada nem desfaz o que os administradores mudaram.
 
-- Roles de admin **Super Admin**, **Editor**, **Author** e **Revisor do Departamento** (`department-reviewer`). As permissões
-  padrão só são aplicadas quando a role é criada.
+- Roles de admin **Super Admin**, **Editor**, **Author**, **Proponente** (`proponent`) e **Revisor do Departamento**
+  (`department-reviewer`). As permissões padrão só são aplicadas quando a role é criada.
   - Editor: cria, lê, atualiza, exclui e publica qualquer documento.
   - Author: cria e lê; atualiza e exclui só o que criou (`admin::is-creator`); não publica.
   - Revisor: lê tudo; só altera `status` e `observacao_interna` dos documentos do próprio departamento
     (`admin::same-department`) e publica nesse departamento.
+  - Proponente: lê os catálogos (tipos de entidade, municípios, parlamentares) e os parâmetros de regras, edita o próprio perfil e
+    cria/edita/exclui só os projetos que criou (`admin::is-creator`). Como o conjunto cresce a cada fase, o seed **acrescenta** à role
+    existente as permissões padrão que faltam (sem alterar nem remover as que já tem). **Quem entra pelo MT
+    Login pela primeira vez recebe esta role automaticamente** (se ela já existir), em vez de ficar sem nenhuma. O seed também a
+    dá a quem já tinha entrado e está sem nenhuma role.
 - Roles de usuário final **Public** (`find`, `findOne`) e **Authenticated** (também `create`, `update`, `delete`), aplicadas uma
   única vez (marcador `seed.enduser-permissions`). Configurações avançadas e templates de e-mail padrão em português.
 - Departamentos de exemplo: Financeiro e Jurídico.
+- **Cadastros de referência** — tipos de entidade, os 5.571 municípios do IBGE e os parâmetros de regras com os valores das normas —
+  são carregados pelo próprio servidor ao subir (`App.Start`), só no que ainda não existe; não precisam do seed.
 - Os Super Admins listados em `SEED_SUPER_ADMIN_CPF` (qualquer ambiente).
 - **Somente com `APP_ENV=development`**: um administrador de exemplo por role (`super@`, `editor@`, `author@`, `revisor@dev.local`)
   com **CPFs fictícios** (não entram pelo MT Login; `seed.DevUsers`) e o usuário final `usuario@dev.local`, com senha aleatória
@@ -331,6 +338,8 @@ desenvolvimento, nem com Argon2 abaixo do mínimo da OWASP. A API também não s
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | Origens permitidas, separadas por vírgula. |
 | `RATE_LIMIT_AUTH_PER_MINUTE` | `10` | Login, cadastro, esqueci a senha e refresh, por IP + identificador. |
 | `RATE_LIMIT_GLOBAL_PER_MINUTE` | `600` | Limite geral por IP em todas as rotas (`0` desliga). |
+| `RATE_LIMIT_UPLOAD_PER_MINUTE` | `120` | Pedidos e confirmações de envio de arquivo de projeto **por usuário** (`0` desliga). Enviar/reenviar/comprovante/duplicar têm limite fixo de 20/min por usuário. Excesso → 429. |
+| `CLAMAV_ADDR` | *(vazio)* | `host:porta` do `clamd`. Com ele, todo arquivo de projeto é varrido na confirmação (falha fechada: scanner fora do ar → 503 `scan_unavailable`). Configure o `clamd` com `StreamMaxLength` ≥ 200M. |
 | `MAX_BODY_BYTES` | `1048576` | Tamanho máximo do corpo (413 acima disso). |
 | `TRUSTED_PROXIES` | *(vazio)* | CIDRs de proxies reversos confiáveis; só neles o `X-Forwarded-For` é considerado. |
 | `INITIAL_REGISTRATION_ENABLED` | *(vazio)* | Registro inicial por HTTP. Vazio: ligado fora de produção, desligado em produção. |
@@ -390,6 +399,10 @@ internal/apitoken  tokens de API
 internal/policy    policies reutilizáveis (is-owner, All, Any)
 internal/audit     registro e consulta da auditoria
 internal/mailer    interface Mailer + SMTP, log (dev) e descarte
+internal/catalog   cadastros de referência: tipos de entidade, municípios (IBGE, embutidos) e parlamentares
+internal/rules     parâmetros das regras de negócio (limites, prazos, datas), versionados por vigência
+internal/project   cadastro de projetos pelo proponente (rascunho em seções: Proponente, Instituição, Proposta) e perfil do proponente
+internal/cnpj      normalização, validação e formatação de CNPJ
 internal/document  recurso de exemplo "documentos"
 internal/seed      dados iniciais (idempotente)
 internal/maintenance  limpeza de sessões de usuário final e tokens vencidos
@@ -420,12 +433,15 @@ idempotente; e a coerência entre `openapi.yaml` e as rotas.
 
 - **Migrações** rodam por `cli migrate:up` (o Compose faz isso antes de subir a API). **Rollback** é manual (`migrate:down`).
 - **`cleanup`** (`make cleanup`) remove sessões de usuário final e tokens de uso único vencidos há mais de N dias (`--days`, padrão 7). Agende,
-  por exemplo, uma vez por dia. A carência preserva a detecção de reutilização de refresh token.
+  por exemplo, uma vez por dia. A carência preserva a detecção de reutilização de refresh token. Com `--draft-days N` (padrão 0 = desligado) também
+  apaga rascunhos de projeto, e os arquivos deles, sem alteração há mais de N dias (política de retenção; cada exclusão é auditada).
 - **Arquivos dos documentos** (MinIO/S3): o navegador envia e baixa direto do armazenamento por URLs pré-assinadas; a API só as emite e confere
   o resultado. Fluxo de envio: `POST .../documents/{id}/files` (autoriza e devolve `upload.url` + `upload.fields`) → POST multipart ao armazenamento →
   `POST .../files/{fileId}/confirm`. Tipos: PDF e DOCX até 200 MB; PNG, JPEG e WebP até 25 MB; até 50 arquivos por documento. O proxy precisa
   expor o MinIO em `STORAGE_PUBLIC_URL` e **remover o prefixo** antes de repassar, mantendo o `Host` (a assinatura SigV4 cobre `Host` e caminho);
   veja `haproxy/haproxy.cfg`. O `cleanup` também remove envios autorizados e nunca confirmados há mais de 24 h.
+  Nos arquivos de **projetos** a confirmação calcula e guarda o SHA-256, confere o tamanho e, se houver `CLAMAV_ADDR`, varre o conteúdo; há ainda
+  limites por projeto (10 arquivos por documento, 20 envios em andamento, 300 arquivos, 2 GiB).
 - **Proxy reverso**: configure `TRUSTED_PROXIES` com o CIDR do proxy; sem isso o IP considerado é o da conexão.
 - **Encerramento**: SIGINT/SIGTERM param de aceitar conexões, concluem as requisições (15 s) e gravações pendentes de `last_used_at`.
 - **Imagem**: Dockerfile multi-stage, binário estático em `distroless/static:nonroot`.

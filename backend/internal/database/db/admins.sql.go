@@ -26,6 +26,43 @@ func (q *Queries) AssignAdminRole(ctx context.Context, arg AssignAdminRoleParams
 	return err
 }
 
+const assignAdminRoleByCode = `-- name: AssignAdminRoleByCode :execrows
+INSERT INTO admin_users_roles (admin_id, role_id)
+SELECT $1, r.id FROM admin_roles r WHERE r.code = $2
+ON CONFLICT DO NOTHING
+`
+
+type AssignAdminRoleByCodeParams struct {
+	AdminID uuid.UUID `json:"admin_id"`
+	Code    string    `json:"code"`
+}
+
+// Atribui a role pelo código (sem efeito se a role não existir ou já estiver atribuída).
+func (q *Queries) AssignAdminRoleByCode(ctx context.Context, arg AssignAdminRoleByCodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, assignAdminRoleByCode, arg.AdminID, arg.Code)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const assignRoleToAdminsWithoutRoles = `-- name: AssignRoleToAdminsWithoutRoles :execrows
+INSERT INTO admin_users_roles (admin_id, role_id)
+SELECT a.id, r.id FROM admins a, admin_roles r
+WHERE r.code = $1
+  AND NOT EXISTS (SELECT 1 FROM admin_users_roles ur WHERE ur.admin_id = a.id)
+ON CONFLICT DO NOTHING
+`
+
+// Dá a role a todo administrador ativo que não tem nenhuma (usado ao introduzir a role de proponente).
+func (q *Queries) AssignRoleToAdminsWithoutRoles(ctx context.Context, code string) (int64, error) {
+	result, err := q.db.Exec(ctx, assignRoleToAdminsWithoutRoles, code)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countActiveSuperAdmins = `-- name: CountActiveSuperAdmins :one
 SELECT count(DISTINCT a.id)
 FROM admins a

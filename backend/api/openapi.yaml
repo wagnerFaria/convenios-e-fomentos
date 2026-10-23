@@ -43,7 +43,7 @@ paths:
       summary: Administrador autenticado, roles e permissões efetivas
       description: |
         Autenticação pelo access token do MT Login (Keycloak/OIDC). Na primeira requisição de um CPF ainda
-        desconhecido o administrador é criado, ativo e sem roles; nome e e-mail são atualizados a cada acesso.
+        desconhecido o administrador é criado, ativo e com a role **Proponente** (se ela já existir; criada pelo seed), sem nenhuma outra; nome e e-mail são atualizados a cada acesso.
         Um administrador sem roles recebe `permissions: []`. Conta desativada ou bloqueada responde 403
         `account_disabled`; token sem CPF válido, 403 `invalid_identity`.
         `permissions` é a união das permissões de todas as roles (Super Admin recebe todas as ações de admin).
@@ -561,6 +561,1104 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
+  /api/admin/catalog/entity-types:
+    get:
+      tags: [Catálogos de referência]
+      summary: Lista os tipos de entidade proponente
+      description: "Permissão: `admin::catalog.entity-types.read` (concedida ao proponente). `?active=true` devolve só os ativos. Ordenados por `sortOrder`; o tipo \"Outro\" (`isOther: true`) vem por último e, quando escolhido, o cadastro do projeto pede o texto livre e a natureza. Resposta: `[{id, code, name, nature (public|private), nonProfit, active, sortOrder, isOther, isSystem, createdAt, updatedAt}]`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: active, in: query, schema: {type: boolean}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Catálogos de referência]
+      summary: Cria um tipo de entidade
+      description: "`code` em minúsculas, números e `_` (2 a 40 caracteres; `other` é reservado). `nonProfit` só vale para natureza `private`. Código ou nome repetido: 409 `entity_type_taken`. Permissão: `admin::catalog.entity-types.create`."
+      security: [{adminBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name, nature]
+              properties:
+                code: {type: string}
+                name: {type: string, maxLength: 100}
+                nature: {type: string, enum: [public, private]}
+                nonProfit: {type: boolean}
+                active: {type: boolean, description: "Padrão true."}
+                sortOrder: {type: integer, minimum: 0, maximum: 9999}
+      responses:
+        "201": {description: Criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/catalog/entity-types/{id}:
+    get:
+      tags: [Catálogos de referência]
+      summary: Detalha um tipo de entidade
+      description: "Permissão: `admin::catalog.entity-types.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    put:
+      tags: [Catálogos de referência]
+      summary: Altera um tipo de entidade
+      description: "O código não muda (informá-lo diferente dá 422). O tipo de sistema (\"Outro\") não pode ser desativado: 409 `entity_type_system`. Omitir `active` mantém o valor atual. Permissão: `admin::catalog.entity-types.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, nature]
+              properties:
+                code: {type: string}
+                name: {type: string, maxLength: 100}
+                nature: {type: string, enum: [public, private]}
+                nonProfit: {type: boolean}
+                active: {type: boolean}
+                sortOrder: {type: integer, minimum: 0, maximum: 9999}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Catálogos de referência]
+      summary: Exclui um tipo de entidade
+      description: "Recusado com 409 `entity_type_system` (tipo do sistema) ou `entity_type_in_use` (em uso por projetos; desative em vez de excluir). Permissão: `admin::catalog.entity-types.delete`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/catalog/municipalities:
+    get:
+      tags: [Catálogos de referência]
+      summary: Busca municípios do IBGE
+      description: "Lista de referência somente leitura (5.571 municípios; 142 em MT). `q` casa pelo começo do nome, sem diferenciar acentos nem maiúsculas. Paginada (`pageSize` padrão 50, máximo 500). Permissão: `admin::catalog.municipalities.read` (concedida ao proponente). Resposta: `[{ibgeCode, name, uf}]`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: uf, in: query, schema: {type: string, minLength: 2, maxLength: 2}}
+        - {name: q, in: query, schema: {type: string, maxLength: 60}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 500}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/catalog/municipalities/{ibgeCode}:
+    get:
+      tags: [Catálogos de referência]
+      summary: Detalha um município pelo código IBGE
+      description: "Permissão: `admin::catalog.municipalities.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: ibgeCode, in: path, required: true, schema: {type: string, pattern: "^[0-9]{7}$"}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/catalog/parliamentarians:
+    get:
+      tags: [Catálogos de referência]
+      summary: Lista os parlamentares que destinam emendas
+      description: "Filtros: `chamber` (`state` ou `federal`), `active=true` e `q` (parte do nome). Permissão: `admin::catalog.parliamentarians.read` (concedida ao proponente). Resposta: `[{id, name, chamber, active, createdAt, updatedAt}]`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: chamber, in: query, schema: {type: string, enum: [state, federal]}}
+        - {name: active, in: query, schema: {type: boolean}}
+        - {name: q, in: query, schema: {type: string, maxLength: 60}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Catálogos de referência]
+      summary: Cria um parlamentar
+      description: "Nome único por casa, sem diferenciar maiúsculas (409 `parliamentarian_taken`). Permissão: `admin::catalog.parliamentarians.create`."
+      security: [{adminBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, chamber]
+              properties:
+                name: {type: string, maxLength: 120}
+                chamber: {type: string, enum: [state, federal]}
+                active: {type: boolean, description: "Padrão true."}
+      responses:
+        "201": {description: Criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/catalog/parliamentarians/{id}:
+    get:
+      tags: [Catálogos de referência]
+      summary: Detalha um parlamentar
+      description: "Permissão: `admin::catalog.parliamentarians.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    put:
+      tags: [Catálogos de referência]
+      summary: Altera um parlamentar
+      description: "Omitir `active` mantém o valor atual. Permissão: `admin::catalog.parliamentarians.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, chamber]
+              properties:
+                name: {type: string, maxLength: 120}
+                chamber: {type: string, enum: [state, federal]}
+                active: {type: boolean}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Catálogos de referência]
+      summary: Exclui um parlamentar
+      description: "Recusado com 409 `parliamentarian_in_use` se houver projetos que o citam (desative em vez de excluir). Permissão: `admin::catalog.parliamentarians.delete`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/rule-parameters:
+    get:
+      tags: [Parâmetros de regras]
+      summary: Lista as versões dos parâmetros das regras de negócio
+      description: "Cada parâmetro tem versões com vigência (`validFrom`, `validTo` nulo = sem fim). `?key=` filtra por chave. Permissão: `admin::settings.rule-parameters.read` (concedida ao proponente). Resposta: `[{id, key, value, validFrom, validTo, note, createdAt, updatedAt}]`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: key, in: query, schema: {type: string}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Parâmetros de regras]
+      summary: Cria uma versão de parâmetro
+      description: "`key` precisa ser uma das chaves conhecidas (ver `/keys`) e `value` segue o formato dela (422 caso contrário). Duas versões da mesma chave não podem se sobrepor (409 `rule_parameter_overlap`) nem começar na mesma data (409 `rule_parameter_exists`). Para trocar um valor a partir de uma data, encerre a versão atual (`validTo`) e crie a nova. Permissão: `admin::settings.rule-parameters.create`."
+      security: [{adminBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value, validFrom]
+              properties:
+                key: {type: string}
+                value: {description: "JSON no formato da chave."}
+                validFrom: {type: string, format: date}
+                validTo: {type: [string, "null"], format: date}
+                note: {type: string, maxLength: 500}
+      responses:
+        "201": {description: Criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/rule-parameters/keys:
+    get:
+      tags: [Parâmetros de regras]
+      summary: Lista as chaves de parâmetro conhecidas
+      description: "Resposta: `[{key, description, source}]`, onde `source` é a norma de origem. Permissão: `admin::settings.rule-parameters.read`."
+      security: [{adminBearer: []}]
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+  /api/admin/rule-parameters/effective:
+    get:
+      tags: [Parâmetros de regras]
+      summary: Valor vigente de cada parâmetro numa data
+      description: "Sem `date`, usa hoje (fuso de Cuiabá). Chaves sem versão vigente na data não aparecem (por exemplo, a data-limite eleitoral fora do ano eleitoral). Permissão: `admin::settings.rule-parameters.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: date, in: query, schema: {type: string, format: date}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/rule-parameters/{id}:
+    get:
+      tags: [Parâmetros de regras]
+      summary: Detalha uma versão de parâmetro
+      description: "Permissão: `admin::settings.rule-parameters.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    put:
+      tags: [Parâmetros de regras]
+      summary: Altera uma versão de parâmetro
+      description: "Altera valor, vigência e nota; a chave não muda (422). Mesmas validações e conflitos da criação. Permissão: `admin::settings.rule-parameters.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value, validFrom]
+              properties:
+                key: {type: string, description: "Opcional; se informada, deve ser igual à atual."}
+                value: {description: "JSON no formato da chave."}
+                validFrom: {type: string, format: date}
+                validTo: {type: [string, "null"], format: date}
+                note: {type: string, maxLength: 500}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Parâmetros de regras]
+      summary: Exclui uma versão de parâmetro
+      description: "Permissão: `admin::settings.rule-parameters.delete`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/proponent-profile:
+    get:
+      tags: [Projetos]
+      summary: Perfil do proponente autenticado
+      description: "Dados de contato reaproveitados em cada projeto novo. `name` e `cpf` vêm do MT Login (somente leitura). Sem perfil salvo, devolve um vazio. `complete` indica celular, e-mail, município e cargo preenchidos. Permissão: `admin::proponent-profile.read`. Resposta: `{name, cpf, phones:[{number,type}], emails:[{address,primary}], uf, municipalityIbge, jobTitle, complete}`."
+      security: [{adminBearer: []}]
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+    put:
+      tags: [Projetos]
+      summary: Grava o perfil do proponente
+      description: "Substitui os dados de contato. Telefones: DDD válido e número com 10 (fixo) ou 11 dígitos (celular, começando por 9); aceita pontuação e +55; no máximo 5, sem repetidos. E-mails: formato válido, minúsculas, no máximo 5, sem repetidos, um principal (o primeiro, se nenhum for marcado). O município precisa pertencer à UF. Perfis salvos não alteram projetos já criados (o projeto guarda uma cópia). Permissão: `admin::proponent-profile.update`."
+      security: [{adminBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phones:
+                  type: array
+                  maxItems: 5
+                  items:
+                    type: object
+                    required: [number, type]
+                    properties:
+                      number: {type: string}
+                      type: {type: string, enum: [mobile, landline]}
+                emails:
+                  type: array
+                  maxItems: 5
+                  items:
+                    type: object
+                    required: [address]
+                    properties:
+                      address: {type: string}
+                      primary: {type: boolean}
+                uf: {type: string, minLength: 2, maxLength: 2}
+                municipalityIbge: {type: string}
+                jobTitle: {type: string, maxLength: 100}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects:
+    get:
+      tags: [Projetos]
+      summary: Lista projetos
+      description: "Cada pessoa vê os projetos permitidos pela condição de sua permissão de leitura (o proponente, os que criou e os em que foi convidado por CPF). `q` busca em título, nome da instituição, número do SIGCon e CNPJ (com ou sem pontuação). Permissão: `admin::projects.read`. Resposta: `[{id, status, version, instrument, title, institutionName, institutionCnpj, sigconNumber, totalCents, code, submittedAt, stage, archiveReason, complementDueAt, isOwner, access (owner|edit|read; vazio para a equipe), createdAt, updatedAt}]`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: q, in: query, schema: {type: string}}
+        - {name: status, in: query, schema: {type: string, enum: [draft, submitted, archived]}}
+        - {name: sort, in: query, schema: {type: string, enum: [updated_at, created_at, title, institution_name]}, description: "Prefixo `-` para decrescente. Padrão: `-updated_at`."}
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Projetos]
+      summary: Cria um rascunho de projeto
+      description: "Sem corpo. O rascunho nasce com o nome e o CPF do login e com os dados de contato do perfil do proponente (se houver). Permissão: `admin::projects.create`. Resposta: o projeto completo (ver `GET /admin/projects/{id}`)."
+      security: [{adminBearer: []}]
+      responses:
+        "201": {description: Criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}:
+    get:
+      tags: [Projetos]
+      summary: Detalha um projeto
+      description: |
+        Permissão: `admin::projects.read`. Um projeto fora do alcance da permissão responde 404.
+        Resposta: `{id, status, version, isOwner, access (owner|edit|read; vazio para a equipe), createdAt, updatedAt, proponent, institution, proposal, funding, documentOptions, documents {total, done, justified, missing}, code, stage, submittedAt, lateSubmission, complement, archive, originProjectId, originCode, issues}`. `code`, `stage` (`awaiting_checklist|in_analysis|awaiting_proponent`) e `submittedAt` só existem depois do envio; `complement` é o pedido de complementação aberto ou o mais recente `{number, status (open|answered|expired|cancelled), requestedAt, dueAt, overdue, message, items [{kind, target, label, note, answered}]}`; `archive` (`{at, reason (complement_deadline|withdrawn|denied|missing_documents|other), note}`) só existe em projeto arquivado. Projeto com o prazo de complementação vencido é arquivado na hora em que é aberto ou alterado (e pela rotina periódica).
+        `version` deve ser enviada em toda gravação de seção (controle de edição simultânea).
+        `issues` lista as pendências: `{section, field, code, severity (block|warn), message}`. O rascunho aceita dados incompletos;
+        as pendências `block` são o que o envio (fase seguinte) vai exigir.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Projetos]
+      summary: Exclui um rascunho
+      description: "Só rascunhos (409 `project_not_editable` nos demais; projeto enviado se arquiva com `withdraw`). Os arquivos anexados são apagados do armazenamento. Permissão: `admin::projects.delete`, sujeita à condição da permissão (403 em projeto alheio)."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/proponent:
+    put:
+      tags: [Projetos]
+      summary: Grava a seção Proponente
+      description: |
+        Grava a seção inteira, com a `version` lida. Versão desatualizada: 409 `project_version_conflict` (`details.currentVersion`).
+        `name` e `cpf` são de leitura e ignorados. Contato com as mesmas regras do perfil. Se `isLegalRepresentative` for `true`,
+        os dados de outro representante são descartados; se `false`, `legalRepCpf` é validado quando informado.
+        Permissão: `admin::projects.update` (403 em projeto alheio). Responde o projeto completo.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: {type: integer, minimum: 1}
+                phones: {type: array, items: {type: object, properties: {number: {type: string}, type: {type: string, enum: [mobile, landline]}}}}
+                emails: {type: array, items: {type: object, properties: {address: {type: string}, primary: {type: boolean}}}}
+                uf: {type: string}
+                municipalityIbge: {type: string}
+                jobTitle: {type: string, maxLength: 100}
+                isLegalRepresentative: {type: [boolean, "null"]}
+                legalRepName: {type: string, maxLength: 150}
+                legalRepCpf: {type: string}
+                legalRepJobTitle: {type: string, maxLength: 100}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/institution:
+    put:
+      tags: [Projetos]
+      summary: Grava a seção Instituição
+      description: |
+        Grava a seção inteira, com a `version` lida (409 `project_version_conflict` se desatualizada).
+        CNPJ validado (dígitos verificadores) e guardado só com dígitos. `entityTypeId` vem de `GET /admin/catalog/entity-types`:
+        nos tipos comuns, `nature` e `nonProfit` são derivados do tipo; no tipo "Outro" (`entityTypeIsOther`), o proponente informa
+        `entityTypeOther`, `nature` (`public|private`) e `nonProfit` (só privada). O Termo de Fomento (`instrument: fomento`) só é aceito
+        para entidade privada sem fins lucrativos (422 em `instrument`); o Convênio vale para qualquer natureza.
+        `habilitationStatus` (`full|partial`), `habilitationNumber` e `habilitationValidUntil` descrevem a Certidão de Habilitação do SIGCon.
+        Permissão: `admin::projects.update`. Responde o projeto completo.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: {type: integer, minimum: 1}
+                instrument: {type: string, enum: ["", convenio, fomento]}
+                cnpj: {type: string}
+                name: {type: string, maxLength: 200}
+                entityTypeId: {type: string, format: uuid}
+                entityTypeOther: {type: string, maxLength: 100}
+                nature: {type: string, enum: ["", public, private]}
+                nonProfit: {type: boolean}
+                uf: {type: string}
+                municipalityIbge: {type: string}
+                zip: {type: string}
+                street: {type: string, maxLength: 150}
+                number: {type: string, maxLength: 20}
+                complement: {type: string, maxLength: 100}
+                district: {type: string, maxLength: 100}
+                email: {type: string}
+                phone: {type: string}
+                habilitationStatus: {type: string, enum: ["", full, partial]}
+                habilitationNumber: {type: string, maxLength: 50}
+                habilitationValidUntil: {type: string, format: date}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/proposal:
+    put:
+      tags: [Projetos]
+      summary: Grava a seção Proposta
+      description: |
+        Grava a seção inteira, com a `version` lida (409 `project_version_conflict` se desatualizada).
+        `sigconNumber` no formato `NNNN/AAAA`; `sigconRegisteredOn` não pode ser futura; `endDate` não pode ser anterior a `startDate`.
+        `municipalityCodes` é a lista de códigos IBGE dos municípios de execução (substitui a anterior; até 50; todos de MT, senão 422);
+        na resposta vêm como `municipalities: [{ibgeCode, name, uf}]`. `objectNature`: `works|goods|services|event|other`.
+        Um número do SIGCon igual ao de outro projeto gera aviso (`sigcon_duplicated`), não erro. Permissão: `admin::projects.update`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: {type: integer, minimum: 1}
+                sigconNumber: {type: string, examples: ["3216/2026"]}
+                sigconRegisteredOn: {type: string, format: date}
+                title: {type: string, maxLength: 200}
+                object: {type: string, maxLength: 5000}
+                justification: {type: string, maxLength: 10000}
+                startDate: {type: string, format: date}
+                endDate: {type: string, format: date}
+                objectNature: {type: string, enum: ["", works, goods, services, event, other]}
+                hasArtisticHiring: {type: boolean}
+                calamity: {type: boolean}
+                executionPlaceDetail: {type: string, maxLength: 500}
+                municipalityCodes: {type: array, maxItems: 50, items: {type: string}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/funding:
+    put:
+      tags: [Projetos]
+      summary: Grava a seção Recursos
+      description: |
+        Grava a seção inteira, com a `version` lida (409 `project_version_conflict` se desatualizada). Valores em **centavos**.
+        `type`: `amendment` (emenda parlamentar), `own` (recurso próprio da SEDEC) ou `mixed` (os dois). `amendments` só existe em
+        `amendment` e `mixed`; `ownAmountCents` não existe em `amendment`; sem `type` não há valores. Cada emenda traz
+        `parliamentarianId` (do cadastro) ou, se o parlamentar não estiver nele, `parliamentarianName` por extenso; `number`, `year`
+        (2000 a ano seguinte) e `amountCents`. `amendmentTotalCents` e `totalCents` (= próprio + emendas) são calculados pelo servidor
+        e ignorados na entrada.
+        Contrapartida: `counterpartKind` `financial|in_kind`; no Termo de Fomento só `in_kind` (422 em `financial`).
+        `indirectCostsCents` só no Termo de Fomento (422 no Convênio); ao trocar o instrumento para Convênio o valor é zerado.
+        Chamamento: `tenderStatus` `held|waived|unfeasible|not_applicable`; `tenderLegalBasis` (`art19_i..iv`, `art20_i`, `art20_ii`,
+        `art20_singular` no Fomento; `conv14_i..iii` no Convênio) precisa combinar com a situação e o instrumento.
+        Cachês (`artistFeesCents`, `regionalArtistFeesCents`, `governorWaiver`) só valem com contratação de artistas marcada na Proposta
+        (422 senão); desmarcar na Proposta zera os valores. `priceOldestCollectedOn` é a data da referência de preço mais antiga.
+        Os limites que dependem do valor total e das normas vigentes (custos indiretos, Lei 12.082/2023, chamamento exigido)
+        não bloqueiam a gravação: aparecem em `issues` (`section: funding`). Permissão: `admin::projects.update`. Responde o projeto completo.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: {type: integer, minimum: 1}
+                type: {type: string, enum: ["", amendment, own, mixed]}
+                ownAmountCents: {type: integer, minimum: 0, maximum: 1000000000000}
+                amendments:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    properties:
+                      parliamentarianId: {type: string, format: uuid}
+                      parliamentarianName: {type: string, maxLength: 120}
+                      number: {type: string, maxLength: 30}
+                      year: {type: integer}
+                      amountCents: {type: integer, minimum: 0}
+                counterpartKind: {type: string, enum: ["", financial, in_kind]}
+                counterpartCents: {type: integer, minimum: 0}
+                counterpartDescription: {type: string, maxLength: 1000}
+                indirectCostsCents: {type: integer, minimum: 0}
+                tenderStatus: {type: string, enum: ["", held, waived, unfeasible, not_applicable]}
+                tenderNoticeNumber: {type: string, maxLength: 50}
+                tenderApprovedOn: {type: string, format: date}
+                tenderLegalBasis: {type: string}
+                tenderJustification: {type: string, maxLength: 2000}
+                artistFeesCents: {type: integer, minimum: 0}
+                regionalArtistFeesCents: {type: integer, minimum: 0}
+                governorWaiver: {type: boolean}
+                priceOldestCollectedOn: {type: string, format: date}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/document-options:
+    put:
+      tags: [Projetos]
+      summary: Grava as situações que acrescentam documentos ao checklist
+      description: "`exclusiveSupplier` (contratação por exclusividade), `publicSpaceUse` (atividade em espaço público; só no Termo de Fomento) e `reducedDeadline` (pedido de redução do prazo de tramitação). Exige a `version` lida (409 `project_version_conflict`). Permissão: `admin::projects.update`. Responde o projeto completo."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: {type: integer, minimum: 1}
+                exclusiveSupplier: {type: boolean}
+                publicSpaceUse: {type: boolean}
+                reducedDeadline: {type: boolean}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/members:
+    get:
+      tags: [Projetos]
+      summary: Lista as pessoas com acesso ao projeto (só o titular)
+      description: |
+        Compartilhamento por CPF. Cada item: `{id, cpf (mascarado), label, level (read|edit), email (o informado pelo titular, mascarado), createdAt, acceptedAt}`. `acceptedAt` vazio = convite
+        pendente (a pessoa ainda não abriu o projeto). A API não informa se o CPF tem conta nem o nome da pessoa. Permissão: `admin::projects.share`
+        (o proponente só a tem sobre os projetos que criou; 403 para convidados e outros usuários).
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    post:
+      tags: [Projetos]
+      summary: Dá acesso ao projeto a um CPF
+      description: |
+        Corpo: `{cpf, level (read|edit), label?, email?}`. A pessoa é avisada por e-mail: no da conta que tem o CPF (que nunca é revelado ao titular) ou, se não há conta, no `email` informado (422 se inválido); sem nenhum dos dois, o convite vale mas não há aviso. O acesso vale assim que a pessoa entra pelo MT Login com aquele CPF (ou já, se ela tem conta); é conferido
+        a cada requisição. **Leitura**: vê o projeto, os arquivos e o comprovante. **Edição**: também altera, anexa documentos, envia e reenvia. Excluir, desistir,
+        duplicar e gerir acesso são sempre só do titular. Erros: 422 (CPF inválido ou do próprio titular), 409 `member_exists` (já tem acesso) e
+        `members_limit` (10 pessoas por projeto). Limite de 20 convites por minuto por usuário (429). Reconvidar quem teve o acesso revogado reativa o mesmo registro. Auditoria: `project.member-invited` (CPF mascarado).
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cpf, level]
+              properties:
+                cpf: {type: string}
+                level: {type: string, enum: [read, edit]}
+                label: {type: string, maxLength: 100}
+                email: {type: string, maxLength: 254}
+      responses:
+        "201": {description: Criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/members/{memberId}:
+    put:
+      tags: [Projetos]
+      summary: Altera o nível ou a identificação de quem tem acesso
+      description: "Corpo: `{level (read|edit), label?, email?}` (e-mail vazio mantém o atual). Só o titular. Auditoria: `project.member-updated`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [level]
+              properties:
+                level: {type: string, enum: [read, edit]}
+                label: {type: string, maxLength: 100}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Projetos]
+      summary: Revoga o acesso
+      description: "Vale na hora, inclusive para quem está com o projeto aberto. Só o titular. Auditoria: `project.member-revoked`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents:
+    get:
+      tags: [Projetos]
+      summary: Checklist de documentos do projeto
+      description: |
+        Lista as exigências que se aplicam às respostas do projeto (instrumento, natureza da entidade, tipo de recurso, natureza do objeto,
+        calamidade, chamamento, emendas e as situações de `document-options`), com os arquivos e a justificativa já registrados.
+        Sem instrumento escolhido, a lista é vazia. Exigências por emenda (`scope: amendment`) têm um item por emenda (`amendmentId`).
+        Cada item: `{code, name, description, group, scope, amendmentId, amendmentLabel, source (item do checklist da SEDEC), template {name,url}, acceptsJustification,
+        files [{id, filename, contentType, sizeBytes, status (pending|confirmed), sha256 (arquivo confirmado), createdAt}], justification, status (missing|done|justified)}`.
+        Só arquivo `confirmed` conta como entregue. Resposta: `{options, instrument, summary {total, done, justified, missing}, items}`.
+        Permissão: `admin::projects.read` (404 em projeto fora do alcance).
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/{code}/justification:
+    put:
+      tags: [Projetos]
+      summary: Grava ou remove a justificativa de não envio de um documento
+      description: "`text` vazio remove a justificativa (e o item, se não tiver arquivos). Até 2.000 caracteres. Nas exigências por emenda informe `amendmentId`. Documento que não se aplica ao projeto: 409 `document_not_applicable`. Projeto que não é mais rascunho: 409 `project_not_editable`. Responde o checklist. Permissão: `admin::projects.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: code, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amendmentId: {type: string, format: uuid}
+                text: {type: string, maxLength: 2000}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/{code}/files:
+    post:
+      tags: [Projetos]
+      summary: Registra um arquivo e autoriza o envio direto ao armazenamento
+      description: |
+        Fluxo em 3 passos, como nos documentos: (1) este pedido devolve `{file, upload}`; (2) o navegador envia o arquivo por POST multipart a
+        `upload.url` com os campos `upload.fields` e o arquivo no último campo `file`; (3) `POST .../files/{fileId}/confirm`.
+        Tipos: PDF, DOCX, PNG, JPEG e WebP (a extensão deve combinar; PDF/DOCX até 200 MB, imagens até 25 MB). Até 10 arquivos por documento
+        (409 `too_many_files`). Nas exigências por emenda, `amendmentId` é obrigatório; nas demais, proibido (422).
+        Documento que não se aplica ao projeto: 409 `document_not_applicable`. A chave do objeto nunca é exposta. Permissão: `admin::projects.update`.
+        Limites por projeto (409): `too_many_pending` (20 envios em andamento), `project_files_limit` (300 arquivos) e `project_storage_full` (2 GiB, somando
+        os tamanhos declarados). Limite de taxa por usuário (`RATE_LIMIT_UPLOAD_PER_MINUTE`): 429 `rate_limited`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: code, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, contentType, sizeBytes]
+              properties:
+                filename: {type: string, maxLength: 255}
+                contentType: {type: string}
+                sizeBytes: {type: integer, minimum: 1}
+                amendmentId: {type: string, format: uuid}
+      responses:
+        "201": {description: Criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}/confirm:
+    post:
+      tags: [Projetos]
+      summary: Confirma o envio de um arquivo
+      description: "Confere no armazenamento a existência, o tipo, o tamanho e a assinatura do formato. Arquivo que não passa é apagado junto com o registro (422). Antes do envio: 409 `file_not_uploaded`. Idempotente. Permissão: `admin::projects.update`.
+
+
+        O servidor lê o objeto, calcula o SHA-256 (devolvido em `sha256`) e confere o tamanho real. Com `CLAMAV_ADDR` configurado, o conteúdo também é varrido: arquivo infectado é recusado
+        (422), apagado e registrado na auditoria (`project.file-infected`). Scanner indisponível: 503 `scan_unavailable` (falha fechada; nada é liberado e o arquivo continua pendente).
+        Limite de taxa por usuário: 429 `rate_limited`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}/download:
+    get:
+      tags: [Projetos]
+      summary: URL temporária para baixar um arquivo confirmado
+      description: "Resposta: `{url, expiresAt}`. Arquivo pendente: 404. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}:
+    delete:
+      tags: [Projetos]
+      summary: Remove um arquivo de um rascunho
+      description: "Apaga o objeto e o registro; o item sem arquivo e sem justificativa some. Permissão: `admin::projects.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/submit:
+    post:
+      tags: [Projetos]
+      summary: Envia o projeto (o rascunho passa a "submitted")
+      description: |
+        Corpo: `{version, declaration}`. `version` é a versão que o proponente viu (409 `project_version_conflict` se o projeto mudou) e
+        `declaration` precisa ser `true`: o aceite da declaração de veracidade, registrado com data, hora, IP e CPF mascarado (422 em `declaration`).
+        O envio só acontece sem pendências que bloqueiam (422 `project_has_issues`, com `details.issues`) e com o número do SIGCon livre entre os projetos já enviados
+        (422 em `sigconNumber`). Avisos (`warn`) não impedem.
+        Efeitos, numa única transação: dá o `code` (`AAAA-NNNNNN`, sequencial por ano, ano de Cuiabá), põe o projeto na etapa `awaiting_checklist`,
+        descarta envios de arquivo nunca confirmados, guarda a versão 1 (retrato imutável com o projeto, o checklist, os parâmetros de regras vigentes e o aceite)
+        e registra a auditoria. Depois da transação, envia o e-mail de confirmação ao e-mail principal do proponente (falha no e-mail não desfaz o envio).
+        Enviado depois da data-limite eleitoral vigente: `lateSubmission: true` (não bloqueia).
+        Depois do envio, as seções, os documentos e a exclusão respondem 409 `project_not_editable`; novo envio, 409 `project_already_submitted`.
+        Permissão: `admin::projects.submit` (condição de criador para o proponente). Responde o projeto completo.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, declaration]
+              properties:
+                version: {type: integer, minimum: 1}
+                declaration: {type: boolean}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/receipt:
+    get:
+      tags: [Projetos]
+      summary: Comprovante de recebimento (PDF)
+      description: "Gerado a partir do retrato imutável do envio, então sai sempre igual. Traz o código, a data e hora do recebimento, o resumo do projeto, os documentos entregues ou justificados, a declaração aceita e o aviso de que não é o protocolo oficial (SIGADOC). Resposta `application/pdf` (fora do envelope JSON). Projeto em rascunho ou fora do alcance da permissão: 404. Permissão: `admin::projects.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: PDF
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/complement-requests:
+    post:
+      tags: [Projetos]
+      summary: Pede complementação ao proponente (equipe)
+      description: |
+        Devolve itens ao proponente: o projeto vai de `awaiting_checklist` ou `in_analysis` para `awaiting_proponent` e o prazo começa a correr:
+        `complement_days` dias corridos (padrão 3), até 23:59:59 de Cuiabá do último dia. Cada item é uma seção (`kind: section`; `target`:
+        `proponent|institution|proposal|funding|document-options`) ou um documento do checklist (`kind: document`; `target`: `codigo` ou `codigo@id-da-emenda`),
+        com uma nota opcional. Enquanto o pedido está aberto o proponente só altera o que foi devolvido (e documentos que ficarem pendentes);
+        o resto responde 409 `not_returned`. O proponente recebe um e-mail com o prazo e os itens.
+        Erros: 409 `project_not_submitted` (rascunho ou arquivado), 409 `project_stage_invalid` (já aguardando o proponente), 422 (itens inválidos).
+        Permissão: `admin::projects.request-complement`. Responde o projeto completo (`complement` traz o pedido).
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                message: {type: string, maxLength: 2000}
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 40
+                  items:
+                    type: object
+                    required: [kind, target]
+                    properties:
+                      kind: {type: string, enum: [section, document]}
+                      target: {type: string}
+                      note: {type: string, maxLength: 500}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/resubmit:
+    post:
+      tags: [Projetos]
+      summary: Reenvia o projeto com as correções
+      description: |
+        Corpo `{version, declaration}`, como no envio. Só vale com um pedido de complementação aberto e dentro do prazo (409 `project_not_awaiting`);
+        confere as pendências (422 `project_has_issues`), a versão lida (409 `project_version_conflict`) e o número do SIGCon entre os projetos enviados.
+        Guarda uma nova versão imutável (reason `complement`), trava os arquivos atuais, descarta envios não confirmados, marca o pedido como `answered`
+        e devolve o projeto para a análise (`in_analysis`). Não exige que todos os itens devolvidos tenham sido alterados (cada item informa `answered`).
+        O código não muda. Permissão: `admin::projects.submit` (condição de criador). Responde o projeto completo.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, declaration]
+              properties:
+                version: {type: integer, minimum: 1}
+                declaration: {type: boolean}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/withdraw:
+    post:
+      tags: [Projetos]
+      summary: Desistência do projeto (proponente)
+      description: |
+        O projeto enviado é arquivado, com o motivo (`note`, de 3 a 1.000 caracteres) e a razão `withdrawn`. Cancela o pedido de complementação aberto.
+        Arquivar é definitivo: para tentar de novo, use `duplicate`. Rascunho não se arquiva (exclua-o): 409 `project_not_submitted`; já arquivado: 409 `project_archived`.
+        O número do SIGCon fica livre. Permissão: `admin::projects.withdraw` (condição de criador). Responde o projeto completo.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: {type: string, minLength: 3, maxLength: 1000}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/deny:
+    post:
+      tags: [Projetos]
+      summary: Nega o projeto (Secretário)
+      description: |
+        Arquiva o projeto enviado sem passar por parecer técnico, razão `denied`, com o motivo em `note` (3 a 1.000 caracteres). O proponente recebe um e-mail
+        com o motivo. Permissão: `admin::projects.deny`. Responde o projeto completo.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: {type: string, minLength: 3, maxLength: 1000}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/archive:
+    post:
+      tags: [Projetos]
+      summary: Arquiva o projeto (equipe)
+      description: |
+        Arquiva o projeto enviado por `missing_documents` (falta de documentos obrigatórios) ou `other`, com o motivo em `note`. O proponente recebe um e-mail.
+        Permissão: `admin::projects.archive`. Responde o projeto completo.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, note]
+              properties:
+                reason: {type: string, enum: [missing_documents, other]}
+                note: {type: string, minLength: 3, maxLength: 1000}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/duplicate:
+    post:
+      tags: [Projetos]
+      summary: Duplica o projeto em um novo rascunho
+      description: |
+        Cria um rascunho novo com os dados de um projeto do próprio proponente, em qualquer situação (inclusive arquivado); o original não muda. Leva proponente,
+        instituição, proposta, municípios, emendas (com ids novos) e recursos, e guarda o vínculo `originProjectId`/`originCode`. Não leva código, envio nem área.
+        `copyDocuments: true` copia também os arquivos (objetos novos no armazenamento) e as justificativas, inclusive os documentos por emenda; por padrão não se
+        copia, porque certidões e comprovantes vencem. Se algum arquivo não existe mais no armazenamento: 409 `file_missing` e nada é criado.
+        Projeto de outra pessoa: 404. Permissão: `admin::projects.create`. Responde 201 com o rascunho.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                copyDocuments: {type: boolean}
+      responses:
+        "201": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
   /api/admin/audit-logs:
     get:
       tags: [Auditoria]

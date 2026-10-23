@@ -9,6 +9,9 @@ import (
 // SuperAdminRoleCode identifica a role Super Admin (curinga no motor).
 const SuperAdminRoleCode = "super-admin"
 
+// ProponentRoleCode identifica a role de proponente, atribuída a quem entra pelo MT Login pela primeira vez.
+const ProponentRoleCode = "proponent"
+
 // SubjectType é o tipo de sujeito autenticado.
 type SubjectType string
 

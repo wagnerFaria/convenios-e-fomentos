@@ -33,8 +33,9 @@ Comandos:
                      departamentos de exemplo, os Super Admins de SEED_SUPER_ADMIN_CPF e,
                      em desenvolvimento, um administrador de exemplo por role
   cleanup            remove sessões de usuário final e tokens de uso único vencidos há mais
-                     de N dias [--days 7] e envios de arquivo nunca confirmados há mais de 24 h
-                     (agende, por exemplo, uma vez por dia)
+                     de N dias [--days 7] e envios de arquivo nunca confirmados há mais de 24 h;
+                     com --draft-days N, também apaga rascunhos de projeto sem alteração há mais
+                     de N dias (retenção; padrão 0 = não apaga). Agende, por exemplo, uma vez por dia
 `
 
 func main() {
@@ -98,6 +99,7 @@ func run(ctx context.Context, cmd string, args []string) error {
 	case "cleanup":
 		fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 		days := fs.Int("days", 7, "carência, em dias, após o vencimento")
+		draftDays := fs.Int("draft-days", 0, "apaga rascunhos de projeto sem alteração há mais de N dias (0 = não apaga)")
 		if err := fs.Parse(args); err != nil {
 			return err
 		}
@@ -115,7 +117,18 @@ func run(ctx context.Context, cmd string, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Removidos: %d envios de arquivo não confirmados.\n", n)
+		m, err := a.Projects.CleanupPendingFiles(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Removidos: %d envios de arquivo não confirmados (documentos) e %d (projetos).\n", n, m)
+		drafts, err := a.Projects.CleanupAbandonedDrafts(ctx, *draftDays)
+		if err != nil {
+			return err
+		}
+		if *draftDays > 0 {
+			fmt.Printf("Removidos: %d rascunhos de projeto sem alteração há mais de %d dias.\n", drafts, *draftDays)
+		}
 		return nil
 	default:
 		return fmt.Errorf("comando desconhecido %q\n\n%s", cmd, uso)

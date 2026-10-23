@@ -111,7 +111,8 @@ func (s *AdminAuth) needsSync(a db.Admin, id *Identity) bool {
 	return changed || a.LastLoginAt == nil || s.nowFunc().Sub(*a.LastLoginAt) >= loginTouchInterval
 }
 
-// provision cria o administrador do primeiro acesso: ativo e sem nenhuma role.
+// provision cria o administrador do primeiro acesso: ativo e com a role de proponente. Se a role ainda
+// não existe (o seed não rodou), fica sem nenhuma, como antes.
 func (s *AdminAuth) provision(ctx context.Context, id *Identity) (db.Admin, error) {
 	var created db.Admin
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -126,8 +127,16 @@ func (s *AdminAuth) provision(ctx context.Context, id *Identity) (db.Admin, erro
 		if err != nil {
 			return err
 		}
+		granted, err := q.AssignAdminRoleByCode(ctx, db.AssignAdminRoleByCodeParams{AdminID: created.ID, Code: authz.ProponentRoleCode})
+		if err != nil {
+			return err
+		}
+		after := map[string]any{"cpf": cpf.Mask(id.CPF), "email": id.Email}
+		if granted > 0 {
+			after["role"] = authz.ProponentRoleCode
+		}
 		return s.audit.Record(ctx, q, audit.Entry{ActorType: "system", Action: "admin.auto-provisioned", Entity: "admin", EntityID: created.ID.String(),
-			Payload: map[string]any{"after": map[string]any{"cpf": cpf.Mask(id.CPF), "email": id.Email}}})
+			Payload: map[string]any{"after": after}})
 	})
 	return created, err
 }

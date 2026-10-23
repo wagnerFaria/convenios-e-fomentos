@@ -26,11 +26,14 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/admin"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/auth"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/authz"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/catalog"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/document"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/enduser"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/project"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
 )
 
 // Deps são as dependências do seed.
@@ -51,6 +54,7 @@ const (
 	RoleEditor     = "editor"
 	RoleAuthor     = "author"
 	RoleReviewer   = "department-reviewer"
+	RoleProponent  = authz.ProponentRoleCode
 )
 
 // Departamentos de exemplo.
@@ -62,6 +66,9 @@ type roleSpec struct {
 	code, name, description string
 	system                  bool
 	perms                   []authz.Permission
+	// topUp acrescenta as permissões padrão que ainda faltam numa role que já existe (sem alterar nem remover
+	// nenhuma). Serve às roles de sistema cujo conjunto cresce a cada fase.
+	topUp bool
 }
 
 func adminRoles() []roleSpec {
@@ -85,6 +92,21 @@ func adminRoles() []roleSpec {
 				{Action: document.ActionAdminFileRead},
 				{Action: document.ActionAdminFileUpload, Conditions: []string{"admin::is-creator"}},
 				{Action: document.ActionAdminFileDelete, Conditions: []string{"admin::is-creator"}},
+			},
+		},
+		{
+			code: RoleProponent, name: "Proponente", description: "Quem entra pelo MT Login e cadastra projetos de convênio ou fomento. Recebe esta role automaticamente no primeiro acesso.", system: true, topUp: true,
+			perms: []authz.Permission{
+				{Action: catalog.ActionEntityTypesRead}, {Action: catalog.ActionMunicipalitiesRead},
+				{Action: catalog.ActionParliamentariansRead}, {Action: rules.ActionRead},
+				{Action: project.ActionProfileRead}, {Action: project.ActionProfileUpdate},
+				{Action: project.ActionCreate},
+				{Action: project.ActionRead, Conditions: []string{"admin::is-creator", project.ConditionMember}},
+				{Action: project.ActionUpdate, Conditions: []string{"admin::is-creator", project.ConditionEditor}},
+				{Action: project.ActionDelete, Conditions: []string{"admin::is-creator"}},
+				{Action: project.ActionSubmit, Conditions: []string{"admin::is-creator", project.ConditionEditor}},
+				{Action: project.ActionWithdraw, Conditions: []string{"admin::is-creator"}},
+				{Action: project.ActionShare, Conditions: []string{"admin::is-creator"}},
 			},
 		},
 		{
@@ -119,6 +141,12 @@ func Run(ctx context.Context, d Deps) error {
 			return fmt.Errorf("role %q: %w", spec.code, err)
 		}
 	}
+	// Quem já entrou pelo MT Login antes da role de proponente existir ficou sem nenhuma e vê "Aguardando liberação".
+	if n, err := q.AssignRoleToAdminsWithoutRoles(ctx, RoleProponent); err != nil {
+		return fmt.Errorf("role de proponente para quem não tem nenhuma: %w", err)
+	} else if n > 0 {
+		d.Log.Info("role de proponente atribuída a administradores sem nenhuma role", "quantidade", n)
+	}
 	if err := d.ensureEndUserPermissions(ctx, q); err != nil {
 		return err
 	}
@@ -143,11 +171,32 @@ func (d Deps) ensureAdminRole(ctx context.Context, q *db.Queries, spec roleSpec)
 	if err != nil {
 		return err
 	}
-	if exists || len(spec.perms) == 0 {
+	if len(spec.perms) == 0 || (exists && !spec.topUp) {
 		return nil
 	}
-	// Role recém-criada: aplica as permissões padrão, validadas pelo mesmo caminho da API.
-	perms, issues := d.Engine.NormalizePermissions(spec.perms)
+	want := spec.perms
+	if exists {
+		// Role já existente: só as permissões padrão cuja ação a role ainda não tem.
+		have, err := q.ListAdminPermissionsByRole(ctx, role.ID)
+		if err != nil {
+			return err
+		}
+		has := map[string]bool{}
+		for _, h := range have {
+			has[h.Action] = true
+		}
+		want = nil
+		for _, p := range spec.perms {
+			if !has[p.Action] {
+				want = append(want, p)
+			}
+		}
+		if len(want) == 0 {
+			return nil
+		}
+	}
+	// Aplica as permissões padrão, validadas pelo mesmo caminho da API.
+	perms, issues := d.Engine.NormalizePermissions(want)
 	if len(issues) > 0 {
 		return fmt.Errorf("permissões padrão inválidas: %v", issues)
 	}

@@ -41,9 +41,13 @@ type Config struct {
 	CORSAllowedOrigins  []string `env:"CORS_ALLOWED_ORIGINS" envSeparator:"," envDefault:"http://localhost:3000"`
 	RateLimitAuthPerMin int      `env:"RATE_LIMIT_AUTH_PER_MINUTE" envDefault:"10"`
 	// Limite geral por IP em todas as rotas (0 desliga). Protege o banco de requisições em massa.
-	RateLimitGlobalPerMin int   `env:"RATE_LIMIT_GLOBAL_PER_MINUTE" envDefault:"600"`
-	MaxBodyBytes          int64 `env:"MAX_BODY_BYTES" envDefault:"1048576"`
-	PasswordMinLength     int   `env:"PASSWORD_MIN_LENGTH" envDefault:"8"`
+	// RateLimitUploadPerMin limita, por usuário, os pedidos e confirmações de envio de arquivo dos projetos (0 desliga).
+	RateLimitUploadPerMin int `env:"RATE_LIMIT_UPLOAD_PER_MINUTE" envDefault:"120"`
+	// ClamAVAddr (host:porta do clamd) liga a verificação de vírus dos arquivos dos projetos; vazio desliga.
+	ClamAVAddr            string `env:"CLAMAV_ADDR"`
+	RateLimitGlobalPerMin int    `env:"RATE_LIMIT_GLOBAL_PER_MINUTE" envDefault:"600"`
+	MaxBodyBytes          int64  `env:"MAX_BODY_BYTES" envDefault:"1048576"`
+	PasswordMinLength     int    `env:"PASSWORD_MIN_LENGTH" envDefault:"8"`
 
 	SMTPHost     string `env:"SMTP_HOST"`
 	SMTPPort     int    `env:"SMTP_PORT" envDefault:"587"`
@@ -136,7 +140,7 @@ func (c *Config) Validate() error {
 	if c.PasswordMinLength < 1 {
 		errs = append(errs, errors.New("PASSWORD_MIN_LENGTH deve ser >= 1"))
 	}
-	if c.RateLimitAuthPerMin < 1 || c.RateLimitGlobalPerMin < 0 {
+	if c.RateLimitAuthPerMin < 1 || c.RateLimitGlobalPerMin < 0 || c.RateLimitUploadPerMin < 0 {
 		errs = append(errs, errors.New("RATE_LIMIT_AUTH_PER_MINUTE deve ser >= 1 e RATE_LIMIT_GLOBAL_PER_MINUTE >= 0"))
 	}
 	if c.Argon2Iterations < 1 || c.Argon2Parallel < 1 || c.Argon2MemoryKiB < 8*uint32(c.Argon2Parallel) {

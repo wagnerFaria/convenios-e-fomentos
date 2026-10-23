@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Admin struct {
@@ -129,6 +130,24 @@ type DocumentFile struct {
 	ConfirmedAt *time.Time `json:"confirmed_at"`
 }
 
+type DocumentRequirement struct {
+	ID                   uuid.UUID `json:"id"`
+	Code                 string    `json:"code"`
+	Name                 string    `json:"name"`
+	Description          string    `json:"description"`
+	Grp                  string    `json:"grp"`
+	SortOrder            int32     `json:"sort_order"`
+	Instruments          []string  `json:"instruments"`
+	Conditions           []byte    `json:"conditions"`
+	Scope                string    `json:"scope"`
+	AcceptsJustification bool      `json:"accepts_justification"`
+	Sources              []byte    `json:"sources"`
+	Templates            []byte    `json:"templates"`
+	Active               bool      `json:"active"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
 type EmailTemplate struct {
 	Key         string    `json:"key"`
 	SenderName  string    `json:"sender_name"`
@@ -184,6 +203,26 @@ type EndUserSession struct {
 	RevokedAt        *time.Time `json:"revoked_at"`
 }
 
+type EntityType struct {
+	ID        uuid.UUID `json:"id"`
+	Code      string    `json:"code"`
+	Name      string    `json:"name"`
+	Nature    string    `json:"nature"`
+	NonProfit bool      `json:"non_profit"`
+	Active    bool      `json:"active"`
+	IsSystem  bool      `json:"is_system"`
+	SortOrder int32     `json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Municipality struct {
+	IbgeCode   string `json:"ibge_code"`
+	Name       string `json:"name"`
+	Uf         string `json:"uf"`
+	SearchName string `json:"search_name"`
+}
+
 type OneTimeToken struct {
 	ID          uuid.UUID  `json:"id"`
 	SubjectType string     `json:"subject_type"`
@@ -193,6 +232,217 @@ type OneTimeToken struct {
 	ExpiresAt   time.Time  `json:"expires_at"`
 	UsedAt      *time.Time `json:"used_at"`
 	CreatedAt   time.Time  `json:"created_at"`
+}
+
+type Parliamentarian struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Chamber   string    `json:"chamber"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Project struct {
+	ID                          uuid.UUID   `json:"id"`
+	CreatedByID                 uuid.UUID   `json:"created_by_id"`
+	UpdatedByID                 *uuid.UUID  `json:"updated_by_id"`
+	DepartmentID                *uuid.UUID  `json:"department_id"`
+	Status                      string      `json:"status"`
+	Version                     int32       `json:"version"`
+	CreatedAt                   time.Time   `json:"created_at"`
+	UpdatedAt                   time.Time   `json:"updated_at"`
+	ProponentName               string      `json:"proponent_name"`
+	ProponentCpf                string      `json:"proponent_cpf"`
+	ProponentPhones             []byte      `json:"proponent_phones"`
+	ProponentEmails             []byte      `json:"proponent_emails"`
+	ProponentUf                 pgtype.Text `json:"proponent_uf"`
+	ProponentMunicipalityIbge   *string     `json:"proponent_municipality_ibge"`
+	ProponentJobTitle           string      `json:"proponent_job_title"`
+	IsLegalRepresentative       pgtype.Bool `json:"is_legal_representative"`
+	LegalRepName                string      `json:"legal_rep_name"`
+	LegalRepCpf                 *string     `json:"legal_rep_cpf"`
+	LegalRepJobTitle            string      `json:"legal_rep_job_title"`
+	Instrument                  *string     `json:"instrument"`
+	InstitutionCnpj             *string     `json:"institution_cnpj"`
+	InstitutionName             string      `json:"institution_name"`
+	EntityTypeID                *uuid.UUID  `json:"entity_type_id"`
+	EntityTypeOther             string      `json:"entity_type_other"`
+	EntityNature                *string     `json:"entity_nature"`
+	EntityNonProfit             bool        `json:"entity_non_profit"`
+	InstitutionUf               pgtype.Text `json:"institution_uf"`
+	InstitutionMunicipalityIbge *string     `json:"institution_municipality_ibge"`
+	InstitutionZip              string      `json:"institution_zip"`
+	InstitutionStreet           string      `json:"institution_street"`
+	InstitutionNumber           string      `json:"institution_number"`
+	InstitutionComplement       string      `json:"institution_complement"`
+	InstitutionDistrict         string      `json:"institution_district"`
+	InstitutionEmail            string      `json:"institution_email"`
+	InstitutionPhone            string      `json:"institution_phone"`
+	HabilitationStatus          *string     `json:"habilitation_status"`
+	HabilitationNumber          string      `json:"habilitation_number"`
+	HabilitationValidUntil      pgtype.Date `json:"habilitation_valid_until"`
+	SigconNumber                *string     `json:"sigcon_number"`
+	SigconRegisteredOn          pgtype.Date `json:"sigcon_registered_on"`
+	Title                       string      `json:"title"`
+	ObjectDescription           string      `json:"object_description"`
+	Justification               string      `json:"justification"`
+	StartDate                   pgtype.Date `json:"start_date"`
+	EndDate                     pgtype.Date `json:"end_date"`
+	ObjectNature                *string     `json:"object_nature"`
+	HasArtisticHiring           bool        `json:"has_artistic_hiring"`
+	Calamity                    bool        `json:"calamity"`
+	ExecutionPlaceDetail        string      `json:"execution_place_detail"`
+	FundingType                 *string     `json:"funding_type"`
+	OwnAmountCents              int64       `json:"own_amount_cents"`
+	AmendmentAmountCents        int64       `json:"amendment_amount_cents"`
+	TotalAmountCents            int64       `json:"total_amount_cents"`
+	CounterpartKind             *string     `json:"counterpart_kind"`
+	CounterpartCents            int64       `json:"counterpart_cents"`
+	CounterpartDescription      string      `json:"counterpart_description"`
+	IndirectCostsCents          int64       `json:"indirect_costs_cents"`
+	TenderStatus                *string     `json:"tender_status"`
+	TenderNoticeNumber          string      `json:"tender_notice_number"`
+	TenderApprovedOn            pgtype.Date `json:"tender_approved_on"`
+	TenderLegalBasis            string      `json:"tender_legal_basis"`
+	TenderJustification         string      `json:"tender_justification"`
+	ArtistFeesCents             int64       `json:"artist_fees_cents"`
+	RegionalArtistFeesCents     int64       `json:"regional_artist_fees_cents"`
+	GovernorWaiver              bool        `json:"governor_waiver"`
+	PriceOldestCollectedOn      pgtype.Date `json:"price_oldest_collected_on"`
+	ExclusiveSupplier           bool        `json:"exclusive_supplier"`
+	PublicSpaceUse              bool        `json:"public_space_use"`
+	ReducedDeadline             bool        `json:"reduced_deadline"`
+	Code                        *string     `json:"code"`
+	Stage                       *string     `json:"stage"`
+	SubmittedAt                 *time.Time  `json:"submitted_at"`
+	SubmittedByID               *uuid.UUID  `json:"submitted_by_id"`
+	SubmissionIp                string      `json:"submission_ip"`
+	LateSubmission              bool        `json:"late_submission"`
+	ArchivedAt                  *time.Time  `json:"archived_at"`
+	ArchivedByID                *uuid.UUID  `json:"archived_by_id"`
+	ArchiveReason               *string     `json:"archive_reason"`
+	ArchiveNote                 string      `json:"archive_note"`
+	OriginProjectID             *uuid.UUID  `json:"origin_project_id"`
+}
+
+type ProjectAmendment struct {
+	ID                      uuid.UUID  `json:"id"`
+	ProjectID               uuid.UUID  `json:"project_id"`
+	Position                int32      `json:"position"`
+	ParliamentarianID       *uuid.UUID `json:"parliamentarian_id"`
+	ParliamentarianFreeName string     `json:"parliamentarian_free_name"`
+	AmendmentNumber         string     `json:"amendment_number"`
+	Year                    *int32     `json:"year"`
+	AmountCents             int64      `json:"amount_cents"`
+}
+
+type ProjectCodeCounter struct {
+	Year       int32 `json:"year"`
+	LastNumber int32 `json:"last_number"`
+}
+
+type ProjectComplementItem struct {
+	ID         uuid.UUID  `json:"id"`
+	RequestID  uuid.UUID  `json:"request_id"`
+	Kind       string     `json:"kind"`
+	Target     string     `json:"target"`
+	Note       string     `json:"note"`
+	AnsweredAt *time.Time `json:"answered_at"`
+}
+
+type ProjectComplementRequest struct {
+	ID              uuid.UUID  `json:"id"`
+	ProjectID       uuid.UUID  `json:"project_id"`
+	Number          int32      `json:"number"`
+	RequestedByID   *uuid.UUID `json:"requested_by_id"`
+	RequestedAt     time.Time  `json:"requested_at"`
+	DueAt           time.Time  `json:"due_at"`
+	Message         string     `json:"message"`
+	Status          string     `json:"status"`
+	AnsweredAt      *time.Time `json:"answered_at"`
+	AnsweredVersion *int32     `json:"answered_version"`
+}
+
+type ProjectDocumentItem struct {
+	ID              uuid.UUID  `json:"id"`
+	ProjectID       uuid.UUID  `json:"project_id"`
+	RequirementCode string     `json:"requirement_code"`
+	AmendmentID     *uuid.UUID `json:"amendment_id"`
+	Justification   string     `json:"justification"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type ProjectFile struct {
+	ID           uuid.UUID  `json:"id"`
+	ItemID       uuid.UUID  `json:"item_id"`
+	ObjectKey    string     `json:"object_key"`
+	Filename     string     `json:"filename"`
+	ContentType  string     `json:"content_type"`
+	SizeBytes    int64      `json:"size_bytes"`
+	Status       string     `json:"status"`
+	CreatedByID  *uuid.UUID `json:"created_by_id"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ConfirmedAt  *time.Time `json:"confirmed_at"`
+	Locked       bool       `json:"locked"`
+	SupersededAt *time.Time `json:"superseded_at"`
+	Sha256       *string    `json:"sha256"`
+}
+
+type ProjectMember struct {
+	ID          uuid.UUID  `json:"id"`
+	ProjectID   uuid.UUID  `json:"project_id"`
+	Cpf         string     `json:"cpf"`
+	Label       string     `json:"label"`
+	Level       string     `json:"level"`
+	Status      string     `json:"status"`
+	InvitedByID uuid.UUID  `json:"invited_by_id"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	AcceptedAt  *time.Time `json:"accepted_at"`
+	RevokedAt   *time.Time `json:"revoked_at"`
+	RevokedByID *uuid.UUID `json:"revoked_by_id"`
+	Email       *string    `json:"email"`
+}
+
+type ProjectMunicipality struct {
+	ProjectID uuid.UUID `json:"project_id"`
+	IbgeCode  string    `json:"ibge_code"`
+}
+
+type ProjectVersion struct {
+	ID            uuid.UUID  `json:"id"`
+	ProjectID     uuid.UUID  `json:"project_id"`
+	Number        int32      `json:"number"`
+	Reason        string     `json:"reason"`
+	SubmittedAt   time.Time  `json:"submitted_at"`
+	SubmittedByID *uuid.UUID `json:"submitted_by_id"`
+	SubmissionIp  string     `json:"submission_ip"`
+	Snapshot      []byte     `json:"snapshot"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+type ProponentProfile struct {
+	AdminID          uuid.UUID   `json:"admin_id"`
+	Phones           []byte      `json:"phones"`
+	Emails           []byte      `json:"emails"`
+	Uf               pgtype.Text `json:"uf"`
+	MunicipalityIbge *string     `json:"municipality_ibge"`
+	JobTitle         string      `json:"job_title"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
+}
+
+type RuleParameter struct {
+	ID        uuid.UUID   `json:"id"`
+	Key       string      `json:"key"`
+	Value     []byte      `json:"value"`
+	ValidFrom pgtype.Date `json:"valid_from"`
+	ValidTo   pgtype.Date `json:"valid_to"`
+	Note      string      `json:"note"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 type Setting struct {
