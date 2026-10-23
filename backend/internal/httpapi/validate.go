@@ -45,7 +45,39 @@ func Decode(r *http.Request, dst any) error {
 		}
 		return ErrBadRequest("Corpo da requisição inválido: " + err.Error())
 	}
+	if hasNUL(reflect.ValueOf(dst)) {
+		return ErrValidation(map[string]any{"fields": []FieldError{{Field: "body", Message: "O texto contém caracteres inválidos."}}})
+	}
 	return Validate(dst)
+}
+
+// hasNUL diz se alguma string do valor tem o caractere NUL, que o PostgreSQL não aceita em texto.
+func hasNUL(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		return !v.IsNil() && hasNUL(v.Elem())
+	case reflect.String:
+		return strings.ContainsRune(v.String(), 0)
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if v.Type().Field(i).IsExported() && hasNUL(v.Field(i)) {
+				return true
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := range v.Len() {
+			if hasNUL(v.Index(i)) {
+				return true
+			}
+		}
+	case reflect.Map:
+		for it := v.MapRange(); it.Next(); {
+			if hasNUL(it.Key()) || hasNUL(it.Value()) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Validate valida uma struct e devolve um erro 422 com mensagens em português.

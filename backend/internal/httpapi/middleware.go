@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/wagner/convenios-e-fomentos/backend/internal/logging"
@@ -89,6 +90,18 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 		// As respostas são dinâmicas e podem conter dados pessoais: nada de cache compartilhado.
 		h.Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RejectNUL recusa requisições com o caractere NUL na URL ou na query: o PostgreSQL não guarda NUL em texto
+// e ele nunca é válido em um parâmetro legítimo.
+func RejectNUL(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "\x00") || strings.Contains(r.URL.RawQuery, "%00") || strings.Contains(r.URL.RawQuery, "\x00") {
+			Error(w, r, ErrBadRequest("A requisição contém caracteres inválidos."))
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

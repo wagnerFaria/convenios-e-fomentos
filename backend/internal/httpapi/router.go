@@ -38,7 +38,7 @@ const APIPrefix = "/api"
 // NewRouter monta o roteador com os middlewares globais e as rotas de infraestrutura.
 func NewRouter(o RouterOptions) http.Handler {
 	r := chi.NewRouter()
-	r.Use(RequestID, ClientIPMiddleware(o.TrustedProxies), RateLimitByIP(o.GlobalRatePerMinute), AccessLog(o.Log), Recoverer(o.Log), SecurityHeaders, BodyLimit(o.MaxBodyBytes))
+	r.Use(RequestID, ClientIPMiddleware(o.TrustedProxies), RateLimitByIP(o.GlobalRatePerMinute), AccessLog(o.Log), Recoverer(o.Log), SecurityHeaders, RejectNUL, BodyLimit(o.MaxBodyBytes))
 	r.Use(middleware.GetHead)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: o.AllowedOrigins,
