@@ -1,0 +1,159 @@
+'use client';
+
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { Icons } from '@/components/icons';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { parliamentariansQueryOptions } from '@/features/parliamentarians/api/queries';
+import type { Amendment } from '../api/types';
+import { MoneyInput } from './money-input';
+
+const OTHER = '__other';
+const MAX = 20;
+
+/** Linha de emenda no formulário: `other` é só da tela (parlamentar fora da lista) e não vai ao servidor. */
+export type AmendmentRow = Amendment & { other?: boolean };
+
+export const toRow = (a: Amendment): AmendmentRow => ({
+  ...a,
+  other: a.parliamentarianId === '' && a.parliamentarianName !== ''
+});
+
+export const fromRow = ({ other: _other, ...a }: AmendmentRow): Amendment => a;
+
+/** Emendas parlamentares do projeto: parlamentar (do cadastro ou por extenso), número, ano e valor. */
+export function AmendmentsEditor({
+  value,
+  onChange,
+  disabled
+}: {
+  value: AmendmentRow[];
+  onChange: (next: AmendmentRow[]) => void;
+  disabled?: boolean;
+}) {
+  const list = useQuery(parliamentariansQueryOptions());
+  const usedIds = new Set(value.map((a) => a.parliamentarianId));
+  // Parlamentar desativado só aparece onde já foi escolhido.
+  const options = (list.data ?? []).filter((p) => p.active || usedIds.has(p.id));
+  const set = (i: number, patch: Partial<AmendmentRow>) =>
+    onChange(value.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
+  const [year] = useState(() => new Date().getFullYear());
+
+  return (
+    <fieldset className='space-y-3' disabled={disabled}>
+      <legend className='text-sm leading-snug font-medium'>Emendas parlamentares *</legend>
+      <p className='text-muted-foreground text-sm'>
+        Informe cada emenda com o deputado, o número, o ano e o valor. Os ofícios do deputado e da
+        Casa Civil são anexados na etapa de documentos.
+      </p>
+      {value.map((a, i) => (
+        <div
+          key={i}
+          className='grid gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_8rem_6rem_11rem_auto] sm:items-end'
+        >
+          <div className='space-y-1.5'>
+            <label className='text-xs font-medium' htmlFor={`amendment-${i}-who`}>
+              Parlamentar
+            </label>
+            <NativeSelect
+              id={`amendment-${i}-who`}
+              className='w-full'
+              value={a.other ? OTHER : a.parliamentarianId}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === OTHER) set(i, { other: true, parliamentarianId: '' });
+                else set(i, { other: false, parliamentarianId: v, parliamentarianName: '' });
+              }}
+            >
+              <NativeSelectOption value=''>Escolha…</NativeSelectOption>
+              {options.map((p) => (
+                <NativeSelectOption key={p.id} value={p.id}>
+                  {p.name}
+                  {p.chamber === 'federal' ? ' (federal)' : ''}
+                </NativeSelectOption>
+              ))}
+              <NativeSelectOption value={OTHER}>Outro (informar o nome)</NativeSelectOption>
+            </NativeSelect>
+            {a.other && (
+              <Input
+                aria-label={`Nome do parlamentar da emenda ${i + 1}`}
+                maxLength={120}
+                placeholder='Nome completo do parlamentar'
+                value={a.parliamentarianName}
+                onChange={(e) => set(i, { parliamentarianName: e.target.value })}
+              />
+            )}
+          </div>
+          <div className='space-y-1.5'>
+            <label className='text-xs font-medium' htmlFor={`amendment-${i}-number`}>
+              Nº da emenda
+            </label>
+            <Input
+              id={`amendment-${i}-number`}
+              maxLength={30}
+              value={a.number}
+              onChange={(e) => set(i, { number: e.target.value })}
+            />
+          </div>
+          <div className='space-y-1.5'>
+            <label className='text-xs font-medium' htmlFor={`amendment-${i}-year`}>
+              Ano
+            </label>
+            <Input
+              id={`amendment-${i}-year`}
+              inputMode='numeric'
+              placeholder={String(year)}
+              value={a.year ? String(a.year) : ''}
+              onChange={(e) =>
+                set(i, { year: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) })
+              }
+            />
+          </div>
+          <div className='space-y-1.5'>
+            <label className='text-xs font-medium' htmlFor={`amendment-${i}-amount`}>
+              Valor
+            </label>
+            <MoneyInput
+              id={`amendment-${i}-amount`}
+              value={a.amountCents}
+              onChange={(amountCents) => set(i, { amountCents })}
+            />
+          </div>
+          <Button
+            type='button'
+            size='icon'
+            variant='ghost'
+            aria-label={`Remover emenda ${i + 1}`}
+            onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+          >
+            <Icons.trash aria-hidden />
+          </Button>
+        </div>
+      ))}
+      {value.length < MAX && (
+        <Button
+          type='button'
+          size='sm'
+          variant='outline'
+          onClick={() =>
+            onChange([
+              ...value,
+              {
+                id: '',
+                parliamentarianId: '',
+                parliamentarianName: '',
+                number: '',
+                year,
+                amountCents: 0
+              }
+            ])
+          }
+        >
+          <Icons.add aria-hidden /> Adicionar emenda
+        </Button>
+      )}
+    </fieldset>
+  );
+}

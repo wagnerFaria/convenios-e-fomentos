@@ -1,0 +1,141 @@
+'use client';
+
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { toast } from 'sonner';
+import { useStore } from '@tanstack/react-form';
+import { FieldGroup } from '@/components/ui/field';
+import { useAppForm } from '@/lib/form';
+import { projectKeys } from '../api/queries';
+import { saveProponent } from '../api/service';
+import type { Contact, Project } from '../api/types';
+import { formatCpf, formatPhone } from '../format';
+import { ContactEditor } from './contact-editor';
+import { ServerErrors } from './server-errors';
+import { StepActions } from './step-actions';
+
+export function contactValues(c: Contact): Contact {
+  return { ...c, phones: c.phones.map((p) => ({ ...p, number: formatPhone(p.number) })) };
+}
+
+const representativeOptions = [
+  { value: 'yes', label: 'Sim, sou o representante legal (prefeito, presidente…)' },
+  { value: 'no', label: 'Não, represento a instituição a pedido do representante legal' }
+];
+
+export function ProponentStep({
+  project,
+  readOnly,
+  onSaved,
+  onDirty
+}: {
+  project: Project;
+  readOnly: boolean;
+  onSaved: (project: Project, advance: boolean) => void;
+  onDirty: (dirty: boolean) => void;
+}) {
+  const qc = useQueryClient();
+  const advance = useRef(false);
+  const p = project.proponent;
+
+  const save = useMutation({
+    mutationFn: (v: ReturnType<typeof defaults>) =>
+      saveProponent(project.id, {
+        version: project.version,
+        ...v.contact,
+        isLegalRepresentative: v.representative === '' ? null : v.representative === 'yes',
+        legalRepName: v.legalRepName,
+        legalRepCpf: v.legalRepCpf,
+        legalRepJobTitle: v.legalRepJobTitle
+      }),
+    onSuccess: (saved) => {
+      qc.setQueryData(projectKeys.detail(project.id), saved);
+      void qc.invalidateQueries({ queryKey: projectKeys.checklist(project.id) });
+      void qc.invalidateQueries({ queryKey: projectKeys.lists() });
+      toast.success('Dados do proponente salvos.');
+      onSaved(saved, advance.current);
+    }
+  });
+
+  const defaults = () => ({
+    contact: contactValues(p),
+    representative: p.isLegalRepresentative === null ? '' : p.isLegalRepresentative ? 'yes' : 'no',
+    legalRepName: p.legalRepName,
+    legalRepCpf: formatCpf(p.legalRepCpf),
+    legalRepJobTitle: p.legalRepJobTitle
+  });
+
+  const form = useAppForm({
+    defaultValues: defaults(),
+    onSubmit: ({ value }) => save.mutateAsync(value).catch(() => undefined)
+  });
+  const dirty = useStore(form.store, (s) => s.isDirty);
+  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  const representative = useStore(form.store, (s) => s.values.representative);
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void form.handleSubmit();
+      }}
+    >
+      <FieldGroup>
+        <div className='bg-muted/40 rounded-lg border p-3 text-sm'>
+          <p className='font-medium'>{p.name}</p>
+          <p className='text-muted-foreground'>
+            CPF {formatCpf(p.cpf)} · dados do seu login no MT Login
+          </p>
+        </div>
+        <form.Field
+          name='contact'
+          children={(f) => <ContactEditor value={f.state.value} onChange={f.handleChange} />}
+        />
+        <form.AppField
+          name='representative'
+          children={(f) => (
+            <f.RadioGroupField
+              label='Você é o representante legal da instituição?'
+              required
+              options={representativeOptions}
+            />
+          )}
+        />
+        {representative === 'no' && (
+          <>
+            <form.AppField
+              name='legalRepName'
+              children={(f) => (
+                <f.TextField label='Nome do representante legal' required maxLength={150} />
+              )}
+            />
+            <form.AppField
+              name='legalRepCpf'
+              children={(f) => (
+                <f.TextField
+                  label='CPF do representante legal'
+                  required
+                  inputMode='numeric'
+                  placeholder='000.000.000-00'
+                />
+              )}
+            />
+            <form.AppField
+              name='legalRepJobTitle'
+              children={(f) => (
+                <f.TextField label='Cargo do representante legal' required maxLength={100} />
+              )}
+            />
+          </>
+        )}
+        <ServerErrors error={save.error} />
+        <StepActions
+          saving={save.isPending}
+          disabled={readOnly}
+          onSave={() => (advance.current = false)}
+          onSaveAndContinue={() => (advance.current = true)}
+        />
+      </FieldGroup>
+    </form>
+  );
+}

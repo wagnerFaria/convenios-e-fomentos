@@ -21,6 +21,29 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
+    label: 'Projetos',
+    items: [
+      {
+        title: 'Meus projetos',
+        url: '/dashboard/projetos',
+        icon: 'kanban',
+        isActive: false,
+        shortcut: ['m', 'p'],
+        access: { permission: 'admin::projects.read' },
+        items: []
+      },
+      {
+        title: 'Perfil de proponente',
+        url: '/dashboard/perfil-proponente',
+        icon: 'userPen',
+        isActive: false,
+        shortcut: ['p', 'f'],
+        access: { permission: 'admin::proponent-profile.read' },
+        items: []
+      }
+    ]
+  },
+  {
     label: 'Conteúdo',
     items: [
       {
@@ -62,6 +85,34 @@ export const navGroups: NavGroup[] = [
         isActive: false,
         shortcut: ['a', 'd'],
         access: { permission: 'admin::settings.departments.read' },
+        items: []
+      },
+      {
+        title: 'Tipos de entidade',
+        url: '/dashboard/administracao/tipos-entidade',
+        icon: 'building',
+        isActive: false,
+        shortcut: ['a', 'e'],
+        // Quem só lê (o proponente) não vê a tela de manutenção: o menu pede a permissão de criar.
+        access: { permission: 'admin::catalog.entity-types.create' },
+        items: []
+      },
+      {
+        title: 'Parlamentares',
+        url: '/dashboard/administracao/parlamentares',
+        icon: 'teams',
+        isActive: false,
+        shortcut: ['a', 'l'],
+        access: { permission: 'admin::catalog.parliamentarians.create' },
+        items: []
+      },
+      {
+        title: 'Parâmetros de regras',
+        url: '/dashboard/administracao/parametros',
+        icon: 'settings',
+        isActive: false,
+        shortcut: ['a', 'r'],
+        access: { permission: 'admin::settings.rule-parameters.create' },
         items: []
       },
       {
