@@ -17,6 +17,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/logging"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/mtid"
 )
 
 func main() {
@@ -53,7 +54,14 @@ func run() error {
 	case !cfg.IsProduction():
 		mail = mailer.LogMailer{Log: log}
 	}
-	application, err := app.New(ctx, cfg, log, pool, mail)
+	var opts []app.Option
+	if cfg.MTIDSimulate {
+		sim := mtid.NewMemory()
+		sim.AutoApprove = cfg.MTIDSimulateDelay
+		opts = append(opts, app.WithMTID(sim))
+		log.Warn("MT-ID SIMULADO ligado: as declarações são \"assinadas\" sozinhas, sem validade", "delay", cfg.MTIDSimulateDelay)
+	}
+	application, err := app.New(ctx, cfg, log, pool, mail, opts...)
 	if err != nil {
 		return err
 	}

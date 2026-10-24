@@ -4,6 +4,7 @@ import type { ApiResponse } from '@/lib/api/types';
 import type {
   Checklist,
   Contact,
+  Declaration,
   Member,
   MemberLevel,
   DocFile,
@@ -218,4 +219,25 @@ export async function updateMember(id: string, memberId: string, input: MemberIn
 
 export async function revokeMember(id: string, memberId: string) {
   await apiClient<void>(`/admin/projects/${id}/members/${memberId}`, { method: 'DELETE' });
+}
+
+const declaration = (id: string, code: string) => `/admin/projects/${id}/declarations/${code}`;
+
+/** Prévia da declaração e situação da última emissão (a consulta também conclui a assinatura já feita no MT-ID). */
+export async function getDeclaration(id: string, code: string) {
+  return (await apiClient<ApiResponse<Declaration>>(declaration(id, code))).data;
+}
+
+/** Aceita o texto lido, gera o PDF e pede a assinatura ao MT-ID. */
+export async function acceptDeclaration(id: string, code: string, paramsSha256: string) {
+  return (
+    await apiClient<ApiResponse<Declaration>>(`${declaration(id, code)}/accept`, {
+      method: 'POST',
+      ...json({ paramsSha256, confirm: true })
+    })
+  ).data;
+}
+
+export async function cancelDeclaration(id: string, code: string) {
+  await apiClient<void>(declaration(id, code), { method: 'DELETE' });
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/config"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/cpf"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/mtid"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/storage"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/testutil"
 )
@@ -41,6 +42,7 @@ type env struct {
 	app   *app.App
 	oidc  *testutil.FakeOIDC
 	store *storage.Memory
+	mtid  *mtid.Memory
 }
 
 type resp struct {
@@ -80,10 +82,11 @@ func newEnv(t *testing.T, mutate ...func(*config.Config)) *env {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	store := storage.NewMemory()
-	a, err := app.New(ctx, cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), pool, mail, app.WithStore(store))
+	signer := mtid.NewMemory()
+	a, err := app.New(ctx, cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), pool, mail, app.WithStore(store), app.WithMTID(signer))
 	require.NoError(t, err)
 	require.NoError(t, a.Start(ctx))
-	return &env{store: store, t: t, h: a.Handler, pool: pool, mail: mail, cfg: cfg, authz: a.Authz, app: a, oidc: oidc}
+	return &env{store: store, mtid: signer, t: t, h: a.Handler, pool: pool, mail: mail, cfg: cfg, authz: a.Authz, app: a, oidc: oidc}
 }
 
 func (e *env) do(method, path string, body any, token string) resp {

@@ -24,6 +24,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/enduser"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/mtid"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/project"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/scan"
@@ -64,10 +65,17 @@ type App struct {
 // Option ajusta a montagem do grafo (usada principalmente pelos testes).
 type Option func(*options)
 
-type options struct{ store storage.Store }
+type options struct {
+	store storage.Store
+	mtid  mtid.Client
+}
 
 // WithStore usa o armazenamento dado em vez de criar o S3 a partir da configuração.
 func WithStore(s storage.Store) Option { return func(o *options) { o.store = s } }
+
+// WithMTID liga o MT-ID (assinatura das declarações). Sem ele, emitir declaração responde 503: o cliente HTTP real ainda não existe
+// (docs/debito-tecnico-mt-id.md).
+func WithMTID(c mtid.Client) Option { return func(o *options) { o.mtid = c } }
 
 // NewStore cria o armazenamento S3 da configuração; devolve nil quando STORAGE_ENDPOINT não está definido.
 func NewStore(cfg *config.Config) (storage.Store, error) {
@@ -148,6 +156,9 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 	projectSvc.SetNotifier(mail, cfg.PublicURL, log)
 	if cfg.ClamAVAddr != "" {
 		projectSvc.SetScanner(scan.ClamAV{Addr: cfg.ClamAVAddr})
+	}
+	if o.mtid != nil {
+		projectSvc.SetMTID(o.mtid)
 	}
 	if o.store != nil {
 		projectSvc.SetStorage(o.store, cfg.StorageUploadTTL, cfg.StorageDownloadTTL, log)

@@ -11,6 +11,7 @@ import { saveProponent } from '../api/service';
 import type { Contact, Project } from '../api/types';
 import { formatCpf, formatPhone } from '../format';
 import { ContactEditor } from './contact-editor';
+import { PersonalDataEditor } from './personal-data-editor';
 import { ServerErrors } from './server-errors';
 import { StepActions } from './step-actions';
 
@@ -21,7 +22,8 @@ export function contactValues(c: Contact): Contact {
     emails: c.emails,
     uf: c.uf,
     municipalityIbge: c.municipalityIbge,
-    jobTitle: c.jobTitle
+    jobTitle: c.jobTitle,
+    personal: c.personal
   };
 }
 
@@ -53,7 +55,8 @@ export function ProponentStep({
         isLegalRepresentative: v.representative === '' ? null : v.representative === 'yes',
         legalRepName: v.legalRepName,
         legalRepCpf: v.legalRepCpf,
-        legalRepJobTitle: v.legalRepJobTitle
+        legalRepJobTitle: v.legalRepJobTitle,
+        legalRepPersonal: v.legalRepPersonal
       }),
     onSuccess: (saved) => {
       qc.setQueryData(projectKeys.detail(project.id), saved);
@@ -69,7 +72,8 @@ export function ProponentStep({
     representative: p.isLegalRepresentative === null ? '' : p.isLegalRepresentative ? 'yes' : 'no',
     legalRepName: p.legalRepName,
     legalRepCpf: formatCpf(p.legalRepCpf),
-    legalRepJobTitle: p.legalRepJobTitle
+    legalRepJobTitle: p.legalRepJobTitle,
+    legalRepPersonal: p.legalRepPersonal
   });
 
   const form = useAppForm({
@@ -133,6 +137,25 @@ export function ProponentStep({
                 <f.TextField label='Cargo do representante legal' required maxLength={100} />
               )}
             />
+            <fieldset className='space-y-3'>
+              <legend className='text-sm leading-snug font-medium'>
+                Dados pessoais do representante legal
+              </legend>
+              <p className='text-muted-foreground text-sm'>
+                É ele quem assina as declarações; nacionalidade, estado civil e endereço entram no
+                texto delas.
+              </p>
+              <form.Field
+                name='legalRepPersonal'
+                children={(f) => (
+                  <PersonalDataEditor
+                    id='legal-rep-personal'
+                    value={f.state.value}
+                    onChange={f.handleChange}
+                  />
+                )}
+              />
+            </fieldset>
           </>
         )}
         <ServerErrors error={save.error} />

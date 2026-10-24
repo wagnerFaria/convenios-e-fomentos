@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import {
   getChecklist,
+  getDeclaration,
   getProfile,
   getProject,
   listMembers,
@@ -14,6 +15,7 @@ export const projectKeys = {
   list: (params: ListProjectsParams) => [...projectKeys.lists(), params] as const,
   detail: (id: string) => [...projectKeys.all, 'detail', id] as const,
   checklist: (id: string) => [...projectKeys.all, 'checklist', id] as const,
+  declaration: (id: string, code: string) => [...projectKeys.all, 'declaration', id, code] as const,
   members: (id: string) => [...projectKeys.all, 'members', id] as const,
   profile: () => ['proponent-profile'] as const
 };
@@ -32,3 +34,12 @@ export const checklistQueryOptions = (id: string) =>
 
 export const membersQueryOptions = (id: string) =>
   queryOptions({ queryKey: projectKeys.members(id), queryFn: () => listMembers(id) });
+
+/** Enquanto a assinatura está pendente, consulta de 5 em 5 segundos: o signatário assina no celular. */
+export const declarationQueryOptions = (id: string, code: string) =>
+  queryOptions({
+    queryKey: projectKeys.declaration(id, code),
+    queryFn: () => getDeclaration(id, code),
+    refetchInterval: (query) =>
+      query.state.data?.current?.status === 'awaiting_signature' ? 5000 : false
+  });

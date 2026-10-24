@@ -9,6 +9,7 @@ import { UFS } from '@/features/municipalities/api/queries';
 import { formatPhone } from '../format';
 import type { Contact, Email, Phone } from '../api/types';
 import { MunicipalitySelect } from './municipality-select';
+import { PersonalDataEditor } from './personal-data-editor';
 
 const MAX = 5;
 
@@ -169,6 +170,18 @@ export function ContactEditor({
         />
         <FieldDescription>Até 100 caracteres.</FieldDescription>
       </Field>
+      <fieldset className='space-y-3'>
+        <legend className='text-sm leading-snug font-medium'>Seus dados pessoais</legend>
+        <p className='text-muted-foreground text-sm'>
+          Usados nas declarações que você assina. Se o representante legal for outra pessoa, os
+          dados dele são pedidos mais adiante.
+        </p>
+        <PersonalDataEditor
+          id='contact-personal'
+          value={value.personal}
+          onChange={(personal) => patch({ personal })}
+        />
+      </fieldset>
     </FieldGroup>
   );
 }

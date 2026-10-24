@@ -3,8 +3,8 @@ SELECT * FROM document_requirements WHERE active ORDER BY sort_order, code;
 
 -- Carga inicial: não altera o que já existe (o catálogo pode ter sido ajustado pela administração).
 -- name: InsertDefaultDocumentRequirement :execrows
-INSERT INTO document_requirements (code, name, description, grp, sort_order, instruments, conditions, scope, accepts_justification, sources, templates)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO document_requirements (code, name, description, grp, sort_order, instruments, conditions, scope, accepts_justification, sources, templates, mandatory)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (code) DO NOTHING;
 
 -- name: UpdateProjectDocumentOptions :one

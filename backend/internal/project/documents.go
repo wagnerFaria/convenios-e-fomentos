@@ -52,12 +52,15 @@ type DocumentOptions struct {
 	ReducedDeadline   bool `json:"reducedDeadline"`   // pedido de redução do prazo de tramitação
 }
 
-// DocumentSummary resume o checklist.
+// DocumentSummary resume o checklist. Os campos Required* contam só as exigências obrigatórias: são eles que bloqueiam a
+// continuidade e o envio. Um obrigatório justificado conta como cumprido.
 type DocumentSummary struct {
-	Total     int `json:"total"`
-	Done      int `json:"done"`
-	Justified int `json:"justified"`
-	Missing   int `json:"missing"`
+	Total           int `json:"total"`
+	Done            int `json:"done"`
+	Justified       int `json:"justified"`
+	Missing         int `json:"missing"`
+	RequiredTotal   int `json:"requiredTotal"`
+	RequiredMissing int `json:"requiredMissing"`
 }
 
 // DocFile é um arquivo anexado a um item. A chave do objeto nunca sai da API.
@@ -84,9 +87,13 @@ type ChecklistItem struct {
 	Source               string    `json:"source"`
 	Template             *Template `json:"template"`
 	AcceptsJustification bool      `json:"acceptsJustification"`
-	Files                []DocFile `json:"files"`
-	Justification        string    `json:"justification"`
-	Status               string    `json:"status"`
+	// Mandatory: sem arquivo nem justificativa, o documento bloqueia a continuidade e o envio. Falso = opcional.
+	Mandatory     bool      `json:"mandatory"`
+	Files         []DocFile `json:"files"`
+	Justification string    `json:"justification"`
+	Status        string    `json:"status"`
+	// DeclarationStale: a declaração assinada deste item ficou desatualizada porque o cadastro mudou; emita de novo.
+	DeclarationStale bool `json:"declarationStale"`
 }
 
 // Checklist é a lista de documentos do projeto.
@@ -179,7 +186,7 @@ func (s *Service) checklist(ctx context.Context, q *db.Queries, p Project) (*Che
 	f := facts(p)
 	add := func(r requirement, amendment *Amendment) {
 		it := ChecklistItem{Code: r.row.Code, Name: r.row.Name, Description: r.row.Description, Group: r.row.Grp, Scope: r.row.Scope,
-			Source: r.sources[p.Institution.Instrument], AcceptsJustification: r.row.AcceptsJustification, Files: []DocFile{}}
+			Source: r.sources[p.Institution.Instrument], AcceptsJustification: r.row.AcceptsJustification, Mandatory: r.row.Mandatory, Files: []DocFile{}}
 		if t, ok := r.templates[p.Institution.Instrument]; ok {
 			it.Template = &t
 		}
@@ -204,15 +211,6 @@ func (s *Service) checklist(ctx context.Context, q *db.Queries, p Project) (*Che
 			it.Status = ItemJustified
 		}
 		cl.Items = append(cl.Items, it)
-		cl.Summary.Total++
-		switch it.Status {
-		case ItemDone:
-			cl.Summary.Done++
-		case ItemJustified:
-			cl.Summary.Justified++
-		default:
-			cl.Summary.Missing++
-		}
 	}
 	for _, r := range reqs {
 		if !r.applies(f) {
@@ -226,15 +224,39 @@ func (s *Service) checklist(ctx context.Context, q *db.Queries, p Project) (*Che
 		}
 		add(r, nil)
 	}
+	cl.tally()
 	return cl, nil
 }
 
+// tally recalcula o resumo a partir dos itens. Deve ser chamado sempre que a situação de um item muda.
+func (cl *Checklist) tally() {
+	cl.Summary = DocumentSummary{}
+	for _, it := range cl.Items {
+		cl.Summary.Total++
+		if it.Mandatory {
+			cl.Summary.RequiredTotal++
+		}
+		switch it.Status {
+		case ItemDone:
+			cl.Summary.Done++
+		case ItemJustified:
+			cl.Summary.Justified++
+		default:
+			cl.Summary.Missing++
+			if it.Mandatory {
+				cl.Summary.RequiredMissing++
+			}
+		}
+	}
+}
+
+// documentIssue bloqueia a continuidade e o envio enquanto faltar documento obrigatório. Opcional pendente não gera pendência.
 func documentIssue(sum DocumentSummary) *Issue {
-	if sum.Missing == 0 {
+	if sum.RequiredMissing == 0 {
 		return nil
 	}
 	return &Issue{Section: "documents", Field: "documents", Code: "documents_missing", Severity: SeverityBlock,
-		Message: fmt.Sprintf("Faltam %d de %d documentos do checklist: anexe o arquivo ou justifique o não envio.", sum.Missing, sum.Total)}
+		Message: fmt.Sprintf("Faltam %d de %d documentos obrigatórios: anexe o arquivo ou justifique o não envio.", sum.RequiredMissing, sum.RequiredTotal)}
 }
 
 // ---- Gravação ----
@@ -631,6 +653,10 @@ func (s *Service) DeleteFile(ctx context.Context, id, fileID uuid.UUID, upd auth
 		return httpapi.ErrNotFound()
 	}
 	if err := s.fileRights(ctx, id, f); err != nil {
+		return err
+	}
+	// Remover a declaração assinada do checklist cancela a declaração, para poder emiti-la de novo.
+	if _, err := s.q.CancelProjectDeclarationOfFile(ctx, &fileID); err != nil {
 		return err
 	}
 	if f.Locked {

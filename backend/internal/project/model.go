@@ -132,6 +132,8 @@ type Contact struct {
 	UF               string  `json:"uf"`
 	MunicipalityIBGE string  `json:"municipalityIbge"`
 	JobTitle         string  `json:"jobTitle"`
+	// Personal são os dados pessoais de quem assina as declarações, quando o titular do perfil é o próprio signatário.
+	Personal PersonalData `json:"personal"`
 }
 
 // Profile é o perfil do proponente. Nome e CPF vêm do MT Login e não são editáveis.
@@ -152,6 +154,8 @@ type ProponentSection struct {
 	LegalRepName          string `json:"legalRepName"`
 	LegalRepCPF           string `json:"legalRepCpf"`
 	LegalRepJobTitle      string `json:"legalRepJobTitle"`
+	// LegalRepPersonal são os dados pessoais do representante legal (quando é outra pessoa).
+	LegalRepPersonal PersonalData `json:"legalRepPersonal"`
 }
 
 // InstitutionSection é a seção "Instituição". Nature e NonProfit são derivados do tipo de entidade,

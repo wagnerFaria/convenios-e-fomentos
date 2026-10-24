@@ -886,7 +886,7 @@ paths:
     get:
       tags: [Projetos]
       summary: Perfil do proponente autenticado
-      description: "Dados de contato reaproveitados em cada projeto novo. `name` e `cpf` vêm do MT Login (somente leitura). Sem perfil salvo, devolve um vazio. `complete` indica celular, e-mail, município e cargo preenchidos. Permissão: `admin::proponent-profile.read`. Resposta: `{name, cpf, phones:[{number,type}], emails:[{address,primary}], uf, municipalityIbge, jobTitle, complete}`."
+      description: "Dados de contato reaproveitados em cada projeto novo. `name` e `cpf` vêm do MT Login (somente leitura). Sem perfil salvo, devolve um vazio. `complete` indica celular, e-mail, município e cargo preenchidos. Permissão: `admin::proponent-profile.read`. Resposta: `{name, cpf, phones:[{number,type}], emails:[{address,primary}], uf, municipalityIbge, jobTitle, personal, complete}`."
       security: [{adminBearer: []}]
       responses:
         "200": {description: OK}
@@ -925,6 +925,7 @@ paths:
                 uf: {type: string, minLength: 2, maxLength: 2}
                 municipalityIbge: {type: string}
                 jobTitle: {type: string, maxLength: 100}
+                personal: {type: object, description: "Dados pessoais de quem assina as declarações (nacionalidade, maritalStatus single|married|stable_union|separated|divorced|widowed, zip, street, number, complement, district, uf, municipalityIbge). O CPF identifica a pessoa: não há RG. Cada projeto novo começa com eles."}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
@@ -962,7 +963,7 @@ paths:
       summary: Detalha um projeto
       description: |
         Permissão: `admin::projects.read`. Um projeto fora do alcance da permissão responde 404.
-        Resposta: `{id, status, version, isOwner, access (owner|edit|read; vazio para a equipe), createdAt, updatedAt, proponent, institution, proposal, funding, documentOptions, documents {total, done, justified, missing}, code, stage, submittedAt, lateSubmission, complement, archive, originProjectId, originCode, issues}`. `code`, `stage` (`awaiting_checklist|in_analysis|awaiting_proponent`) e `submittedAt` só existem depois do envio; `complement` é o pedido de complementação aberto ou o mais recente `{number, status (open|answered|expired|cancelled), requestedAt, dueAt, overdue, message, items [{kind, target, label, note, answered}]}`; `archive` (`{at, reason (complement_deadline|withdrawn|denied|missing_documents|other), note}`) só existe em projeto arquivado. Projeto com o prazo de complementação vencido é arquivado na hora em que é aberto ou alterado (e pela rotina periódica).
+        Resposta: `{id, status, version, isOwner, access (owner|edit|read; vazio para a equipe), createdAt, updatedAt, proponent, institution, proposal, funding, documentOptions, documents {total, done, justified, missing, requiredTotal, requiredMissing}, code, stage, submittedAt, lateSubmission, complement, archive, originProjectId, originCode, issues}`. `code`, `stage` (`awaiting_checklist|in_analysis|awaiting_proponent`) e `submittedAt` só existem depois do envio; `complement` é o pedido de complementação aberto ou o mais recente `{number, status (open|answered|expired|cancelled), requestedAt, dueAt, overdue, message, items [{kind, target, label, note, answered}]}`; `archive` (`{at, reason (complement_deadline|withdrawn|denied|missing_documents|other), note}`) só existe em projeto arquivado. Projeto com o prazo de complementação vencido é arquivado na hora em que é aberto ou alterado (e pela rotina periódica).
         `version` deve ser enviada em toda gravação de seção (controle de edição simultânea).
         `issues` lista as pendências: `{section, field, code, severity (block|warn), message}`. O rascunho aceita dados incompletos;
         as pendências `block` são o que o envio (fase seguinte) vai exigir.
@@ -1017,6 +1018,8 @@ paths:
                 legalRepName: {type: string, maxLength: 150}
                 legalRepCpf: {type: string}
                 legalRepJobTitle: {type: string, maxLength: 100}
+                personal: {type: object, description: "Dados pessoais do proponente (mesmo formato do perfil). Erros de validação: personal.<campo>."}
+                legalRepPersonal: {type: object, description: "Dados pessoais do representante legal, quando é outra pessoa (mesmo formato); ignorados se isLegalRepresentative for true. Erros: legalRepPersonal.<campo>."}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
@@ -1298,9 +1301,13 @@ paths:
         Lista as exigências que se aplicam às respostas do projeto (instrumento, natureza da entidade, tipo de recurso, natureza do objeto,
         calamidade, chamamento, emendas e as situações de `document-options`), com os arquivos e a justificativa já registrados.
         Sem instrumento escolhido, a lista é vazia. Exigências por emenda (`scope: amendment`) têm um item por emenda (`amendmentId`).
-        Cada item: `{code, name, description, group, scope, amendmentId, amendmentLabel, source (item do checklist da SEDEC), template {name,url}, acceptsJustification,
+        Cada item: `{code, name, description, group, scope, amendmentId, amendmentLabel, source (item do checklist da SEDEC), template {name,url}, acceptsJustification, mandatory,
         files [{id, filename, contentType, sizeBytes, status (pending|confirmed), sha256 (arquivo confirmado), createdAt}], justification, status (missing|done|justified)}`.
-        Só arquivo `confirmed` conta como entregue. Resposta: `{options, instrument, summary {total, done, justified, missing}, items}`.
+        Só arquivo `confirmed` conta como entregue.
+        `mandatory` diz se o documento bloqueia a continuidade e o envio: obrigatório sem arquivo nem justificativa gera a pendência bloqueante
+        `documents_missing`; opcional (`mandatory: false`) aparece marcado e nunca bloqueia.
+        Resposta: `{options, instrument, summary {total, done, justified, missing, requiredTotal, requiredMissing}, items}`.
+        `requiredMissing` é o que falta entre os obrigatórios: com 0, o proponente pode seguir para a revisão e o envio.
         Permissão: `admin::projects.read` (404 em projeto fora do alcance).
       security: [{adminBearer: []}]
       parameters:
@@ -1310,6 +1317,88 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/declarations/{code}:
+    get:
+      tags: [Projetos]
+      summary: Prévia de uma declaração gerada pelo sistema e situação da emissão
+      description: |
+        Monta a declaração a partir do cadastro, com o texto do modelo oficial da SEDEC exatamente como será emitido. Não altera o cadastro.
+        Códigos disponíveis: `declaracao_contrapartida` (convênio de município, contrapartida financeira), `declaracao_nao_duplicidade`,
+        `declaracao_gratuidade`, `declaracao_publicidade` (essas duas usam os dados pessoais de quem assina, sem RG) e
+        `declaracao_compatibilidade_precos`. Para a equipe, o CPF aparece mascarado no texto; o `paramsSha256` é o mesmo para todos.
+        Resposta: `{code, name, annex, templateVersion, title, paragraphs, place, signerName, signerRole, institution, paramsSha256, ready, issues, current}`.
+        `ready: false` quando faltam dados (`issues` com `section: declaration`); `paramsSha256` resume o conteúdo e muda se o cadastro mudar.
+        `current` é a última emissão (nulo se nunca houve): `{id, status (awaiting_signature|signed|rejected|expired|cancelled|superseded), acceptedAt,
+        requestedBySigner, signerCpf (mascarado), signedAt, fileId, stale}`. `stale: true` quando o cadastro mudou depois da emissão: a declaração
+        deixa de valer e o item do checklist volta a faltar (`declarationStale`). Com a assinatura pendente, a consulta pergunta ao MT-ID e, se o
+        signatário já assinou, traz o arquivo assinado para o checklist.
+        Código sem modelo ou projeto fora do alcance: 404. Declaração que não se aplica ao projeto: 409 `document_not_applicable`.
+        Permissão: `admin::projects.read`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: code, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Projetos]
+      summary: Cancelar o pedido de assinatura em andamento
+      description: |
+        Cancela o pedido pendente no MT-ID e marca a emissão como `cancelled`. Sem pedido pendente: 409 `declaration_not_pending`.
+        Sem MT-ID configurado: 503 `signature_unavailable`. Permissão: `admin::projects.update` (e o projeto precisa aceitar alterações).
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: code, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Cancelado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/declarations/{code}/accept:
+    post:
+      tags: [Projetos]
+      summary: Aceitar o texto da declaração, gerar o PDF e pedir a assinatura
+      description: |
+        Corpo: `{paramsSha256, confirm}`. `paramsSha256` é o resumo devolvido pela prévia: prova que a pessoa leu o texto que será emitido;
+        se o cadastro mudou desde então, 409 `declaration_changed`. `confirm` precisa ser `true` (422 se não).
+        Gera o PDF, guarda-o, envia ao MT-ID e pede a assinatura do representante legal (CPF do proponente ou do representante informado).
+        Quem pediu pode não ser o signatário (`current.requestedBySigner: false`): o pedido vai para o signatário, que confirma no app MTCidadão.
+        Cada declaração tem o seu pedido e o seu arquivo. Pedir de novo com o mesmo conteúdo devolve o pedido em andamento; com conteúdo
+        diferente, cancela o pedido anterior ou substitui a declaração assinada desatualizada.
+        Faltam dados no cadastro: 422 `declaration_not_ready` (`details.issues`). Já assinada com o mesmo conteúdo: 409 `declaration_already_signed`.
+        MT-ID fora do ar: 502 `signature_failed`; não configurado: 503 `signature_unavailable`. Responde a prévia, com `current`.
+        Permissão: `admin::projects.update` (e o projeto precisa aceitar alterações). Limite das rotas pesadas.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: code, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paramsSha256, confirm]
+              properties:
+                paramsSha256: {type: string}
+                confirm: {type: boolean}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+        "502": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /api/admin/projects/{id}/documents/{code}/justification:
     put:
       tags: [Projetos]

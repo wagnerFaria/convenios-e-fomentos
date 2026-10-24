@@ -222,8 +222,8 @@ func (q *Queries) GetProjectFile(ctx context.Context, arg GetProjectFileParams) 
 }
 
 const insertDefaultDocumentRequirement = `-- name: InsertDefaultDocumentRequirement :execrows
-INSERT INTO document_requirements (code, name, description, grp, sort_order, instruments, conditions, scope, accepts_justification, sources, templates)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO document_requirements (code, name, description, grp, sort_order, instruments, conditions, scope, accepts_justification, sources, templates, mandatory)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (code) DO NOTHING
 `
 
@@ -239,6 +239,7 @@ type InsertDefaultDocumentRequirementParams struct {
 	AcceptsJustification bool     `json:"accepts_justification"`
 	Sources              []byte   `json:"sources"`
 	Templates            []byte   `json:"templates"`
+	Mandatory            bool     `json:"mandatory"`
 }
 
 // Carga inicial: não altera o que já existe (o catálogo pode ter sido ajustado pela administração).
@@ -255,6 +256,7 @@ func (q *Queries) InsertDefaultDocumentRequirement(ctx context.Context, arg Inse
 		arg.AcceptsJustification,
 		arg.Sources,
 		arg.Templates,
+		arg.Mandatory,
 	)
 	if err != nil {
 		return 0, err
@@ -308,7 +310,7 @@ func (q *Queries) InsertProjectFile(ctx context.Context, arg InsertProjectFilePa
 }
 
 const listDocumentRequirements = `-- name: ListDocumentRequirements :many
-SELECT id, code, name, description, grp, sort_order, instruments, conditions, scope, accepts_justification, sources, templates, active, created_at, updated_at FROM document_requirements WHERE active ORDER BY sort_order, code
+SELECT id, code, name, description, grp, sort_order, instruments, conditions, scope, accepts_justification, sources, templates, active, created_at, updated_at, mandatory FROM document_requirements WHERE active ORDER BY sort_order, code
 `
 
 func (q *Queries) ListDocumentRequirements(ctx context.Context) ([]DocumentRequirement, error) {
@@ -336,6 +338,7 @@ func (q *Queries) ListDocumentRequirements(ctx context.Context) ([]DocumentRequi
 			&i.Active,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Mandatory,
 		); err != nil {
 			return nil, err
 		}
@@ -605,7 +608,7 @@ const updateProjectDocumentOptions = `-- name: UpdateProjectDocumentOptions :one
 UPDATE projects SET exclusive_supplier = $2, public_space_use = $3, reduced_deadline = $4,
     version = version + 1, updated_at = now(), updated_by_id = $5
 WHERE id = $1
-RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id
+RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal
 `
 
 type UpdateProjectDocumentOptionsParams struct {
@@ -706,6 +709,8 @@ func (q *Queries) UpdateProjectDocumentOptions(ctx context.Context, arg UpdatePr
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }

@@ -126,9 +126,9 @@ func (q *Queries) CountOtherSubmittedProjectsWithSigconNumber(ctx context.Contex
 
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (created_by_id, updated_by_id, proponent_name, proponent_cpf, proponent_phones, proponent_emails,
-                      proponent_uf, proponent_municipality_ibge, proponent_job_title)
-VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id
+                      proponent_uf, proponent_municipality_ibge, proponent_job_title, proponent_personal)
+VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal
 `
 
 type CreateProjectParams struct {
@@ -140,6 +140,7 @@ type CreateProjectParams struct {
 	ProponentUf               pgtype.Text `json:"proponent_uf"`
 	ProponentMunicipalityIbge *string     `json:"proponent_municipality_ibge"`
 	ProponentJobTitle         string      `json:"proponent_job_title"`
+	ProponentPersonal         []byte      `json:"proponent_personal"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -152,6 +153,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.ProponentUf,
 		arg.ProponentMunicipalityIbge,
 		arg.ProponentJobTitle,
+		arg.ProponentPersonal,
 	)
 	var i Project
 	err := row.Scan(
@@ -235,6 +237,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }
@@ -279,7 +283,7 @@ func (q *Queries) DeleteProjectPendingFiles(ctx context.Context, projectID uuid.
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id FROM projects WHERE id = $1
+SELECT id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal FROM projects WHERE id = $1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error) {
@@ -366,12 +370,14 @@ func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error)
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }
 
 const getProjectForUpdate = `-- name: GetProjectForUpdate :one
-SELECT id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id FROM projects WHERE id = $1 FOR UPDATE
+SELECT id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal FROM projects WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetProjectForUpdate(ctx context.Context, id uuid.UUID) (Project, error) {
@@ -458,6 +464,8 @@ func (q *Queries) GetProjectForUpdate(ctx context.Context, id uuid.UUID) (Projec
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }
@@ -644,7 +652,7 @@ const submitProject = `-- name: SubmitProject :one
 UPDATE projects SET status = 'submitted', stage = 'awaiting_checklist', code = $2, submitted_at = now(), submitted_by_id = $3,
     submission_ip = $4, late_submission = $5, version = version + 1, updated_at = now(), updated_by_id = $3
 WHERE id = $1 AND status = 'draft'
-RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id
+RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal
 `
 
 type SubmitProjectParams struct {
@@ -745,6 +753,8 @@ func (q *Queries) SubmitProject(ctx context.Context, arg SubmitProjectParams) (P
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }
@@ -757,7 +767,7 @@ UPDATE projects SET
     tender_justification = $14, artist_fees_cents = $15, regional_artist_fees_cents = $16, governor_waiver = $17,
     price_oldest_collected_on = $18, version = version + 1, updated_at = now(), updated_by_id = $19
 WHERE id = $1
-RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id
+RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal
 `
 
 type UpdateProjectFundingParams struct {
@@ -886,6 +896,8 @@ func (q *Queries) UpdateProjectFunding(ctx context.Context, arg UpdateProjectFun
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }
@@ -899,7 +911,7 @@ UPDATE projects SET
     habilitation_number = $19, habilitation_valid_until = $20,
     version = version + 1, updated_at = now(), updated_by_id = $21
 WHERE id = $1
-RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id
+RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal
 `
 
 type UpdateProjectInstitutionParams struct {
@@ -1032,6 +1044,8 @@ func (q *Queries) UpdateProjectInstitution(ctx context.Context, arg UpdateProjec
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }
@@ -1040,9 +1054,10 @@ const updateProjectProponent = `-- name: UpdateProjectProponent :one
 UPDATE projects SET
     proponent_phones = $2, proponent_emails = $3, proponent_uf = $4, proponent_municipality_ibge = $5,
     proponent_job_title = $6, is_legal_representative = $7, legal_rep_name = $8, legal_rep_cpf = $9,
-    legal_rep_job_title = $10, version = version + 1, updated_at = now(), updated_by_id = $11
+    legal_rep_job_title = $10, proponent_personal = $12, legal_rep_personal = $13,
+    version = version + 1, updated_at = now(), updated_by_id = $11
 WHERE id = $1
-RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id
+RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal
 `
 
 type UpdateProjectProponentParams struct {
@@ -1057,6 +1072,8 @@ type UpdateProjectProponentParams struct {
 	LegalRepCpf               *string     `json:"legal_rep_cpf"`
 	LegalRepJobTitle          string      `json:"legal_rep_job_title"`
 	UpdatedByID               *uuid.UUID  `json:"updated_by_id"`
+	ProponentPersonal         []byte      `json:"proponent_personal"`
+	LegalRepPersonal          []byte      `json:"legal_rep_personal"`
 }
 
 func (q *Queries) UpdateProjectProponent(ctx context.Context, arg UpdateProjectProponentParams) (Project, error) {
@@ -1072,6 +1089,8 @@ func (q *Queries) UpdateProjectProponent(ctx context.Context, arg UpdateProjectP
 		arg.LegalRepCpf,
 		arg.LegalRepJobTitle,
 		arg.UpdatedByID,
+		arg.ProponentPersonal,
+		arg.LegalRepPersonal,
 	)
 	var i Project
 	err := row.Scan(
@@ -1155,6 +1174,8 @@ func (q *Queries) UpdateProjectProponent(ctx context.Context, arg UpdateProjectP
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }
@@ -1165,7 +1186,7 @@ UPDATE projects SET
     start_date = $7, end_date = $8, object_nature = $9, has_artistic_hiring = $10, calamity = $11,
     execution_place_detail = $12, version = version + 1, updated_at = now(), updated_by_id = $13
 WHERE id = $1
-RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id
+RETURNING id, created_by_id, updated_by_id, department_id, status, version, created_at, updated_at, proponent_name, proponent_cpf, proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title, is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit, institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement, institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until, sigcon_number, sigcon_registered_on, title, object_description, justification, start_date, end_date, object_nature, has_artistic_hiring, calamity, execution_place_detail, funding_type, own_amount_cents, amendment_amount_cents, total_amount_cents, counterpart_kind, counterpart_cents, counterpart_description, indirect_costs_cents, tender_status, tender_notice_number, tender_approved_on, tender_legal_basis, tender_justification, artist_fees_cents, regional_artist_fees_cents, governor_waiver, price_oldest_collected_on, exclusive_supplier, public_space_use, reduced_deadline, code, stage, submitted_at, submitted_by_id, submission_ip, late_submission, archived_at, archived_by_id, archive_reason, archive_note, origin_project_id, proponent_personal, legal_rep_personal
 `
 
 type UpdateProjectProposalParams struct {
@@ -1282,6 +1303,8 @@ func (q *Queries) UpdateProjectProposal(ctx context.Context, arg UpdateProjectPr
 		&i.ArchiveReason,
 		&i.ArchiveNote,
 		&i.OriginProjectID,
+		&i.ProponentPersonal,
+		&i.LegalRepPersonal,
 	)
 	return i, err
 }

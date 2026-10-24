@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -150,6 +151,14 @@ func (s *S3) Head(ctx context.Context, key string, n int64) ([]byte, error) {
 func (s *S3) Delete(ctx context.Context, key string) error {
 	if err := s.internal.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{}); err != nil && !isNotFound(err) {
 		return fmt.Errorf("storage: removendo: %w", err)
+	}
+	return nil
+}
+
+func (s *S3) PutObject(ctx context.Context, key, contentType string, data []byte) error {
+	_, err := s.internal.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: contentType})
+	if err != nil {
+		return fmt.Errorf("storage: gravando: %w", err)
 	}
 	return nil
 }

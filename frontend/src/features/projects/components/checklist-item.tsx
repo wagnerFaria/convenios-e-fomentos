@@ -23,9 +23,15 @@ import {
   requestFileUpload,
   saveJustification
 } from '../api/service';
-import type { ChecklistItem, DocFile } from '../api/types';
+import { GENERATED_DECLARATIONS, type ChecklistItem, type DocFile } from '../api/types';
+import { DeclarationPanel } from './declaration-panel';
 
 const MAX_FILES = 10;
+
+/** Âncora do item na página: a aba Documentos leva o proponente até o que falta. */
+export function itemDomId(item: Pick<ChecklistItem, 'code' | 'amendmentId'>) {
+  return `doc-${item.code}${item.amendmentId ? `-${item.amendmentId}` : ''}`;
+}
 
 const statusBadge = {
   missing: { label: 'Pendente', variant: 'outline' as const },
@@ -58,7 +64,11 @@ export function ChecklistItemCard({
   const [toDelete, setToDelete] = useState<DocFile | null>(null);
   const [justifying, setJustifying] = useState(false);
   const [draft, setDraft] = useState(item.justification);
-  const status = statusBadge[item.status];
+  // Opcional sem arquivo não é erro: "Não enviado", em tom neutro, em vez de "Pendente".
+  const status =
+    item.status === 'missing' && !item.mandatory
+      ? { label: 'Não enviado', variant: 'outline' as const }
+      : statusBadge[item.status];
   const amendmentId = item.amendmentId || undefined;
 
   const refresh = async () => {
@@ -141,7 +151,7 @@ export function ChecklistItemCard({
   });
 
   return (
-    <li className='space-y-3 rounded-lg border p-4'>
+    <li id={itemDomId(item)} className='scroll-mt-20 space-y-3 rounded-lg border p-4'>
       <div className='flex flex-wrap items-start justify-between gap-2'>
         <div className='min-w-0'>
           <p className='font-medium'>{item.name}</p>
@@ -155,6 +165,9 @@ export function ChecklistItemCard({
               {item.source}
             </Badge>
           )}
+          <Badge variant={item.mandatory ? 'default' : 'outline'}>
+            {item.mandatory ? 'Obrigatório' : 'Opcional'}
+          </Badge>
           <Badge variant={status.variant}>{status.label}</Badge>
         </div>
       </div>
@@ -169,6 +182,15 @@ export function ChecklistItemCard({
           <Icons.externalLink className='size-3.5' aria-hidden /> Baixar modelo (
           {item.template.name})
         </a>
+      )}
+
+      {item.declarationStale && item.status !== 'done' && (
+        <p className='text-destructive text-sm'>
+          A declaração assinada ficou desatualizada porque o cadastro mudou. Gere e assine de novo.
+        </p>
+      )}
+      {GENERATED_DECLARATIONS.includes(item.code) && (
+        <DeclarationPanel projectId={projectId} item={item} editable={editable} />
       )}
 
       {item.files.length > 0 && (

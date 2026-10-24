@@ -33,6 +33,12 @@ func (m *Memory) Put(key, contentType string, data []byte) {
 	m.objects[key] = memObject{data: data, contentType: contentType}
 }
 
+// PutObject grava o objeto, como o servidor faria no armazenamento real.
+func (m *Memory) PutObject(_ context.Context, key, contentType string, data []byte) error {
+	m.Put(key, contentType, append([]byte(nil), data...))
+	return nil
+}
+
 // Has indica se o objeto existe.
 func (m *Memory) Has(key string) bool {
 	m.mu.Lock()

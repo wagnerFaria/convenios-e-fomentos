@@ -146,6 +146,7 @@ type DocumentRequirement struct {
 	Active               bool      `json:"active"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
+	Mandatory            bool      `json:"mandatory"`
 }
 
 type EmailTemplate struct {
@@ -324,6 +325,8 @@ type Project struct {
 	ArchiveReason               *string     `json:"archive_reason"`
 	ArchiveNote                 string      `json:"archive_note"`
 	OriginProjectID             *uuid.UUID  `json:"origin_project_id"`
+	ProponentPersonal           []byte      `json:"proponent_personal"`
+	LegalRepPersonal            []byte      `json:"legal_rep_personal"`
 }
 
 type ProjectAmendment struct {
@@ -362,6 +365,32 @@ type ProjectComplementRequest struct {
 	Status          string     `json:"status"`
 	AnsweredAt      *time.Time `json:"answered_at"`
 	AnsweredVersion *int32     `json:"answered_version"`
+}
+
+type ProjectDeclaration struct {
+	ID              uuid.UUID  `json:"id"`
+	ProjectID       uuid.UUID  `json:"project_id"`
+	RequirementCode string     `json:"requirement_code"`
+	ProjectVersion  int32      `json:"project_version"`
+	TemplateVersion string     `json:"template_version"`
+	ParamsSha256    string     `json:"params_sha256"`
+	RenderedText    string     `json:"rendered_text"`
+	SignerName      string     `json:"signer_name"`
+	SignerRole      string     `json:"signer_role"`
+	SignerCpf       string     `json:"signer_cpf"`
+	AcceptedByID    *uuid.UUID `json:"accepted_by_id"`
+	AcceptedByCpf   string     `json:"accepted_by_cpf"`
+	AcceptedAt      time.Time  `json:"accepted_at"`
+	AcceptedIp      string     `json:"accepted_ip"`
+	Status          string     `json:"status"`
+	PdfObjectKey    string     `json:"pdf_object_key"`
+	PdfSha256       string     `json:"pdf_sha256"`
+	MtidFileID      string     `json:"mtid_file_id"`
+	MtidOrderID     string     `json:"mtid_order_id"`
+	SignedAt        *time.Time `json:"signed_at"`
+	FileID          *uuid.UUID `json:"file_id"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type ProjectDocumentItem struct {
@@ -432,6 +461,7 @@ type ProponentProfile struct {
 	JobTitle         string      `json:"job_title"`
 	CreatedAt        time.Time   `json:"created_at"`
 	UpdatedAt        time.Time   `json:"updated_at"`
+	Personal         []byte      `json:"personal"`
 }
 
 type RuleParameter struct {

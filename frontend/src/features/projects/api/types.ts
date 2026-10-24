@@ -29,6 +29,27 @@ export interface Email {
   primary: boolean;
 }
 
+export type MaritalStatus =
+  | 'single'
+  | 'married'
+  | 'stable_union'
+  | 'separated'
+  | 'divorced'
+  | 'widowed';
+
+/** Dados pessoais de quem assina as declarações. O CPF identifica a pessoa: não se pede RG. */
+export interface PersonalData {
+  nationality: string;
+  maritalStatus: MaritalStatus | '';
+  zip: string;
+  street: string;
+  number: string;
+  complement: string;
+  district: string;
+  uf: string;
+  municipalityIbge: string;
+}
+
 /** Dados de contato do proponente, comuns ao perfil e ao projeto. */
 export interface Contact {
   phones: Phone[];
@@ -36,6 +57,8 @@ export interface Contact {
   uf: string;
   municipalityIbge: string;
   jobTitle: string;
+  /** Usados nas declarações de gratuidade e de publicidade, quando o proponente é quem assina. */
+  personal: PersonalData;
 }
 
 export interface Profile extends Contact {
@@ -51,6 +74,8 @@ export interface ProponentSection extends Contact {
   legalRepName: string;
   legalRepCpf: string;
   legalRepJobTitle: string;
+  /** Dados pessoais do representante legal, quando é outra pessoa. */
+  legalRepPersonal: PersonalData;
 }
 
 export interface InstitutionSection {
@@ -155,6 +180,9 @@ export interface DocumentSummary {
   done: number;
   justified: number;
   missing: number;
+  /** Só os obrigatórios: é o que bloqueia a continuidade e o envio. */
+  requiredTotal: number;
+  requiredMissing: number;
 }
 
 export interface DocFile {
@@ -180,9 +208,13 @@ export interface ChecklistItem {
   source: string;
   template: { name: string; url: string } | null;
   acceptsJustification: boolean;
+  /** Obrigatório: sem arquivo nem justificativa, bloqueia a continuidade e o envio. Falso = opcional. */
+  mandatory: boolean;
   files: DocFile[];
   justification: string;
   status: 'missing' | 'done' | 'justified';
+  /** A declaração assinada deste item ficou desatualizada porque o cadastro mudou: emita de novo. */
+  declarationStale: boolean;
 }
 
 export interface Checklist {
@@ -373,3 +405,61 @@ export const accessLabels: Record<Exclude<ProjectAccess, ''>, string> = {
   edit: 'Edição',
   read: 'Leitura'
 };
+
+/** Documentos que o sistema gera a partir do cadastro e o representante legal assina no MT-ID. */
+export const GENERATED_DECLARATIONS: readonly string[] = [
+  'declaracao_contrapartida',
+  'declaracao_nao_duplicidade',
+  'declaracao_gratuidade',
+  'declaracao_publicidade',
+  'declaracao_compatibilidade_precos'
+];
+
+export type DeclarationStatus =
+  | 'awaiting_signature'
+  | 'signed'
+  | 'rejected'
+  | 'expired'
+  | 'cancelled'
+  | 'superseded';
+
+/** Situação da última emissão da declaração. */
+export interface DeclarationRecord {
+  id: string;
+  status: DeclarationStatus;
+  acceptedAt: string;
+  /** Falso quando quem pediu não é o signatário: o pedido vai para o signatário, que confirma no MTCidadão. */
+  requestedBySigner: boolean;
+  /** CPF do signatário, mascarado. */
+  signerCpf: string;
+  signedAt: string | null;
+  fileId: string | null;
+  /** O cadastro mudou depois da emissão: a declaração deixou de valer. */
+  stale: boolean;
+}
+
+export interface DeclarationIssue {
+  section: 'declaration';
+  field: string;
+  code: string;
+  severity: 'block' | 'warn';
+  message: string;
+}
+
+/** Prévia da declaração: o texto como será emitido e as pendências de cadastro. */
+export interface Declaration {
+  code: string;
+  name: string;
+  annex: string;
+  title: string;
+  paragraphs: string[];
+  place: string;
+  signerName: string;
+  signerRole: string;
+  institution: string;
+  /** Resumo do conteúdo; volta no aceite para provar que esta é a versão que a pessoa leu. */
+  paramsSha256: string;
+  ready: boolean;
+  issues: DeclarationIssue[];
+  current: DeclarationRecord | null;
+}

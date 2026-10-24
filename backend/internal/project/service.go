@@ -23,6 +23,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/mtid"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/scan"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/storage"
@@ -56,6 +57,9 @@ type Service struct {
 
 	// Verificação de vírus dos arquivos (opcional; ver SetScanner).
 	scanner scan.Scanner
+
+	// MT-ID, que assina as declarações geradas pelo sistema (opcional; ver SetMTID).
+	mtid mtid.Client
 
 	// Confirmação de recebimento por e-mail (opcional; ver SetNotifier).
 	mail      mailer.Mailer
@@ -101,6 +105,7 @@ type contactOut struct {
 	uf             pgtype.Text
 	ibge           *string
 	job            string
+	personal       []byte
 }
 
 func normalizeContact(ctx context.Context, q *db.Queries, in Contact, p *problems) contactOut {
@@ -113,11 +118,12 @@ func normalizeContact(ctx context.Context, q *db.Queries, in Contact, p *problem
 	if tooLong(out.job, maxJobTitle) {
 		p.add("jobTitle", "Use até 100 caracteres.")
 	}
+	out.personal, _ = normalizePersonal(ctx, q, in.Personal, "personal", p)
 	return out
 }
 
-func contactOf(phonesJSON, emailsJSON []byte, uf pgtype.Text, ibge *string, job string) Contact {
-	c := Contact{Phones: []Phone{}, Emails: []Email{}, UF: uf.String, MunicipalityIBGE: str(ibge), JobTitle: job}
+func contactOf(phonesJSON, emailsJSON []byte, uf pgtype.Text, ibge *string, job string, personal []byte) Contact {
+	c := Contact{Phones: []Phone{}, Emails: []Email{}, UF: uf.String, MunicipalityIBGE: str(ibge), JobTitle: job, Personal: personalOf(personal)}
 	_ = json.Unmarshal(phonesJSON, &c.Phones)
 	_ = json.Unmarshal(emailsJSON, &c.Emails)
 	if c.Phones == nil {
@@ -142,7 +148,7 @@ func contactComplete(c Contact) bool {
 func (s *Service) GetProfile(ctx context.Context, actor Actor) (*Profile, error) {
 	row, err := s.q.GetProponentProfile(ctx, actor.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return &Profile{Name: actor.Name, CPF: actor.CPF, Contact: contactOf(nil, nil, pgtype.Text{}, nil, "")}, nil
+		return &Profile{Name: actor.Name, CPF: actor.CPF, Contact: contactOf(nil, nil, pgtype.Text{}, nil, "", nil)}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -151,7 +157,7 @@ func (s *Service) GetProfile(ctx context.Context, actor Actor) (*Profile, error)
 }
 
 func profileView(actor Actor, row db.ProponentProfile) *Profile {
-	c := contactOf(row.Phones, row.Emails, row.Uf, row.MunicipalityIbge, row.JobTitle)
+	c := contactOf(row.Phones, row.Emails, row.Uf, row.MunicipalityIbge, row.JobTitle, row.Personal)
 	return &Profile{Name: actor.Name, CPF: actor.CPF, Contact: c, Complete: contactComplete(c)}
 }
 
@@ -162,7 +168,7 @@ func (s *Service) SaveProfile(ctx context.Context, actor Actor, in Contact) (*Pr
 	if err := p.err(); err != nil {
 		return nil, err
 	}
-	row, err := s.q.UpsertProponentProfile(ctx, db.UpsertProponentProfileParams{AdminID: actor.ID, Phones: c.phones, Emails: c.emails, Uf: c.uf, MunicipalityIbge: c.ibge, JobTitle: c.job})
+	row, err := s.q.UpsertProponentProfile(ctx, db.UpsertProponentProfileParams{AdminID: actor.ID, Phones: c.phones, Emails: c.emails, Uf: c.uf, MunicipalityIbge: c.ibge, JobTitle: c.job, Personal: c.personal})
 	if err != nil {
 		return nil, err
 	}
@@ -199,9 +205,10 @@ func (s *Service) viewWithChecklist(ctx context.Context, q *db.Queries, r db.Pro
 		Code: str(r.Code), Stage: str(r.Stage), SubmittedAt: r.SubmittedAt, LateSubmission: r.LateSubmission,
 		Proponent: ProponentSection{
 			Name: r.ProponentName, CPF: r.ProponentCpf,
-			Contact:               contactOf(r.ProponentPhones, r.ProponentEmails, r.ProponentUf, r.ProponentMunicipalityIbge, r.ProponentJobTitle),
+			Contact:               contactOf(r.ProponentPhones, r.ProponentEmails, r.ProponentUf, r.ProponentMunicipalityIbge, r.ProponentJobTitle, r.ProponentPersonal),
 			IsLegalRepresentative: boolPtr(r.IsLegalRepresentative),
 			LegalRepName:          r.LegalRepName, LegalRepCPF: str(r.LegalRepCpf), LegalRepJobTitle: r.LegalRepJobTitle,
+			LegalRepPersonal: personalOf(r.LegalRepPersonal),
 		},
 		Institution: InstitutionSection{
 			Instrument: str(r.Instrument), CNPJ: str(r.InstitutionCnpj), Name: r.InstitutionName, EntityTypeID: uuidString(r.EntityTypeID),
@@ -254,6 +261,9 @@ func (s *Service) viewWithChecklist(ctx context.Context, q *db.Queries, r db.Pro
 	p.DocumentOptions = DocumentOptions{ExclusiveSupplier: r.ExclusiveSupplier, PublicSpaceUse: r.PublicSpaceUse, ReducedDeadline: r.ReducedDeadline}
 	cl, err := s.checklist(ctx, q, p)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.markStaleDeclarations(ctx, q, r, &p, cl); err != nil {
 		return nil, nil, err
 	}
 	p.Documents = cl.Summary
@@ -396,10 +406,10 @@ func (s *Service) Create(ctx context.Context, actor Actor) (*Project, error) {
 			return err
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			prof = db.ProponentProfile{Phones: []byte("[]"), Emails: []byte("[]")}
+			prof = db.ProponentProfile{Phones: []byte("[]"), Emails: []byte("[]"), Personal: []byte("{}")}
 		}
 		out, err = q.CreateProject(ctx, db.CreateProjectParams{CreatedByID: actor.ID, ProponentName: actor.Name, ProponentCpf: actor.CPF,
-			ProponentPhones: prof.Phones, ProponentEmails: prof.Emails, ProponentUf: prof.Uf, ProponentMunicipalityIbge: prof.MunicipalityIbge, ProponentJobTitle: prof.JobTitle})
+			ProponentPhones: prof.Phones, ProponentEmails: prof.Emails, ProponentUf: prof.Uf, ProponentMunicipalityIbge: prof.MunicipalityIbge, ProponentJobTitle: prof.JobTitle, ProponentPersonal: prof.Personal})
 		if err != nil {
 			return err
 		}
@@ -460,9 +470,11 @@ func (s *Service) SaveProponent(ctx context.Context, actor Actor, id uuid.UUID, 
 		c := normalizeContact(ctx, q, in.Contact, &p)
 		repName, repJob := text(in.LegalRepName), text(in.LegalRepJobTitle)
 		var repCPF *string
+		repPersonal := []byte("{}")
 		if in.IsLegalRepresentative != nil && *in.IsLegalRepresentative {
 			repName, repJob = "", "" // o próprio proponente é o representante: não há outro a informar
 		} else {
+			repPersonal, _ = normalizePersonal(ctx, q, in.LegalRepPersonal, "legalRepPersonal", &p)
 			if tooLong(repName, maxPersonName) {
 				p.add("legalRepName", "Use até 150 caracteres.")
 			}
@@ -486,7 +498,7 @@ func (s *Service) SaveProponent(ctx context.Context, actor Actor, id uuid.UUID, 
 		}
 		return q.UpdateProjectProponent(ctx, db.UpdateProjectProponentParams{ID: id, ProponentPhones: c.phones, ProponentEmails: c.emails,
 			ProponentUf: c.uf, ProponentMunicipalityIbge: c.ibge, ProponentJobTitle: c.job, IsLegalRepresentative: isRep,
-			LegalRepName: repName, LegalRepCpf: repCPF, LegalRepJobTitle: repJob, UpdatedByID: &actor.ID})
+			LegalRepName: repName, LegalRepCpf: repCPF, LegalRepJobTitle: repJob, ProponentPersonal: c.personal, LegalRepPersonal: repPersonal, UpdatedByID: &actor.ID})
 	})
 }
 

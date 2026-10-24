@@ -46,8 +46,13 @@ type Config struct {
 	// ClamAVAddr (host:porta do clamd) liga a verificação de vírus dos arquivos dos projetos; vazio desliga.
 	ClamAVAddr            string `env:"CLAMAV_ADDR"`
 	RateLimitGlobalPerMin int    `env:"RATE_LIMIT_GLOBAL_PER_MINUTE" envDefault:"600"`
-	MaxBodyBytes          int64  `env:"MAX_BODY_BYTES" envDefault:"1048576"`
-	PasswordMinLength     int    `env:"PASSWORD_MIN_LENGTH" envDefault:"8"`
+	// MTIDSimulate liga um MT-ID simulado (sem rede) para o desenvolvimento: o pedido de assinatura é aprovado sozinho depois de
+	// MTIDSimulateDelay. NÃO assina nada de verdade; é recusado em produção. O cliente real do MT-ID ainda não existe
+	// (docs/debito-tecnico-mt-id.md).
+	MTIDSimulate      bool          `env:"MTID_SIMULATE"`
+	MTIDSimulateDelay time.Duration `env:"MTID_SIMULATE_DELAY" envDefault:"10s"`
+	MaxBodyBytes      int64         `env:"MAX_BODY_BYTES" envDefault:"1048576"`
+	PasswordMinLength int           `env:"PASSWORD_MIN_LENGTH" envDefault:"8"`
 
 	SMTPHost     string `env:"SMTP_HOST"`
 	SMTPPort     int    `env:"SMTP_PORT" envDefault:"587"`
@@ -158,6 +163,12 @@ func (c *Config) Validate() error {
 		if c.StorageUploadTTL <= 0 || c.StorageDownloadTTL <= 0 {
 			errs = append(errs, errors.New("STORAGE_UPLOAD_TTL e STORAGE_DOWNLOAD_TTL devem ser positivos"))
 		}
+	}
+	if c.MTIDSimulate && c.IsProduction() {
+		errs = append(errs, errors.New("MTID_SIMULATE não pode ficar ligado em produção: o MT-ID simulado não assina de verdade"))
+	}
+	if c.MTIDSimulate && c.MTIDSimulateDelay < 0 {
+		errs = append(errs, errors.New("MTID_SIMULATE_DELAY não pode ser negativo"))
 	}
 	if c.IsProduction() && c.Argon2MemoryKiB < owaspArgon2MemoryKiB {
 		errs = append(errs, fmt.Errorf("ARGON2_MEMORY_KIB abaixo do mínimo recomendado pela OWASP (%d) em produção", owaspArgon2MemoryKiB))

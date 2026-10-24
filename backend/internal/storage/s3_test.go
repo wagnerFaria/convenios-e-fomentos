@@ -99,6 +99,13 @@ func TestS3PreassinadoPeloMesmoDominio(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "%PDF-", string(head))
 	})
+	t.Run("grava um objeto pelo servidor", func(t *testing.T) {
+		require.NoError(t, s.PutObject(ctx, "projects/p1/gerado", "application/pdf", []byte("%PDF-1.7 gerado")))
+		info, err := s.Stat(ctx, "projects/p1/gerado")
+		require.NoError(t, err)
+		assert.EqualValues(t, 15, info.Size)
+		assert.Equal(t, "application/pdf", info.ContentType)
+	})
 	t.Run("recusa outro tipo de conteúdo", func(t *testing.T) {
 		other, err := s.PresignUpload(ctx, "documents/d1/f2", "application/pdf", 64, time.Minute)
 		require.NoError(t, err)

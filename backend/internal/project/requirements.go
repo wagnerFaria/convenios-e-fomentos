@@ -76,6 +76,7 @@ type reqDef struct {
 	conds                 []Clause
 	scope                 string
 	noJustification       bool
+	optional              bool // não bloqueia a continuidade nem o envio; o padrão é obrigatório
 	sources               map[string]string
 	templates             map[string]Template
 }
@@ -214,7 +215,7 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 		}
 		if _, err := s.q.InsertDefaultDocumentRequirement(ctx, db.InsertDefaultDocumentRequirementParams{
 			Code: d.code, Name: d.name, Description: d.desc, Grp: d.grp, SortOrder: int32((i + 1) * 10), //nolint:gosec // poucas dezenas
-			Instruments: d.instruments, Conditions: conds, Scope: scope, AcceptsJustification: !d.noJustification, Sources: sources, Templates: templates,
+			Instruments: d.instruments, Conditions: conds, Scope: scope, AcceptsJustification: !d.noJustification, Sources: sources, Templates: templates, Mandatory: !d.optional,
 		}); err != nil {
 			return fmt.Errorf("exigência %q: %w", d.code, err)
 		}

@@ -1,7 +1,7 @@
 -- name: CreateProject :one
 INSERT INTO projects (created_by_id, updated_by_id, proponent_name, proponent_cpf, proponent_phones, proponent_emails,
-                      proponent_uf, proponent_municipality_ibge, proponent_job_title)
-VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8)
+                      proponent_uf, proponent_municipality_ibge, proponent_job_title, proponent_personal)
+VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: GetProject :one
@@ -17,7 +17,8 @@ DELETE FROM projects WHERE id = $1;
 UPDATE projects SET
     proponent_phones = $2, proponent_emails = $3, proponent_uf = $4, proponent_municipality_ibge = $5,
     proponent_job_title = $6, is_legal_representative = $7, legal_rep_name = $8, legal_rep_cpf = $9,
-    legal_rep_job_title = $10, version = version + 1, updated_at = now(), updated_by_id = $11
+    legal_rep_job_title = $10, proponent_personal = $12, legal_rep_personal = $13,
+    version = version + 1, updated_at = now(), updated_by_id = $11
 WHERE id = $1
 RETURNING *;
 

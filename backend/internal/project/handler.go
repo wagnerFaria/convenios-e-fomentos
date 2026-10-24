@@ -87,6 +87,9 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(g(ActionShare)).Delete("/admin/projects/{id}/members/{memberId}", h.revokeMember)
 
 	r.With(g(ActionRead)).Get("/admin/projects/{id}/documents", h.checklist)
+	r.With(g(ActionRead)).Get("/admin/projects/{id}/declarations/{code}", h.declarationPreview)
+	r.With(g(ActionUpdate), heavy).Post("/admin/projects/{id}/declarations/{code}/accept", h.acceptDeclaration)
+	r.With(g(ActionUpdate)).Delete("/admin/projects/{id}/declarations/{code}", h.cancelDeclaration)
 	r.With(g(ActionUpdate)).Put("/admin/projects/{id}/documents/{code}/justification", h.putJustification)
 	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/{code}/files", h.requestUpload)
 	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/files/{fileId}/confirm", h.confirmUpload)
@@ -453,6 +456,51 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+// declarationPreview devolve o texto da declaração como será emitido e as pendências de dados.
+func (h *Handler) declarationPreview(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	read, _ := admin.DecisionFrom(r.Context())
+	v, err := h.svc.DeclarationPreview(r.Context(), actorOf(r), id, chi.URLParam(r, "code"), read)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+// acceptDeclaration grava o aceite do texto lido, gera o PDF e pede a assinatura.
+func (h *Handler) acceptDeclaration(w http.ResponseWriter, r *http.Request) {
+	in, id, upd, ok := decode[AcceptDeclarationInput](w, r)
+	if !ok {
+		return
+	}
+	v, err := h.svc.AcceptDeclaration(r.Context(), actorOf(r), id, chi.URLParam(r, "code"), in, upd)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+// cancelDeclaration cancela o pedido de assinatura em andamento.
+func (h *Handler) cancelDeclaration(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	upd, _ := admin.DecisionFrom(r.Context())
+	if err := h.svc.CancelDeclaration(r.Context(), actorOf(r), id, chi.URLParam(r, "code"), upd); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // receipt devolve o comprovante de recebimento em PDF (não é o envelope JSON padrão).

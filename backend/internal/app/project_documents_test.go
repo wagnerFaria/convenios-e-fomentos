@@ -473,6 +473,48 @@ func TestChecklistCompletoZeraAPendenciaDeDocumentos(t *testing.T) {
 	assert.NotContains(t, issueFields(proj), "documents.documents")
 }
 
+// Todo item da carga inicial é obrigatório: o resumo dos obrigatórios acompanha o geral.
+func TestChecklistMarcaTodosComoObrigatoriosPorPadrao(t *testing.T) {
+	p := newProjEnv(t)
+	fp := p.newFundingProject("fomento", "association", nil)
+	items, r := fp.checklist(p.maria)
+	for code, it := range items {
+		assert.Equal(t, true, it["mandatory"], code)
+	}
+	sum := r.data()["summary"].(map[string]any)
+	assert.EqualValues(t, 24, sum["requiredTotal"])
+	assert.EqualValues(t, 24, sum["requiredMissing"])
+}
+
+// Documento opcional aparece marcado, mas não conta nos obrigatórios nem gera a pendência que bloqueia a continuidade.
+func TestDocumentoOpcionalNaoBloqueia(t *testing.T) {
+	p := newProjEnv(t)
+	_, err := p.pool.Exec(context.Background(), "UPDATE document_requirements SET mandatory = false WHERE code = 'termo_referencia'")
+	require.NoError(t, err)
+	fp := p.newFundingProject("fomento", "association", nil)
+	items, r := fp.checklist(p.maria)
+	require.Len(t, items, 24)
+	assert.Equal(t, false, items["termo_referencia"]["mandatory"])
+	sum := r.data()["summary"].(map[string]any)
+	assert.EqualValues(t, 24, sum["total"])
+	assert.EqualValues(t, 23, sum["requiredTotal"])
+	assert.EqualValues(t, 24, sum["missing"])
+	assert.EqualValues(t, 23, sum["requiredMissing"])
+
+	for code, it := range items {
+		if it["mandatory"] == true {
+			fp.upload(p.maria, code, "")
+		}
+	}
+	_, r = fp.checklist(p.maria)
+	sum = r.data()["summary"].(map[string]any)
+	assert.EqualValues(t, 0, sum["requiredMissing"])
+	assert.EqualValues(t, 1, sum["missing"], "o opcional segue pendente")
+	proj := p.do("GET", "/api/admin/projects/"+fp.id, nil, p.maria)
+	assert.NotContains(t, issueFields(proj), "documents.documents")
+	assert.EqualValues(t, 0, proj.data()["documents"].(map[string]any)["requiredMissing"])
+}
+
 func TestLimpezaDeEnviosNaoConfirmados(t *testing.T) {
 	p := newProjEnv(t)
 	fp := p.newFundingProject("convenio", "municipal_government", nil)

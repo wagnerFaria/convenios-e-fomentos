@@ -13,7 +13,7 @@ import (
 )
 
 const getProponentProfile = `-- name: GetProponentProfile :one
-SELECT admin_id, phones, emails, uf, municipality_ibge, job_title, created_at, updated_at FROM proponent_profiles WHERE admin_id = $1
+SELECT admin_id, phones, emails, uf, municipality_ibge, job_title, created_at, updated_at, personal FROM proponent_profiles WHERE admin_id = $1
 `
 
 func (q *Queries) GetProponentProfile(ctx context.Context, adminID uuid.UUID) (ProponentProfile, error) {
@@ -28,17 +28,18 @@ func (q *Queries) GetProponentProfile(ctx context.Context, adminID uuid.UUID) (P
 		&i.JobTitle,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Personal,
 	)
 	return i, err
 }
 
 const upsertProponentProfile = `-- name: UpsertProponentProfile :one
-INSERT INTO proponent_profiles (admin_id, phones, emails, uf, municipality_ibge, job_title)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO proponent_profiles (admin_id, phones, emails, uf, municipality_ibge, job_title, personal)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (admin_id) DO UPDATE
 SET phones = EXCLUDED.phones, emails = EXCLUDED.emails, uf = EXCLUDED.uf,
-    municipality_ibge = EXCLUDED.municipality_ibge, job_title = EXCLUDED.job_title, updated_at = now()
-RETURNING admin_id, phones, emails, uf, municipality_ibge, job_title, created_at, updated_at
+    municipality_ibge = EXCLUDED.municipality_ibge, job_title = EXCLUDED.job_title, personal = EXCLUDED.personal, updated_at = now()
+RETURNING admin_id, phones, emails, uf, municipality_ibge, job_title, created_at, updated_at, personal
 `
 
 type UpsertProponentProfileParams struct {
@@ -48,6 +49,7 @@ type UpsertProponentProfileParams struct {
 	Uf               pgtype.Text `json:"uf"`
 	MunicipalityIbge *string     `json:"municipality_ibge"`
 	JobTitle         string      `json:"job_title"`
+	Personal         []byte      `json:"personal"`
 }
 
 func (q *Queries) UpsertProponentProfile(ctx context.Context, arg UpsertProponentProfileParams) (ProponentProfile, error) {
@@ -58,6 +60,7 @@ func (q *Queries) UpsertProponentProfile(ctx context.Context, arg UpsertProponen
 		arg.Uf,
 		arg.MunicipalityIbge,
 		arg.JobTitle,
+		arg.Personal,
 	)
 	var i ProponentProfile
 	err := row.Scan(
@@ -69,6 +72,7 @@ func (q *Queries) UpsertProponentProfile(ctx context.Context, arg UpsertProponen
 		&i.JobTitle,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Personal,
 	)
 	return i, err
 }

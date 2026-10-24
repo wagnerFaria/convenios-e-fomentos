@@ -42,6 +42,9 @@ type Store interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	// Copy duplica o objeto src em dst (mesmo conteúdo e tipo), sem passar os bytes pela API. src inexistente: ErrNotFound.
 	Copy(ctx context.Context, src, dst string) error
+	// PutObject grava o objeto key com o conteúdo dado, sem passar pelo navegador (arquivos que o próprio servidor gera ou recebe de
+	// outro sistema). Substitui o objeto se já existir.
+	PutObject(ctx context.Context, key, contentType string, data []byte) error
 	// Delete remove o objeto; remover um objeto inexistente não é erro.
 	Delete(ctx context.Context, key string) error
 }

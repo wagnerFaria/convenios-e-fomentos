@@ -62,8 +62,11 @@ export function ProjectWizard({ id }: { id: string }) {
     (project.access === 'owner' || project.access === 'edit') && can(projectActions.update);
   const access = accessOf(project, base, now);
   const editable = access.draft;
+  // Nos documentos, a pendência do servidor é uma só ("faltam N"); o selo da aba mostra os N.
   const blocksIn = (s: SectionKey) =>
-    project.issues.filter((i) => i.section === s && i.severity === 'block').length;
+    project.issues.filter(
+      (i) => i.section === s && i.severity === 'block' && i.code !== 'documents_missing'
+    ).length + (s === 'documents' ? project.documents.requiredMissing : 0);
 
   // Trocar de etapa com alterações não salvas pede confirmação, para não perder o que foi digitado.
   const go = (s: SectionKey) => {
@@ -158,7 +161,9 @@ export function ProjectWizard({ id }: { id: string }) {
           {step === 'funding' && (
             <FundingStep key={project.version} {...common} readOnly={readOnly('funding')} />
           )}
-          {step === 'documents' && <DocumentsStep project={project} access={access} />}
+          {step === 'documents' && (
+            <DocumentsStep project={project} access={access} onContinue={() => go('submission')} />
+          )}
           {step === 'submission' && (
             <ReviewStep
               project={project}
@@ -167,10 +172,7 @@ export function ProjectWizard({ id }: { id: string }) {
               onGo={go}
             />
           )}
-          <p className='text-muted-foreground mt-6 text-xs'>
-            Cada etapa é salva separadamente. Os documentos e o envio do projeto vêm nas próximas
-            fases.
-          </p>
+          <p className='text-muted-foreground mt-6 text-xs'>Cada etapa é salva separadamente.</p>
         </div>
         {(project.status === 'draft' || access.complement !== null) && (
           <aside aria-label='Pendências do projeto'>

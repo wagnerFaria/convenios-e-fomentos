@@ -51,6 +51,10 @@ x-api: &api
     STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
     STORAGE_BUCKET: ${STORAGE_BUCKET:-${MINIO_BUCKET:-documentos}}
     STORAGE_PUBLIC_URL: ${STORAGE_PUBLIC_URL:-${APP_URL:-http://localhost}/storage}
+    # MT-ID simulado: o cliente real depende do X-Via (rede do governo). Com isto, o pedido de assinatura das declarações é
+    # aprovado sozinho depois de MTID_SIMULATE_DELAY, sem validade alguma. Use MTID_SIMULATE=false para ver o erro 503.
+    MTID_SIMULATE: ${MTID_SIMULATE:-true}
+    MTID_SIMULATE_DELAY: ${MTID_SIMULATE_DELAY:-10s}
     # Segredos: os padrões servem SOMENTE para desenvolvimento.
     JWT_API_SECRET: ${JWT_API_SECRET:-dev-only-api-secret-change-me-000000000000}
     API_TOKEN_SALT: ${API_TOKEN_SALT:-dev-only-api-token-salt-change-me-0000000}

@@ -31,6 +31,7 @@ func TestValidateProducao(t *testing.T) {
 		{"segredo de desenvolvimento", func(c *Config) { c.APITokenSalt = "dev-only-api-token-salt-change-me-0000000" }, true},
 		{"ambiente inválido", func(c *Config) { c.AppEnv = "x" }, true},
 		{"argon2 fraco em produção", func(c *Config) { c.Argon2MemoryKiB = 1024 }, true},
+		{"MT-ID simulado em produção", func(c *Config) { c.MTIDSimulate = true }, true},
 		{"argon2 sem iterações", func(c *Config) { c.Argon2Iterations = 0 }, true},
 		{"limite de login zerado", func(c *Config) { c.RateLimitAuthPerMin = 0 }, true},
 		{"validade de token zerada", func(c *Config) { c.EmailConfirmationTTL = 0 }, true},

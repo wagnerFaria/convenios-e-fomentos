@@ -69,7 +69,7 @@ SELECT * FROM project_complement_requests WHERE id = $1 FOR UPDATE;
 INSERT INTO projects (
     created_by_id, updated_by_id, origin_project_id, proponent_name, proponent_cpf,
     proponent_phones, proponent_emails, proponent_uf, proponent_municipality_ibge, proponent_job_title,
-    is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title,
+    is_legal_representative, legal_rep_name, legal_rep_cpf, legal_rep_job_title, proponent_personal, legal_rep_personal,
     instrument, institution_cnpj, institution_name, entity_type_id, entity_type_other, entity_nature, entity_non_profit,
     institution_uf, institution_municipality_ibge, institution_zip, institution_street, institution_number, institution_complement,
     institution_district, institution_email, institution_phone, habilitation_status, habilitation_number, habilitation_valid_until,
@@ -82,7 +82,7 @@ INSERT INTO projects (
 SELECT
     $2, $2, p.id, $3, $4,
     p.proponent_phones, p.proponent_emails, p.proponent_uf, p.proponent_municipality_ibge, p.proponent_job_title,
-    p.is_legal_representative, p.legal_rep_name, p.legal_rep_cpf, p.legal_rep_job_title,
+    p.is_legal_representative, p.legal_rep_name, p.legal_rep_cpf, p.legal_rep_job_title, p.proponent_personal, p.legal_rep_personal,
     p.instrument, p.institution_cnpj, p.institution_name, p.entity_type_id, p.entity_type_other, p.entity_nature, p.entity_non_profit,
     p.institution_uf, p.institution_municipality_ibge, p.institution_zip, p.institution_street, p.institution_number, p.institution_complement,
     p.institution_district, p.institution_email, p.institution_phone, p.habilitation_status, p.habilitation_number, p.habilitation_valid_until,
