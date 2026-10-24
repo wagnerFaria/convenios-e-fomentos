@@ -15,7 +15,14 @@ import { ServerErrors } from './server-errors';
 import { StepActions } from './step-actions';
 
 export function contactValues(c: Contact): Contact {
-  return { ...c, phones: c.phones.map((p) => ({ ...p, number: formatPhone(p.number) })) };
+  // Só os campos de Contact: o perfil e o projeto trazem também nome e CPF, que a API rejeita no corpo.
+  return {
+    phones: c.phones.map((p) => ({ ...p, number: formatPhone(p.number) })),
+    emails: c.emails,
+    uf: c.uf,
+    municipalityIbge: c.municipalityIbge,
+    jobTitle: c.jobTitle
+  };
 }
 
 const representativeOptions = [
