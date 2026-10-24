@@ -14,10 +14,30 @@ import {
 import { InputGroup, InputGroupAddon } from '@/components/ui/input-group';
 import { IconSearch, IconCheck } from '@tabler/icons-react';
 
-function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
+/** Lowercases and drops accents and special characters, so "Sao-Paulo" matches "São Paulo". */
+function normalizeSearch(text: string) {
+  return text
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+function accentInsensitiveFilter(value: string, search: string, keywords?: string[]) {
+  const needle = normalizeSearch(search);
+  if (!needle) return 1;
+  return normalizeSearch([value, ...(keywords ?? [])].join(' ')).includes(needle) ? 1 : 0;
+}
+
+function Command({
+  className,
+  filter = accentInsensitiveFilter,
+  ...props
+}: React.ComponentProps<typeof CommandPrimitive>) {
   return (
     <CommandPrimitive
       data-slot='command'
+      filter={filter}
       className={cn(
         'flex size-full flex-col overflow-hidden rounded-xl! bg-popover p-1 text-popover-foreground',
         className
