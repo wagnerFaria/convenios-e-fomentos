@@ -302,7 +302,7 @@ export function getDateFilterLabel(filter: ColumnFilterItem) {
   const [startDate, endDate] = getFilterDates(filter.value);
   if (!startDate) return undefined;
 
-  const start = formatDate(startDate, { month: 'short' });
+  const start = formatDate(startDate);
   if (
     filter.operator !== 'isBetween' ||
     !endDate ||
@@ -311,7 +311,7 @@ export function getDateFilterLabel(filter: ColumnFilterItem) {
     return start;
   }
 
-  return `${start} - ${formatDate(endDate, { month: 'short' })}`;
+  return `${start} - ${formatDate(endDate)}`;
 }
 
 export function stringifyFilterValue(value: unknown): string {

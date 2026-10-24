@@ -116,7 +116,7 @@ function DataTableSliderFilterContent<TData extends RowData>({
   const range: RangeValue = columnFilterValue ?? [min, max];
 
   const formatValue = React.useCallback((value: number) => {
-    return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    return value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   }, []);
 
   const onFromInputChange = React.useCallback(
@@ -183,7 +183,7 @@ function DataTableSliderFilterContent<TData extends RowData>({
         ) : null}
       </PopoverTrigger>
       <PopoverContent
-        aria-label={`${title} filter`}
+        aria-label={`Filtro de ${title}`}
         dir={dir}
         align='start'
         className='flex w-auto flex-col gap-4'
@@ -194,7 +194,7 @@ function DataTableSliderFilterContent<TData extends RowData>({
           </p>
           <div className='flex items-center gap-4'>
             <Label htmlFor={`${id}-from`} className='sr-only'>
-              From
+              De
             </Label>
             <div className='relative'>
               <Input
@@ -218,7 +218,7 @@ function DataTableSliderFilterContent<TData extends RowData>({
               )}
             </div>
             <Label htmlFor={`${id}-to`} className='sr-only'>
-              to
+              até
             </Label>
             <div className='relative'>
               <Input
@@ -243,7 +243,7 @@ function DataTableSliderFilterContent<TData extends RowData>({
             </div>
           </div>
           <Label htmlFor={`${id}-slider`} className='sr-only'>
-            {title} slider
+            Controle deslizante de {title}
           </Label>
           <Slider
             id={`${id}-slider`}
@@ -254,8 +254,8 @@ function DataTableSliderFilterContent<TData extends RowData>({
             onValueChange={onSliderValueChange}
           />
         </div>
-        <Button aria-label={`Clear ${title} filter`} variant='outline' onClick={onReset}>
-          Clear
+        <Button aria-label={`Limpar filtro de ${title}`} variant='outline' onClick={onReset}>
+          Limpar
         </Button>
       </PopoverContent>
     </Popover>

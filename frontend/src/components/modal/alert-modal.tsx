@@ -19,10 +19,10 @@ export function AlertModal({
   onClose,
   onConfirm,
   loading,
-  title = 'Are you sure?',
-  description = 'This action cannot be undone.',
-  confirmLabel = 'Continue',
-  cancelLabel = 'Cancel'
+  title = 'Tem certeza?',
+  description = 'Esta ação não pode ser desfeita.',
+  confirmLabel = 'Continuar',
+  cancelLabel = 'Cancelar'
 }: AlertModalProps) {
   return (
     <Modal title={title} description={description} isOpen={isOpen} onClose={onClose}>

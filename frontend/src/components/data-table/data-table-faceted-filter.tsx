@@ -125,10 +125,10 @@ function DataTableFacetedFilterContent<TData extends RowData, TValue>({
           </>
         )}
       </FacetedTrigger>
-      <FacetedContent aria-label={`${title} filter`} dir={dir} className='w-50'>
+      <FacetedContent aria-label={`Filtro de ${title}`} dir={dir} className='w-50'>
         <FacetedInput placeholder={title} />
         <FacetedList className='max-h-full'>
-          <FacetedEmpty>No results found.</FacetedEmpty>
+          <FacetedEmpty>Nenhum resultado encontrado.</FacetedEmpty>
           <FacetedGroup className='max-h-75 scroll-py-1 overflow-x-hidden overflow-y-auto'>
             {options.map((option) => (
               <FacetedItem key={option.value} value={option.value}>
@@ -138,7 +138,7 @@ function DataTableFacetedFilterContent<TData extends RowData, TValue>({
               </FacetedItem>
             ))}
           </FacetedGroup>
-          <FacetedClear>Clear filters</FacetedClear>
+          <FacetedClear>Limpar filtros</FacetedClear>
         </FacetedList>
       </FacetedContent>
     </Faceted>

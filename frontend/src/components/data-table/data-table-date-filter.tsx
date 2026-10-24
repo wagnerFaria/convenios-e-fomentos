@@ -143,7 +143,7 @@ function DataTableDateFilterContent<TData extends RowData>({
       if (!getIsDateRange(selectedDates)) return null;
 
       const hasSelectedDates = selectedDates.from || selectedDates.to;
-      const dateText = hasSelectedDates ? formatDateRange(selectedDates) : 'Select date range';
+      const dateText = hasSelectedDates ? formatDateRange(selectedDates) : 'Selecionar período';
 
       return (
         <span className='flex items-center gap-2'>
@@ -164,7 +164,7 @@ function DataTableDateFilterContent<TData extends RowData>({
     if (getIsDateRange(selectedDates)) return null;
 
     const hasSelectedDate = selectedDates.length > 0;
-    const dateText = hasSelectedDate ? formatDate(selectedDates[0]) : 'Select date';
+    const dateText = hasSelectedDate ? formatDate(selectedDates[0]) : 'Selecionar data';
 
     return (
       <span className='flex items-center gap-2'>
@@ -198,7 +198,7 @@ function DataTableDateFilterContent<TData extends RowData>({
         )}
         {label}
       </PopoverTrigger>
-      <PopoverContent aria-label={`${title} filter`} dir={dir} className='w-auto p-0' align='start'>
+      <PopoverContent aria-label={`Filtro de ${title}`} dir={dir} className='w-auto p-0' align='start'>
         {multiple ? (
           <Calendar
             autoFocus
@@ -220,12 +220,12 @@ function DataTableDateFilterContent<TData extends RowData>({
         {hasValue && (
           <div className='border-t p-3'>
             <Button
-              aria-label={`Clear ${title} filter`}
+              aria-label={`Limpar filtro de ${title}`}
               variant='outline'
               className='w-full'
               onClick={onReset}
             >
-              Clear
+              Limpar
             </Button>
           </div>
         )}

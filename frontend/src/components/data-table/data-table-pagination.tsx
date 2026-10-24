@@ -98,16 +98,17 @@ function DataTablePaginationContent<TData extends RowData>({
       {...props}
     >
       <div role='status' className='text-sm whitespace-nowrap text-muted-foreground'>
-        {selectedRowCount} {selectedRowCount === 1 ? 'row' : 'rows'} selected
+        {selectedRowCount}{' '}
+        {selectedRowCount === 1 ? 'linha selecionada' : 'linhas selecionadas'}
         {selectedRowCount > visibleSelectedRowCount
-          ? ` (${selectedRowCount - visibleSelectedRowCount} not shown)`
+          ? ` (${selectedRowCount - visibleSelectedRowCount} não exibida(s))`
           : ''}
         .
       </div>
       <div className='flex items-center gap-2 sm:gap-6 lg:gap-8'>
         <div className='hidden items-center gap-2 sm:flex'>
           <p id={pageSizeLabelId} className='text-sm font-medium whitespace-nowrap'>
-            Rows per page
+            Linhas por página
           </p>
           <Select
             value={`${pageSize}`}
@@ -137,11 +138,11 @@ function DataTablePaginationContent<TData extends RowData>({
           role='status'
           className='flex items-center justify-center text-sm font-medium whitespace-nowrap'
         >
-          Page {pageIndex + 1} of {pageCount}
+          Página {pageIndex + 1} de {pageCount}
         </div>
         <div className='flex items-center gap-1'>
           <Button
-            aria-label='Go to first page'
+            aria-label='Ir para a primeira página'
             variant='outline'
             size='icon'
             className='hidden size-8 lg:flex'
@@ -151,7 +152,7 @@ function DataTablePaginationContent<TData extends RowData>({
             <IconChevronsLeft className='rtl:rotate-180' />
           </Button>
           <Button
-            aria-label='Go to previous page'
+            aria-label='Ir para a página anterior'
             variant='outline'
             size='icon'
             className='size-8'
@@ -161,7 +162,7 @@ function DataTablePaginationContent<TData extends RowData>({
             <IconChevronLeft className='rtl:rotate-180' />
           </Button>
           <Button
-            aria-label='Go to next page'
+            aria-label='Ir para a próxima página'
             variant='outline'
             size='icon'
             className='size-8'
@@ -171,7 +172,7 @@ function DataTablePaginationContent<TData extends RowData>({
             <IconChevronRight className='rtl:rotate-180' />
           </Button>
           <Button
-            aria-label='Go to last page'
+            aria-label='Ir para a última página'
             variant='outline'
             size='icon'
             className='hidden size-8 lg:flex'

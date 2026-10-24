@@ -16,14 +16,14 @@ import {
 
 // Default/fallback data when no content is set
 const defaultData = {
-  title: 'Documentation',
+  title: 'Documentação',
   sections: [
     {
-      title: 'Getting Started',
-      description: 'Learn how to get started with this application.',
+      title: 'Primeiros passos',
+      description: 'Saiba como começar a usar esta aplicação.',
       links: [
         {
-          title: 'Installation Guide',
+          title: 'Guia de instalação',
           url: '#'
         }
       ]
@@ -63,7 +63,7 @@ export function InfoSidebar({ ...props }: React.ComponentProps<typeof Infobar>) 
                     {section.links && section.links.length > 0 && (
                       <div className='flex flex-col gap-2'>
                         <h4 className='text-muted-foreground text-xs font-medium tracking-wide uppercase'>
-                          Learn more
+                          Saiba mais
                         </h4>
                         <ul className='flex flex-col gap-1.5'>
                           {section.links.map((link) => (

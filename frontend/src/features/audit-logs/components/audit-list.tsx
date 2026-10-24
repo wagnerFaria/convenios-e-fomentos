@@ -5,7 +5,7 @@ import { parseAsInteger, parseAsString, useQueryStates } from 'nuqs';
 import { useState } from 'react';
 import { Pager } from '@/components/pager';
 import { QueryError } from '@/components/query-error';
-import { Input } from '@/components/ui/input';
+import { DateInput } from '@/components/ui/date-input';
 import {
   Select,
   SelectContent,
@@ -122,24 +122,22 @@ export function AuditList() {
         />
         <div className='text-muted-foreground flex items-center gap-1.5 text-sm'>
           <label htmlFor='audit-from'>De</label>
-          <Input
+          <DateInput
             id='audit-from'
-            type='date'
             value={f.from}
             max={f.to || undefined}
-            onChange={(e) => void setF({ from: e.target.value, page: 1 })}
-            className='w-auto'
+            onChange={(from) => void setF({ from, page: 1 })}
+            className='w-44'
           />
         </div>
         <div className='text-muted-foreground flex items-center gap-1.5 text-sm'>
           <label htmlFor='audit-to'>até</label>
-          <Input
+          <DateInput
             id='audit-to'
-            type='date'
             value={f.to}
             min={f.from || undefined}
-            onChange={(e) => void setF({ to: e.target.value, page: 1 })}
-            className='w-auto'
+            onChange={(to) => void setF({ to, page: 1 })}
+            className='w-44'
           />
         </div>
       </div>

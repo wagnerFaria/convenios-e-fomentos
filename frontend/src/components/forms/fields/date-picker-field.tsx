@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Icons } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import type { DateRange } from 'react-day-picker';
 import { useFieldContext, useFieldInvalid, type BaseFieldProps } from '@/lib/form-context';
 
@@ -15,7 +16,7 @@ export function DatePickerField({
   label,
   description,
   required,
-  placeholder = 'Pick a date',
+  placeholder = 'Escolha uma data',
   disabledDates
 }: BaseFieldProps & {
   placeholder?: string;
@@ -46,7 +47,7 @@ export function DatePickerField({
           }
         >
           <Icons.calendar className='mr-2 h-4 w-4' />
-          {field.state.value ? format(field.state.value, 'PPP') : <span>{placeholder}</span>}
+          {field.state.value ? format(field.state.value, 'dd/MM/yyyy', { locale: ptBR }) : <span>{placeholder}</span>}
         </PopoverTrigger>
         <PopoverContent className='w-auto p-0' align='start'>
           <Calendar
@@ -69,7 +70,7 @@ export function DateRangeField({
   label,
   description,
   required,
-  placeholder = 'Pick a date range'
+  placeholder = 'Escolha um período'
 }: BaseFieldProps & { placeholder?: string }) {
   const field = useFieldContext<DateRange | undefined>();
   const isInvalid = useFieldInvalid();
@@ -100,10 +101,10 @@ export function DateRangeField({
           {range?.from ? (
             range.to ? (
               <>
-                {format(range.from, 'LLL dd, y')} - {format(range.to, 'LLL dd, y')}
+                {format(range.from, 'dd/MM/yyyy', { locale: ptBR })} - {format(range.to, 'dd/MM/yyyy', { locale: ptBR })}
               </>
             ) : (
-              format(range.from, 'LLL dd, y')
+              format(range.from, 'dd/MM/yyyy', { locale: ptBR })
             )
           ) : (
             <span>{placeholder}</span>

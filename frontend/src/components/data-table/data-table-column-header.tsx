@@ -106,7 +106,7 @@ function DataTableColumnHeaderMenu<TData extends RowData, TValue>({
             <IconSelector />
           ))}
       </DropdownMenuTrigger>
-      <DropdownMenuContent dir={dir} align='start' className='w-28 data-closed:fill-mode-forwards'>
+      <DropdownMenuContent dir={dir} align='start' className='w-40 data-closed:fill-mode-forwards'>
         {column.getCanSort() && (
           <>
             <DropdownMenuCheckboxItem
@@ -115,7 +115,7 @@ function DataTableColumnHeaderMenu<TData extends RowData, TValue>({
               onClick={() => onSortDirectionChange('asc')}
             >
               <IconChevronUp />
-              Asc
+              Crescente
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               className='[&_svg]:text-muted-foreground'
@@ -123,7 +123,7 @@ function DataTableColumnHeaderMenu<TData extends RowData, TValue>({
               onClick={() => onSortDirectionChange('desc')}
             >
               <IconChevronDown />
-              Desc
+              Decrescente
             </DropdownMenuCheckboxItem>
           </>
         )}
@@ -134,7 +134,7 @@ function DataTableColumnHeaderMenu<TData extends RowData, TValue>({
             onClick={() => column.toggleVisibility(false)}
           >
             <IconEyeClosed />
-            Hide
+            Ocultar
           </DropdownMenuCheckboxItem>
         )}
       </DropdownMenuContent>

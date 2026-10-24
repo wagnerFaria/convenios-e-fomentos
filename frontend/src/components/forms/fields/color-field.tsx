@@ -25,7 +25,7 @@ export function ColorField({ label, description }: Omit<BaseFieldProps, 'require
           onChange={(e) => field.handleChange(e.target.value)}
           className='w-28 font-mono'
           placeholder='#000000'
-          aria-label={`${label} hex value`}
+          aria-label={`${label} (valor hexadecimal)`}
         />
       </div>
       {description && <FieldDescription>{description}</FieldDescription>}

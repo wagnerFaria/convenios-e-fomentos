@@ -15,7 +15,7 @@ export function SelectField({
   label,
   description,
   required,
-  placeholder = 'Select',
+  placeholder = 'Selecione',
   options
 }: BaseFieldProps & {
   placeholder?: string;

@@ -269,7 +269,7 @@ function Infobar({
           side={side}
         >
           <SheetHeader className='sr-only'>
-            <SheetTitle>Infobar</SheetTitle>
+            <SheetTitle>Painel de informações</SheetTitle>
             <SheetDescription>Displays the mobile infobar.</SheetDescription>
           </SheetHeader>
           <div className='flex h-full w-full flex-col'>{children}</div>
@@ -323,7 +323,7 @@ function InfobarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       variant='ghost'
       size='icon'
       className={cn('size-7', className)}
-      aria-label='Close info panel'
+      aria-label='Fechar painel de informações'
       onClick={(event) => {
         onClick?.(event);
         toggleInfobar();
@@ -342,10 +342,10 @@ function InfobarRail({ className, ...props }: React.ComponentProps<'button'>) {
     <button
       data-infobar='rail'
       data-slot='infobar-rail'
-      aria-label='Toggle Infobar'
+      aria-label='Alternar painel de informações'
       tabIndex={-1}
       onClick={toggleInfobar}
-      title='Toggle Infobar'
+      title='Alternar painel de informações'
       className={cn(
         'hover:after:bg-sidebar-border absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] sm:flex',
         'in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize',

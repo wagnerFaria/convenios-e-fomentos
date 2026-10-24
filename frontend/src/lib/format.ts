@@ -1,19 +1,9 @@
-export function formatDate(
-  date: Date | string | number | undefined,
-  opts: Intl.DateTimeFormatOptions = {}
-) {
+/** Data no formato brasileiro (ex.: 24/10/2026). */
+export function formatDate(date: Date | string | number | undefined) {
   if (!date) return '';
-
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      month: opts.month ?? 'long',
-      day: opts.day ?? 'numeric',
-      year: opts.year ?? 'numeric',
-      ...opts
-    }).format(new Date(date));
-  } catch {
-    return '';
-  }
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('pt-BR');
 }
 
 /** Data e hora no formato brasileiro (ex.: 22/10/2026 14:30). */
