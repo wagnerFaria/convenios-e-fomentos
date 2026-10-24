@@ -1306,7 +1306,9 @@ paths:
         Só arquivo `confirmed` conta como entregue.
         `mandatory` diz se o documento bloqueia a continuidade e o envio: obrigatório sem arquivo nem justificativa gera a pendência bloqueante
         `documents_missing`; opcional (`mandatory: false`) aparece marcado e nunca bloqueia.
-        Resposta: `{options, instrument, summary {total, done, justified, missing, requiredTotal, requiredMissing}, items}`.
+        Resposta: `{options, instrument, summary {total, done, justified, missing, requiredTotal, requiredMissing}, items, extraDocuments}`.
+        `extraDocuments` são os documentos adicionais do proponente: `[{id, title, description, file (DocFile ou null), locked}]`. Não entram no
+        `summary` e nunca bloqueiam o envio.
         `requiredMissing` é o que falta entre os obrigatórios: com 0, o proponente pode seguir para a revisão e o envio.
         Permissão: `admin::projects.read` (404 em projeto fora do alcance).
       security: [{adminBearer: []}]
@@ -1452,6 +1454,106 @@ paths:
                 contentType: {type: string}
                 sizeBytes: {type: integer, minimum: 1}
                 amendmentId: {type: string, format: uuid}
+      responses:
+        "201": {description: Criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/extra:
+    post:
+      tags: [Projetos]
+      summary: Cria um documento adicional (sem arquivo ainda)
+      description: |
+        Documento livre do proponente, fora do catálogo de exigências: `title` (obrigatório, até 120 caracteres) e `description` (opcional, até 1.000).
+        O arquivo é enviado depois, por `POST .../documents/extra/{itemId}/files`. No máximo 5 por projeto (409 `too_many_extra_documents`).
+        No rascunho, ou durante uma complementação aberta (409 `project_not_editable` nos demais casos). Responde o checklist (201).
+        Permissão: `admin::projects.update`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string, maxLength: 120}
+                description: {type: string, maxLength: 1000}
+      responses:
+        "201": {description: Criado}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/extra/{itemId}:
+    put:
+      tags: [Projetos]
+      summary: Altera o título e a descrição de um documento adicional
+      description: "Não altera o que já fez parte de uma versão enviada (409 `not_returned`). Responde o checklist. Permissão: `admin::projects.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string, maxLength: 120}
+                description: {type: string, maxLength: 1000}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+    delete:
+      tags: [Projetos]
+      summary: Remove um documento adicional e o arquivo dele
+      description: "Não remove o que já fez parte de uma versão enviada (409 `not_returned`). Responde o checklist. Permissão: `admin::projects.update`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/extra/{itemId}/files:
+    post:
+      tags: [Projetos]
+      summary: Registra o arquivo de um documento adicional e autoriza o envio direto ao armazenamento
+      description: |
+        Mesmo fluxo em 3 passos de `.../documents/{code}/files` (o passo 3 usa `POST .../documents/files/{fileId}/confirm`), com um único arquivo por
+        documento adicional (409 `too_many_files`; remova o documento para trocar o arquivo). Permissão: `admin::projects.update`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, contentType, sizeBytes]
+              properties:
+                filename: {type: string, maxLength: 255}
+                contentType: {type: string}
+                sizeBytes: {type: integer, minimum: 1}
       responses:
         "201": {description: Criado}
         "401": {$ref: "#/components/responses/Error"}

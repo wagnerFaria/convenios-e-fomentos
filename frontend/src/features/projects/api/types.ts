@@ -217,11 +217,25 @@ export interface ChecklistItem {
   declarationStale: boolean;
 }
 
+/** Documento adicional do proponente: título, descrição opcional e um único arquivo. Não conta nos obrigatórios. */
+export interface ExtraDocument {
+  id: string;
+  title: string;
+  description: string;
+  file: DocFile | null;
+  /** O arquivo já fez parte de uma versão enviada: não pode mais ser alterado nem removido. */
+  locked: boolean;
+}
+
+/** Máximo de documentos adicionais por projeto (o servidor é a autoridade). */
+export const MAX_EXTRA_DOCUMENTS = 5;
+
 export interface Checklist {
   options: DocumentOptions;
   instrument: Instrument | '';
   summary: DocumentSummary;
   items: ChecklistItem[];
+  extraDocuments: ExtraDocument[];
 }
 
 export interface FileRequest {

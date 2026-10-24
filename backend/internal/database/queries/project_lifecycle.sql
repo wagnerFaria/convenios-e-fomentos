@@ -104,8 +104,8 @@ INSERT INTO project_amendments (id, project_id, position, parliamentarian_id, pa
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: CreateProjectDocumentItemCopy :one
-INSERT INTO project_document_items (project_id, requirement_code, amendment_id, justification)
-VALUES ($1, $2, sqlc.narg('amendment_id')::uuid, $3)
+INSERT INTO project_document_items (project_id, requirement_code, amendment_id, justification, title, description)
+VALUES ($1, sqlc.narg('requirement_code')::text, sqlc.narg('amendment_id')::uuid, $2, $3, $4)
 RETURNING *;
 
 -- Rascunhos sem nenhuma alteração há mais de N dias (retenção). Só rascunhos: projeto enviado nunca é apagado por tempo.

@@ -129,6 +129,46 @@ export async function deleteProjectFile(id: string, fileId: string) {
   await apiClient<void>(`${docs(id)}/files/${fileId}`, { method: 'DELETE' });
 }
 
+/** Cria o documento adicional (sem arquivo ainda); devolve o checklist atualizado. */
+export async function createExtraDocument(
+  id: string,
+  input: { title: string; description: string }
+) {
+  return (
+    await apiClient<ApiResponse<Checklist>>(`${docs(id)}/extra`, { method: 'POST', ...json(input) })
+  ).data;
+}
+
+export async function updateExtraDocument(
+  id: string,
+  itemId: string,
+  input: { title: string; description: string }
+) {
+  return (
+    await apiClient<ApiResponse<Checklist>>(`${docs(id)}/extra/${itemId}`, {
+      method: 'PUT',
+      ...json(input)
+    })
+  ).data;
+}
+
+/** Remove o documento adicional e o arquivo dele. */
+export async function deleteExtraDocument(id: string, itemId: string) {
+  return (
+    await apiClient<ApiResponse<Checklist>>(`${docs(id)}/extra/${itemId}`, { method: 'DELETE' })
+  ).data;
+}
+
+/** Passo 1 do envio do arquivo de um documento adicional. */
+export async function requestExtraFileUpload(id: string, itemId: string, input: FileRequest) {
+  return (
+    await apiClient<ApiResponse<{ file: DocFile; upload: UploadGrant }>>(
+      `${docs(id)}/extra/${itemId}/files`,
+      { method: 'POST', ...json(input) }
+    )
+  ).data;
+}
+
 export async function saveJustification(
   id: string,
   code: string,

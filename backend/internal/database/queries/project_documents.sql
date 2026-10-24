@@ -91,3 +91,26 @@ WHERE id = $1 AND project_id = $2;
 
 -- name: DeleteProjectAmendmentsExcept :exec
 DELETE FROM project_amendments WHERE project_id = $1 AND NOT (id = ANY(sqlc.arg('keep')::uuid[]));
+
+-- Documentos adicionais (itens sem exigência do catálogo).
+-- name: CountExtraDocumentItems :one
+SELECT count(*) FROM project_document_items WHERE project_id = $1 AND requirement_code IS NULL;
+
+-- name: CreateExtraDocumentItem :one
+INSERT INTO project_document_items (project_id, title, description) VALUES ($1, $2, $3) RETURNING *;
+
+-- name: GetExtraDocumentItem :one
+SELECT * FROM project_document_items WHERE id = $1 AND project_id = $2 AND requirement_code IS NULL;
+
+-- name: UpdateExtraDocumentItem :one
+UPDATE project_document_items SET title = $2, description = $3, updated_at = now() WHERE id = $1 AND requirement_code IS NULL RETURNING *;
+
+-- name: DeleteExtraDocumentItem :execrows
+DELETE FROM project_document_items WHERE id = $1 AND requirement_code IS NULL;
+
+-- Todos os arquivos do item (inclusive pendentes e substituídos), para apagar os objetos ao remover o documento.
+-- name: ListItemFileKeys :many
+SELECT object_key FROM project_files WHERE item_id = $1;
+
+-- name: CountItemLockedFiles :one
+SELECT count(*) FROM project_files WHERE item_id = $1 AND locked;

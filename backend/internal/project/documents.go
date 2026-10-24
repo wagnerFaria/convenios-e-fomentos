@@ -34,9 +34,13 @@ const (
 )
 
 const (
-	maxFilesPerItem   = 10
-	maxJustification  = 2000
-	pendingGraceHours = 24
+	maxFilesPerItem = 10
+	// Documentos adicionais: itens livres do proponente, sem exigência do catálogo e que nunca bloqueiam o envio.
+	maxExtraDocuments   = 5
+	maxExtraTitle       = 120
+	maxExtraDescription = 1000
+	maxJustification    = 2000
+	pendingGraceHours   = 24
 
 	// Limites de armazenamento por projeto: protegem contra abuso (envios sem fim) sem atrapalhar um projeto real, que tem dezenas de
 	// documentos. Contam todos os arquivos guardados, inclusive os substituídos, e os tamanhos declarados no pedido de envio.
@@ -96,12 +100,23 @@ type ChecklistItem struct {
 	DeclarationStale bool `json:"declarationStale"`
 }
 
+// ExtraDocument é um documento adicional: o proponente dá o título e a descrição e anexa um único arquivo. Não conta no resumo.
+type ExtraDocument struct {
+	ID          uuid.UUID `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	File        *DocFile  `json:"file"`
+	// Locked: o arquivo já fez parte de uma versão enviada; o documento não pode mais ser alterado nem removido.
+	Locked bool `json:"locked"`
+}
+
 // Checklist é a lista de documentos do projeto.
 type Checklist struct {
-	Options    DocumentOptions `json:"options"`
-	Instrument string          `json:"instrument"`
-	Summary    DocumentSummary `json:"summary"`
-	Items      []ChecklistItem `json:"items"`
+	Options        DocumentOptions `json:"options"`
+	Instrument     string          `json:"instrument"`
+	Summary        DocumentSummary `json:"summary"`
+	Items          []ChecklistItem `json:"items"`
+	ExtraDocuments []ExtraDocument `json:"extraDocuments"`
 }
 
 // requirement é uma linha do catálogo já interpretada.
@@ -157,10 +172,7 @@ func amendmentLabel(a Amendment) string {
 // checklist monta a lista de documentos do projeto: as exigências aplicáveis às respostas dele (uma por emenda nas exigências
 // por emenda), com os arquivos e a justificativa já registrados.
 func (s *Service) checklist(ctx context.Context, q *db.Queries, p Project) (*Checklist, error) {
-	cl := &Checklist{Options: p.DocumentOptions, Instrument: p.Institution.Instrument, Items: []ChecklistItem{}}
-	if p.Institution.Instrument == "" {
-		return cl, nil
-	}
+	cl := &Checklist{Options: p.DocumentOptions, Instrument: p.Institution.Instrument, Items: []ChecklistItem{}, ExtraDocuments: []ExtraDocument{}}
 	reqs, err := s.requirements(ctx, q)
 	if err != nil {
 		return nil, err
@@ -176,11 +188,30 @@ func (s *Service) checklist(ctx context.Context, q *db.Queries, p Project) (*Che
 	type key struct{ code, amendment string }
 	byKey := map[key]db.ProjectDocumentItem{}
 	for _, it := range items {
-		byKey[key{it.RequirementCode, uuidString(it.AmendmentID)}] = it
+		if it.RequirementCode != nil {
+			byKey[key{*it.RequirementCode, uuidString(it.AmendmentID)}] = it
+		}
 	}
 	filesByItem := map[uuid.UUID][]DocFile{}
+	lockedItems := map[uuid.UUID]bool{}
 	for _, f := range files {
 		filesByItem[f.ItemID] = append(filesByItem[f.ItemID], DocFile{ID: f.ID, Filename: f.Filename, ContentType: f.ContentType, SizeBytes: f.SizeBytes, Status: f.Status, SHA256: str(f.Sha256), CreatedAt: f.CreatedAt})
+		if f.Locked {
+			lockedItems[f.ItemID] = true
+		}
+	}
+	for _, it := range items {
+		if it.RequirementCode != nil {
+			continue
+		}
+		x := ExtraDocument{ID: it.ID, Title: it.Title, Description: it.Description, Locked: lockedItems[it.ID]}
+		if fs := filesByItem[it.ID]; len(fs) > 0 {
+			x.File = &fs[0]
+		}
+		cl.ExtraDocuments = append(cl.ExtraDocuments, x)
+	}
+	if p.Institution.Instrument == "" {
+		return cl, nil
 	}
 
 	f := facts(p)
@@ -379,9 +410,9 @@ func (s *Service) lockedItem(ctx context.Context, q *db.Queries, id uuid.UUID, c
 	if !rt.canDocument(key, missingIn(cl, key)) {
 		return db.ProjectDocumentItem{}, requirement{}, errNotReturned()
 	}
-	item, err := q.GetProjectDocumentItem(ctx, db.GetProjectDocumentItemParams{ProjectID: id, RequirementCode: code, AmendmentID: amendment})
+	item, err := q.GetProjectDocumentItem(ctx, db.GetProjectDocumentItemParams{ProjectID: id, RequirementCode: &code, AmendmentID: amendment})
 	if errors.Is(err, pgx.ErrNoRows) {
-		item, err = q.CreateProjectDocumentItem(ctx, db.CreateProjectDocumentItemParams{ProjectID: id, RequirementCode: code, AmendmentID: amendment})
+		item, err = q.CreateProjectDocumentItem(ctx, db.CreateProjectDocumentItemParams{ProjectID: id, RequirementCode: &code, AmendmentID: amendment})
 	}
 	if err != nil {
 		return db.ProjectDocumentItem{}, requirement{}, err
@@ -405,7 +436,10 @@ func (s *Service) fileRights(ctx context.Context, id uuid.UUID, f db.GetProjectF
 	if rt.draft {
 		return nil
 	}
-	key := docKey(f.RequirementCode, f.AmendmentID)
+	if f.RequirementCode == nil {
+		return rt.canExtra(f.Locked)
+	}
+	key := docKey(*f.RequirementCode, f.AmendmentID)
 	_, cl, err := s.viewWithChecklist(ctx, s.q, cur, Actor{})
 	if err != nil {
 		return err
@@ -418,6 +452,22 @@ func (s *Service) fileRights(ctx context.Context, id uuid.UUID, f db.GetProjectF
 
 // RequestUpload registra o arquivo como pendente e autoriza o envio direto ao armazenamento.
 func (s *Service) RequestUpload(ctx context.Context, actor Actor, id uuid.UUID, code string, in FileInput, upd authz.Decision) (DocFile, storage.Upload, error) {
+	return s.requestUpload(ctx, actor, id, in, maxFilesPerItem, func(q *db.Queries) (db.ProjectDocumentItem, error) {
+		item, _, err := s.lockedItem(ctx, q, id, code, in.AmendmentID, upd, actor)
+		return item, err
+	})
+}
+
+// RequestExtraUpload é o envio do arquivo de um documento adicional (um só por documento).
+func (s *Service) RequestExtraUpload(ctx context.Context, actor Actor, id, itemID uuid.UUID, in FileInput, upd authz.Decision) (DocFile, storage.Upload, error) {
+	return s.requestUpload(ctx, actor, id, in, 1, func(q *db.Queries) (db.ProjectDocumentItem, error) {
+		item, _, err := s.lockedExtra(ctx, q, id, &itemID, upd)
+		return item, err
+	})
+}
+
+// requestUpload registra o arquivo como pendente no item que resolve devolve (já com o projeto travado) e autoriza o envio.
+func (s *Service) requestUpload(ctx context.Context, actor Actor, id uuid.UUID, in FileInput, perItem int64, resolve func(q *db.Queries) (db.ProjectDocumentItem, error)) (DocFile, storage.Upload, error) {
 	if err := s.requireStore(); err != nil {
 		return DocFile{}, storage.Upload{}, err
 	}
@@ -432,7 +482,7 @@ func (s *Service) RequestUpload(ctx context.Context, actor Actor, id uuid.UUID, 
 	var row db.ProjectFile
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		item, _, err := s.lockedItem(ctx, q, id, code, in.AmendmentID, upd, actor)
+		item, err := resolve(q)
 		if err != nil {
 			return err
 		}
@@ -440,8 +490,8 @@ func (s *Service) RequestUpload(ctx context.Context, actor Actor, id uuid.UUID, 
 		if err != nil {
 			return err
 		}
-		if n >= maxFilesPerItem {
-			return httpapi.ErrConflict("too_many_files", fmt.Sprintf("Este documento já tem %d arquivos (limite).", maxFilesPerItem))
+		if n >= perItem {
+			return httpapi.ErrConflict("too_many_files", fmt.Sprintf("Este documento já tem %d arquivo(s) (limite).", perItem))
 		}
 		totals, err := q.ProjectFileTotals(ctx, id)
 		if err != nil {
@@ -632,7 +682,7 @@ func (s *Service) Download(ctx context.Context, actor Actor, id, fileID uuid.UUI
 		return DownloadLink{}, err
 	}
 	// Documentos têm dados pessoais (RG, CPF, comprovantes): todo acesso fica registrado.
-	if err := s.audit.Record(ctx, s.q, actor.entry("project.file-download", id, map[string]any{"file": fileID, "document": f.RequirementCode})); err != nil {
+	if err := s.audit.Record(ctx, s.q, actor.entry("project.file-download", id, map[string]any{"file": fileID, "document": str(f.RequirementCode)})); err != nil {
 		return DownloadLink{}, err
 	}
 	return DownloadLink{URL: u, ExpiresAt: exp}, nil
@@ -739,4 +789,153 @@ func (s *Service) CleanupPendingFiles(ctx context.Context) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// ---- Documentos adicionais ----
+
+// ExtraInput é o título e a descrição de um documento adicional.
+type ExtraInput struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+func cleanExtra(in ExtraInput) (ExtraInput, error) {
+	in.Title, in.Description = text(in.Title), multiline(in.Description)
+	switch {
+	case in.Title == "":
+		return in, fieldIssue("title", "Informe o título do documento.")
+	case tooLong(in.Title, maxExtraTitle):
+		return in, fieldIssue("title", fmt.Sprintf("Use até %d caracteres.", maxExtraTitle))
+	case tooLong(in.Description, maxExtraDescription):
+		return in, fieldIssue("description", fmt.Sprintf("Use até %d caracteres.", maxExtraDescription))
+	}
+	return in, nil
+}
+
+// canExtra: no rascunho tudo vale; depois do envio, só durante uma complementação e só no que ainda não fez parte de uma versão
+// enviada (o adicionado agora). Não depende de a equipe ter devolvido o documento: ele é do proponente.
+func (r rights) canExtra(locked bool) error {
+	if r.draft || (r.open != nil && !locked) {
+		return nil
+	}
+	if r.open != nil {
+		return errNotReturned()
+	}
+	return errNotEditable()
+}
+
+// lockedExtra trava o projeto, confere a permissão e o direito de mexer em documentos adicionais agora. Com itemID, devolve o
+// documento (que precisa ser do projeto e ainda não enviado numa versão); sem ele, devolve só a checagem (criação).
+func (s *Service) lockedExtra(ctx context.Context, q *db.Queries, id uuid.UUID, itemID *uuid.UUID, upd authz.Decision) (db.ProjectDocumentItem, db.Project, error) {
+	cur, err := q.GetProjectForUpdate(ctx, id)
+	if err != nil {
+		return db.ProjectDocumentItem{}, cur, notFound(err)
+	}
+	if !upd.AllowsRecord(refOf(cur).Getter()) {
+		return db.ProjectDocumentItem{}, cur, httpapi.ErrForbidden()
+	}
+	rt, err := s.rightsOf(ctx, q, cur)
+	if err != nil {
+		return db.ProjectDocumentItem{}, cur, err
+	}
+	if !rt.editable() {
+		return db.ProjectDocumentItem{}, cur, errNotEditable()
+	}
+	if itemID == nil {
+		return db.ProjectDocumentItem{}, cur, rt.canExtra(false)
+	}
+	item, err := q.GetExtraDocumentItem(ctx, db.GetExtraDocumentItemParams{ID: *itemID, ProjectID: id})
+	if err != nil {
+		return db.ProjectDocumentItem{}, cur, notFound(err)
+	}
+	locked, err := q.CountItemLockedFiles(ctx, item.ID)
+	if err != nil {
+		return db.ProjectDocumentItem{}, cur, err
+	}
+	return item, cur, rt.canExtra(locked > 0)
+}
+
+func (s *Service) checklistOf(ctx context.Context, id uuid.UUID, actor Actor) (*Checklist, error) {
+	r, err := s.q.GetProject(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	_, cl, err := s.viewWithChecklist(ctx, s.q, r, actor)
+	return cl, err
+}
+
+// CreateExtraDocument cria um documento adicional (ainda sem arquivo). Há no máximo maxExtraDocuments por projeto.
+func (s *Service) CreateExtraDocument(ctx context.Context, actor Actor, id uuid.UUID, in ExtraInput, upd authz.Decision) (*Checklist, error) {
+	s.settle(ctx, id)
+	in, err := cleanExtra(in)
+	if err != nil {
+		return nil, err
+	}
+	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		if _, _, err := s.lockedExtra(ctx, q, id, nil, upd); err != nil {
+			return err
+		}
+		n, err := q.CountExtraDocumentItems(ctx, id)
+		if err != nil {
+			return err
+		}
+		if n >= maxExtraDocuments {
+			return httpapi.ErrConflict("too_many_extra_documents", fmt.Sprintf("O projeto já tem %d documentos adicionais (limite).", maxExtraDocuments))
+		}
+		_, err = q.CreateExtraDocumentItem(ctx, db.CreateExtraDocumentItemParams{ProjectID: id, Title: in.Title, Description: in.Description})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.checklistOf(ctx, id, actor)
+}
+
+// UpdateExtraDocument altera o título e a descrição de um documento adicional.
+func (s *Service) UpdateExtraDocument(ctx context.Context, actor Actor, id, itemID uuid.UUID, in ExtraInput, upd authz.Decision) (*Checklist, error) {
+	s.settle(ctx, id)
+	in, err := cleanExtra(in)
+	if err != nil {
+		return nil, err
+	}
+	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		item, _, err := s.lockedExtra(ctx, q, id, &itemID, upd)
+		if err != nil {
+			return err
+		}
+		_, err = q.UpdateExtraDocumentItem(ctx, db.UpdateExtraDocumentItemParams{ID: item.ID, Title: in.Title, Description: in.Description})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.checklistOf(ctx, id, actor)
+}
+
+// DeleteExtraDocument remove o documento adicional e o arquivo dele. Não remove o que já fez parte de uma versão enviada.
+func (s *Service) DeleteExtraDocument(ctx context.Context, actor Actor, id, itemID uuid.UUID, upd authz.Decision) (*Checklist, error) {
+	if err := s.requireStore(); err != nil {
+		return nil, err
+	}
+	s.settle(ctx, id)
+	var keys []string
+	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		item, _, err := s.lockedExtra(ctx, q, id, &itemID, upd)
+		if err != nil {
+			return err
+		}
+		if keys, err = q.ListItemFileKeys(ctx, item.ID); err != nil {
+			return err
+		}
+		_, err = q.DeleteExtraDocumentItem(ctx, item.ID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.deleteObjects(ctx, keys)
+	return s.checklistOf(ctx, id, actor)
 }

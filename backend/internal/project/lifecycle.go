@@ -535,7 +535,7 @@ func (s *Service) copyDocuments(ctx context.Context, q *db.Queries, actor Actor,
 			}
 			amendment = &m
 		}
-		created, err := q.CreateProjectDocumentItemCopy(ctx, db.CreateProjectDocumentItemCopyParams{ProjectID: to, RequirementCode: it.RequirementCode, AmendmentID: amendment, Justification: it.Justification})
+		created, err := q.CreateProjectDocumentItemCopy(ctx, db.CreateProjectDocumentItemCopyParams{ProjectID: to, RequirementCode: it.RequirementCode, AmendmentID: amendment, Justification: it.Justification, Title: it.Title, Description: it.Description})
 		if err != nil {
 			return copied, err
 		}

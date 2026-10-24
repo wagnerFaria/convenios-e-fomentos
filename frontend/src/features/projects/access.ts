@@ -13,6 +13,8 @@ export interface Access {
   step: (s: SectionKey) => boolean;
   /** O documento do checklist pode ser alterado. */
   document: (item: ChecklistItem) => boolean;
+  /** Documentos adicionais: criar (locked = false) ou alterar um existente. Não dependem de a equipe ter devolvido algo. */
+  extra: (locked: boolean) => boolean;
 }
 
 const sectionTarget: Partial<Record<SectionKey, string>> = {
@@ -59,6 +61,7 @@ export function accessOf(project: Project, base: boolean, now: number): Access {
     },
     document: (item) =>
       draft ||
-      (!!open && (returned.has(`document:${documentKey(item)}`) || item.status === 'missing'))
+      (!!open && (returned.has(`document:${documentKey(item)}`) || item.status === 'missing')),
+    extra: (locked) => draft || (!!open && !locked)
   };
 }

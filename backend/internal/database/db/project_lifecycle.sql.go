@@ -254,23 +254,27 @@ func (q *Queries) CreateComplementRequest(ctx context.Context, arg CreateComplem
 }
 
 const createProjectDocumentItemCopy = `-- name: CreateProjectDocumentItemCopy :one
-INSERT INTO project_document_items (project_id, requirement_code, amendment_id, justification)
-VALUES ($1, $2, $4::uuid, $3)
-RETURNING id, project_id, requirement_code, amendment_id, justification, created_at, updated_at
+INSERT INTO project_document_items (project_id, requirement_code, amendment_id, justification, title, description)
+VALUES ($1, $5::text, $6::uuid, $2, $3, $4)
+RETURNING id, project_id, requirement_code, amendment_id, justification, created_at, updated_at, title, description
 `
 
 type CreateProjectDocumentItemCopyParams struct {
 	ProjectID       uuid.UUID  `json:"project_id"`
-	RequirementCode string     `json:"requirement_code"`
 	Justification   string     `json:"justification"`
+	Title           string     `json:"title"`
+	Description     string     `json:"description"`
+	RequirementCode *string    `json:"requirement_code"`
 	AmendmentID     *uuid.UUID `json:"amendment_id"`
 }
 
 func (q *Queries) CreateProjectDocumentItemCopy(ctx context.Context, arg CreateProjectDocumentItemCopyParams) (ProjectDocumentItem, error) {
 	row := q.db.QueryRow(ctx, createProjectDocumentItemCopy,
 		arg.ProjectID,
-		arg.RequirementCode,
 		arg.Justification,
+		arg.Title,
+		arg.Description,
+		arg.RequirementCode,
 		arg.AmendmentID,
 	)
 	var i ProjectDocumentItem
@@ -282,6 +286,8 @@ func (q *Queries) CreateProjectDocumentItemCopy(ctx context.Context, arg CreateP
 		&i.Justification,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Title,
+		&i.Description,
 	)
 	return i, err
 }

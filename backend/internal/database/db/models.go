@@ -396,11 +396,13 @@ type ProjectDeclaration struct {
 type ProjectDocumentItem struct {
 	ID              uuid.UUID  `json:"id"`
 	ProjectID       uuid.UUID  `json:"project_id"`
-	RequirementCode string     `json:"requirement_code"`
+	RequirementCode *string    `json:"requirement_code"`
 	AmendmentID     *uuid.UUID `json:"amendment_id"`
 	Justification   string     `json:"justification"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
+	Title           string     `json:"title"`
+	Description     string     `json:"description"`
 }
 
 type ProjectFile struct {

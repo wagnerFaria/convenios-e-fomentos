@@ -45,6 +45,29 @@ func (q *Queries) ConfirmProjectFile(ctx context.Context, arg ConfirmProjectFile
 	return i, err
 }
 
+const countExtraDocumentItems = `-- name: CountExtraDocumentItems :one
+SELECT count(*) FROM project_document_items WHERE project_id = $1 AND requirement_code IS NULL
+`
+
+// Documentos adicionais (itens sem exigência do catálogo).
+func (q *Queries) CountExtraDocumentItems(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countExtraDocumentItems, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countItemLockedFiles = `-- name: CountItemLockedFiles :one
+SELECT count(*) FROM project_files WHERE item_id = $1 AND locked
+`
+
+func (q *Queries) CountItemLockedFiles(ctx context.Context, itemID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countItemLockedFiles, itemID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countLockedFilesOfRemovedAmendments = `-- name: CountLockedFilesOfRemovedAmendments :one
 SELECT count(*) FROM project_files f JOIN project_document_items i ON i.id = f.item_id
 WHERE i.project_id = $1 AND i.amendment_id IS NOT NULL AND NOT (i.amendment_id = ANY($2::uuid[])) AND f.locked
@@ -74,15 +97,42 @@ func (q *Queries) CountProjectItemFiles(ctx context.Context, itemID uuid.UUID) (
 	return count, err
 }
 
+const createExtraDocumentItem = `-- name: CreateExtraDocumentItem :one
+INSERT INTO project_document_items (project_id, title, description) VALUES ($1, $2, $3) RETURNING id, project_id, requirement_code, amendment_id, justification, created_at, updated_at, title, description
+`
+
+type CreateExtraDocumentItemParams struct {
+	ProjectID   uuid.UUID `json:"project_id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+}
+
+func (q *Queries) CreateExtraDocumentItem(ctx context.Context, arg CreateExtraDocumentItemParams) (ProjectDocumentItem, error) {
+	row := q.db.QueryRow(ctx, createExtraDocumentItem, arg.ProjectID, arg.Title, arg.Description)
+	var i ProjectDocumentItem
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RequirementCode,
+		&i.AmendmentID,
+		&i.Justification,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Title,
+		&i.Description,
+	)
+	return i, err
+}
+
 const createProjectDocumentItem = `-- name: CreateProjectDocumentItem :one
 INSERT INTO project_document_items (project_id, requirement_code, amendment_id)
 VALUES ($1, $2, $3::uuid)
-RETURNING id, project_id, requirement_code, amendment_id, justification, created_at, updated_at
+RETURNING id, project_id, requirement_code, amendment_id, justification, created_at, updated_at, title, description
 `
 
 type CreateProjectDocumentItemParams struct {
 	ProjectID       uuid.UUID  `json:"project_id"`
-	RequirementCode string     `json:"requirement_code"`
+	RequirementCode *string    `json:"requirement_code"`
 	AmendmentID     *uuid.UUID `json:"amendment_id"`
 }
 
@@ -97,8 +147,22 @@ func (q *Queries) CreateProjectDocumentItem(ctx context.Context, arg CreateProje
 		&i.Justification,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Title,
+		&i.Description,
 	)
 	return i, err
+}
+
+const deleteExtraDocumentItem = `-- name: DeleteExtraDocumentItem :execrows
+DELETE FROM project_document_items WHERE id = $1 AND requirement_code IS NULL
+`
+
+func (q *Queries) DeleteExtraDocumentItem(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExtraDocumentItem, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteProjectAmendmentsExcept = `-- name: DeleteProjectAmendmentsExcept :exec
@@ -141,14 +205,40 @@ func (q *Queries) DeleteProjectFile(ctx context.Context, id uuid.UUID) (int64, e
 	return result.RowsAffected(), nil
 }
 
+const getExtraDocumentItem = `-- name: GetExtraDocumentItem :one
+SELECT id, project_id, requirement_code, amendment_id, justification, created_at, updated_at, title, description FROM project_document_items WHERE id = $1 AND project_id = $2 AND requirement_code IS NULL
+`
+
+type GetExtraDocumentItemParams struct {
+	ID        uuid.UUID `json:"id"`
+	ProjectID uuid.UUID `json:"project_id"`
+}
+
+func (q *Queries) GetExtraDocumentItem(ctx context.Context, arg GetExtraDocumentItemParams) (ProjectDocumentItem, error) {
+	row := q.db.QueryRow(ctx, getExtraDocumentItem, arg.ID, arg.ProjectID)
+	var i ProjectDocumentItem
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RequirementCode,
+		&i.AmendmentID,
+		&i.Justification,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Title,
+		&i.Description,
+	)
+	return i, err
+}
+
 const getProjectDocumentItem = `-- name: GetProjectDocumentItem :one
-SELECT id, project_id, requirement_code, amendment_id, justification, created_at, updated_at FROM project_document_items
+SELECT id, project_id, requirement_code, amendment_id, justification, created_at, updated_at, title, description FROM project_document_items
 WHERE project_id = $1 AND requirement_code = $2 AND amendment_id IS NOT DISTINCT FROM $3::uuid
 `
 
 type GetProjectDocumentItemParams struct {
 	ProjectID       uuid.UUID  `json:"project_id"`
-	RequirementCode string     `json:"requirement_code"`
+	RequirementCode *string    `json:"requirement_code"`
 	AmendmentID     *uuid.UUID `json:"amendment_id"`
 }
 
@@ -163,6 +253,8 @@ func (q *Queries) GetProjectDocumentItem(ctx context.Context, arg GetProjectDocu
 		&i.Justification,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Title,
+		&i.Description,
 	)
 	return i, err
 }
@@ -193,7 +285,7 @@ type GetProjectFileRow struct {
 	SupersededAt    *time.Time `json:"superseded_at"`
 	Sha256          *string    `json:"sha256"`
 	ProjectID       uuid.UUID  `json:"project_id"`
-	RequirementCode string     `json:"requirement_code"`
+	RequirementCode *string    `json:"requirement_code"`
 	AmendmentID     *uuid.UUID `json:"amendment_id"`
 }
 
@@ -350,8 +442,33 @@ func (q *Queries) ListDocumentRequirements(ctx context.Context) ([]DocumentRequi
 	return items, nil
 }
 
+const listItemFileKeys = `-- name: ListItemFileKeys :many
+SELECT object_key FROM project_files WHERE item_id = $1
+`
+
+// Todos os arquivos do item (inclusive pendentes e substituídos), para apagar os objetos ao remover o documento.
+func (q *Queries) ListItemFileKeys(ctx context.Context, itemID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listItemFileKeys, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjectDocumentItems = `-- name: ListProjectDocumentItems :many
-SELECT id, project_id, requirement_code, amendment_id, justification, created_at, updated_at FROM project_document_items WHERE project_id = $1
+SELECT id, project_id, requirement_code, amendment_id, justification, created_at, updated_at, title, description FROM project_document_items WHERE project_id = $1
 `
 
 func (q *Queries) ListProjectDocumentItems(ctx context.Context, projectID uuid.UUID) ([]ProjectDocumentItem, error) {
@@ -371,6 +488,8 @@ func (q *Queries) ListProjectDocumentItems(ctx context.Context, projectID uuid.U
 			&i.Justification,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Title,
+			&i.Description,
 		); err != nil {
 			return nil, err
 		}
@@ -458,7 +577,7 @@ type ListProjectFilesRow struct {
 	Locked          bool       `json:"locked"`
 	SupersededAt    *time.Time `json:"superseded_at"`
 	Sha256          *string    `json:"sha256"`
-	RequirementCode string     `json:"requirement_code"`
+	RequirementCode *string    `json:"requirement_code"`
 	AmendmentID     *uuid.UUID `json:"amendment_id"`
 }
 
@@ -550,7 +669,7 @@ func (q *Queries) ProjectFileTotals(ctx context.Context, projectID uuid.UUID) (P
 }
 
 const setProjectDocumentJustification = `-- name: SetProjectDocumentJustification :one
-UPDATE project_document_items SET justification = $2, updated_at = now() WHERE id = $1 RETURNING id, project_id, requirement_code, amendment_id, justification, created_at, updated_at
+UPDATE project_document_items SET justification = $2, updated_at = now() WHERE id = $1 RETURNING id, project_id, requirement_code, amendment_id, justification, created_at, updated_at, title, description
 `
 
 type SetProjectDocumentJustificationParams struct {
@@ -569,6 +688,35 @@ func (q *Queries) SetProjectDocumentJustification(ctx context.Context, arg SetPr
 		&i.Justification,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Title,
+		&i.Description,
+	)
+	return i, err
+}
+
+const updateExtraDocumentItem = `-- name: UpdateExtraDocumentItem :one
+UPDATE project_document_items SET title = $2, description = $3, updated_at = now() WHERE id = $1 AND requirement_code IS NULL RETURNING id, project_id, requirement_code, amendment_id, justification, created_at, updated_at, title, description
+`
+
+type UpdateExtraDocumentItemParams struct {
+	ID          uuid.UUID `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+}
+
+func (q *Queries) UpdateExtraDocumentItem(ctx context.Context, arg UpdateExtraDocumentItemParams) (ProjectDocumentItem, error) {
+	row := q.db.QueryRow(ctx, updateExtraDocumentItem, arg.ID, arg.Title, arg.Description)
+	var i ProjectDocumentItem
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RequirementCode,
+		&i.AmendmentID,
+		&i.Justification,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Title,
+		&i.Description,
 	)
 	return i, err
 }

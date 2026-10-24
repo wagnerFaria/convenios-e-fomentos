@@ -356,9 +356,9 @@ func (s *Service) completeDeclaration(ctx context.Context, rec db.ProjectDeclara
 	}
 	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		item, err := q.GetProjectDocumentItem(ctx, db.GetProjectDocumentItemParams{ProjectID: rec.ProjectID, RequirementCode: rec.RequirementCode})
+		item, err := q.GetProjectDocumentItem(ctx, db.GetProjectDocumentItemParams{ProjectID: rec.ProjectID, RequirementCode: &rec.RequirementCode})
 		if errors.Is(err, pgx.ErrNoRows) {
-			item, err = q.CreateProjectDocumentItem(ctx, db.CreateProjectDocumentItemParams{ProjectID: rec.ProjectID, RequirementCode: rec.RequirementCode})
+			item, err = q.CreateProjectDocumentItem(ctx, db.CreateProjectDocumentItemParams{ProjectID: rec.ProjectID, RequirementCode: &rec.RequirementCode})
 		}
 		if err != nil {
 			return err

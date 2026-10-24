@@ -19,6 +19,7 @@ import { saveDocumentOptions } from '../api/service';
 import type { Access } from '../access';
 import type { ChecklistItem, Project } from '../api/types';
 import { ChecklistItemCard, itemDomId } from './checklist-item';
+import { ExtraDocuments } from './extra-documents';
 import { ServerErrors } from './server-errors';
 
 /** Situações informadas pelo proponente que acrescentam documentos ao checklist. */
@@ -204,6 +205,11 @@ export function DocumentsStep({
               </ul>
             </section>
           ))}
+          <ExtraDocuments
+            projectId={project.id}
+            docs={checklist.data.extraDocuments}
+            access={access}
+          />
           <ContinueBar blockers={blockers} onContinue={onContinue} />
         </>
       )}

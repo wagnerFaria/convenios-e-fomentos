@@ -92,6 +92,10 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(g(ActionUpdate)).Delete("/admin/projects/{id}/declarations/{code}", h.cancelDeclaration)
 	r.With(g(ActionUpdate)).Put("/admin/projects/{id}/documents/{code}/justification", h.putJustification)
 	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/{code}/files", h.requestUpload)
+	r.With(g(ActionUpdate)).Post("/admin/projects/{id}/documents/extra", h.createExtra)
+	r.With(g(ActionUpdate)).Put("/admin/projects/{id}/documents/extra/{itemId}", h.updateExtra)
+	r.With(g(ActionUpdate)).Delete("/admin/projects/{id}/documents/extra/{itemId}", h.deleteExtra)
+	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/extra/{itemId}/files", h.requestExtraUpload)
 	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/files/{fileId}/confirm", h.confirmUpload)
 	r.With(g(ActionRead)).Get("/admin/projects/{id}/documents/files/{fileId}/download", h.download)
 	r.With(g(ActionUpdate)).Delete("/admin/projects/{id}/documents/files/{fileId}", h.deleteFile)
@@ -376,6 +380,92 @@ func (h *Handler) requestUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	upd, _ := admin.DecisionFrom(r.Context())
 	file, up, err := h.svc.RequestUpload(r.Context(), actorOf(r), id, chi.URLParam(r, "code"), in, upd)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusCreated, map[string]any{"file": file, "upload": up}, nil)
+}
+
+func itemIDParam(r *http.Request) (uuid.UUID, error) {
+	id, err := uuid.Parse(chi.URLParam(r, "itemId"))
+	if err != nil {
+		return uuid.Nil, httpapi.ErrNotFound()
+	}
+	return id, nil
+}
+
+func (h *Handler) createExtra(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	var in ExtraInput
+	if err := httpapi.Decode(r, &in); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	upd, _ := admin.DecisionFrom(r.Context())
+	v, err := h.svc.CreateExtraDocument(r.Context(), actorOf(r), id, in, upd)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusCreated, v, nil)
+}
+
+func (h *Handler) updateExtra(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	itemID, err2 := itemIDParam(r)
+	if err != nil || err2 != nil {
+		httpapi.Error(w, r, httpapi.ErrNotFound())
+		return
+	}
+	var in ExtraInput
+	if err := httpapi.Decode(r, &in); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	upd, _ := admin.DecisionFrom(r.Context())
+	v, err := h.svc.UpdateExtraDocument(r.Context(), actorOf(r), id, itemID, in, upd)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+func (h *Handler) deleteExtra(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	itemID, err2 := itemIDParam(r)
+	if err != nil || err2 != nil {
+		httpapi.Error(w, r, httpapi.ErrNotFound())
+		return
+	}
+	upd, _ := admin.DecisionFrom(r.Context())
+	v, err := h.svc.DeleteExtraDocument(r.Context(), actorOf(r), id, itemID, upd)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+func (h *Handler) requestExtraUpload(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	itemID, err2 := itemIDParam(r)
+	if err != nil || err2 != nil {
+		httpapi.Error(w, r, httpapi.ErrNotFound())
+		return
+	}
+	var in FileInput
+	if err := httpapi.Decode(r, &in); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	upd, _ := admin.DecisionFrom(r.Context())
+	file, up, err := h.svc.RequestExtraUpload(r.Context(), actorOf(r), id, itemID, in, upd)
 	if err != nil {
 		httpapi.Error(w, r, err)
 		return
