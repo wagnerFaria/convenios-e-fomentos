@@ -1,8 +1,19 @@
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs/config';
 
+// O Next dev bloqueia o HMR (WebSocket) quando a página é aberta por um host diferente de
+// localhost (ex.: IP da rede local). Libera o host de APP_URL.
+const devOrigin = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_APP_URL ?? '').hostname;
+  } catch {
+    return undefined;
+  }
+})();
+
 // Define the base Next.js configuration
 const baseConfig: NextConfig = {
+  allowedDevOrigins: devOrigin ? [devOrigin] : undefined,
   output: process.env.BUILD_STANDALONE === 'true' ? 'standalone' : undefined,
   transpilePackages: ['geist'],
   compiler: {
