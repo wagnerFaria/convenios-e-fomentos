@@ -55,6 +55,10 @@ const (
 	RoleAuthor     = "author"
 	RoleReviewer   = "department-reviewer"
 	RoleProponent  = authz.ProponentRoleCode
+	// RoleSupervisor também é criado pela migração 00022.
+	RoleSupervisor = "administrative-supervisor"
+	// RoleAnalyst também é criado pela migração 00023.
+	RoleAnalyst = "analyst"
 )
 
 // Departamentos de exemplo.
@@ -115,6 +119,22 @@ func adminRoles() []roleSpec {
 				{Action: document.ActionAdminRead}, {Action: document.ActionAdminFileRead},
 				{Action: document.ActionAdminUpdate, Fields: []string{"status", "observacao_interna"}, Conditions: []string{"admin::same-department"}},
 				{Action: document.ActionAdminPublish, Conditions: []string{"admin::same-department"}},
+			},
+		},
+		{
+			code: RoleAnalyst, name: "Analista", description: "Vê todos os projetos enviados, confere a documentação, pede complementação ao proponente ou arquiva o projeto.", system: true,
+			perms: []authz.Permission{
+				{Action: project.ActionRead}, {Action: project.ActionRequestComplement}, {Action: project.ActionArchive},
+				{Action: catalog.ActionEntityTypesRead}, {Action: catalog.ActionMunicipalitiesRead},
+				{Action: catalog.ActionParliamentariansRead}, {Action: rules.ActionRead},
+			},
+		},
+		{
+			code: RoleSupervisor, name: "Supervisor Administrador", description: "Acompanha todos os projetos enviados e conduz a análise: pede complementação, arquiva ou nega.", system: true,
+			perms: []authz.Permission{
+				{Action: project.ActionRead}, {Action: project.ActionRequestComplement}, {Action: project.ActionArchive}, {Action: project.ActionDeny},
+				{Action: catalog.ActionEntityTypesRead}, {Action: catalog.ActionMunicipalitiesRead},
+				{Action: catalog.ActionParliamentariansRead}, {Action: rules.ActionRead},
 			},
 		},
 	}

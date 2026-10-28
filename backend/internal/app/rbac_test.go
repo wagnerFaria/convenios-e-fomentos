@@ -684,6 +684,9 @@ func TestAguardandoLiberacaoELiberacaoPorSubstituicaoDeRoles(t *testing.T) {
 	e, boss := setup(t)
 	e.mkRole("leitor", "admin::settings.users.read")
 	e.mkRole("redator", "admin::settings.audit-logs.read")
+	// A migração já cria o Proponente (que o primeiro acesso receberia); aqui vale o cenário sem ele.
+	_, err := e.pool.Exec(context.Background(), "DELETE FROM admin_roles WHERE code = 'proponent'")
+	require.NoError(t, err)
 
 	// Quem entra pelo MT Login sem pré-cadastro fica ativo, sem roles e aguardando liberação.
 	maria := e.login("maria@exemplo.com")
@@ -724,6 +727,9 @@ func TestSubstituirRolesRespeitaSuperAdminEEscalonamento(t *testing.T) {
 	e.mkRole("gestor", usersAll...)
 	e.mkRole("poderoso", "admin::settings.audit-logs.read")
 	gestor, _ := e.newAdmin(boss, "gestor@exemplo.com", "gestor")
+	// Maria entraria como Proponente (criado pela migração); o teste parte de quem não tem role nenhuma.
+	_, err := e.pool.Exec(context.Background(), "DELETE FROM admin_roles WHERE code = 'proponent'")
+	require.NoError(t, err)
 	e.login("maria@exemplo.com")
 	maria := e.adminID("maria@exemplo.com")
 	ana := e.adminID("ana@exemplo.com")

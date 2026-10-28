@@ -66,7 +66,9 @@ func TestProponenteLeOsCatalogosMasNaoAdministra(t *testing.T) {
 
 func TestSeedDaARoleDeProponenteAQuemFicouSemNenhuma(t *testing.T) {
 	e := newEnv(t)
-	// Primeiro acesso antes de a role existir: sem roles (a tela "Aguardando liberação").
+	// Primeiro acesso antes de a role existir: sem roles (a tela "Aguardando liberação"). A migração já a cria, então some com ela.
+	_, err := e.pool.Exec(context.Background(), "DELETE FROM admin_roles WHERE code = 'proponent'")
+	require.NoError(t, err)
 	tok := e.token("joao@exemplo.com")
 	me := e.do("GET", "/api/admin/auth/me", nil, tok)
 	require.Equal(t, 200, me.Status)

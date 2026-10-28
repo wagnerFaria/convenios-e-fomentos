@@ -163,6 +163,9 @@ func TestPrimeiroAcessoCriaAdministradorSemRoles(t *testing.T) {
 	var n int
 	require.NoError(t, e.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
 	require.Zero(t, n)
+	// A migração já cria o Proponente (que o primeiro acesso receberia); aqui vale o cenário sem ele.
+	_, err := e.pool.Exec(context.Background(), "DELETE FROM admin_roles WHERE code = 'proponent'")
+	require.NoError(t, err)
 
 	tok := e.token("maria@exemplo.com")
 	me := e.do("GET", "/api/admin/auth/me", nil, tok)
