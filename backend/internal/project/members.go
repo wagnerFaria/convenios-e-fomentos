@@ -45,7 +45,7 @@ type MemberLookup interface {
 	ListMembershipsOfAdmin(ctx context.Context, id uuid.UUID) ([]db.ListMembershipsOfAdminRow, error)
 }
 
-// RegisterConditions registra as condições do compartilhamento. A lista de projetos da pessoa é resolvida a cada requisição, antes
+// RegisterConditions registra as condições do compartilhamento e as de visibilidade da equipe (visibility.go). A lista de projetos da pessoa é resolvida a cada requisição, antes
 // da consulta (um proponente tem poucos projetos), o que mantém o filtro simples e faz a revogação valer na hora.
 func RegisterConditions(reg *authz.ConditionRegistry, members MemberLookup) {
 	handler := func(editOnly bool) authz.Handler {
@@ -67,6 +67,7 @@ func RegisterConditions(reg *authz.ConditionRegistry, members MemberLookup) {
 		authz.Condition{ID: ConditionMember, Name: "É membro do projeto (leitura ou edição)", Category: "default", Handler: handler(false)},
 		authz.Condition{ID: ConditionEditor, Name: "É membro do projeto com edição", Category: "default", Handler: handler(true)},
 	)
+	registerVisibilityConditions(reg)
 }
 
 // Member é uma pessoa com acesso a um projeto. O CPF sai mascarado, e a API não informa se a pessoa tem conta (nem o nome dela).

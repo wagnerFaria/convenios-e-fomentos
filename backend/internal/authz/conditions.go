@@ -28,6 +28,9 @@ func Deny() Result { return Result{filter: FilterFalse()} }
 // Restrict permite apenas os registros que casam com o filtro.
 func Restrict(f Filter) Result { return Result{filter: f} }
 
+// Filter devolve o filtro do resultado. Serve a testes e a quem precisa inspecionar o que a condição restringe.
+func (r Result) Filter() Filter { return r.filter }
+
 // Handler avalia uma condição para o sujeito autenticado.
 type Handler func(ctx context.Context, s Subject) (Result, error)
 
