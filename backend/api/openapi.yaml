@@ -486,8 +486,10 @@ paths:
     get:
       tags: [Departamentos]
       summary: Lista departamentos com a contagem de administradores e documentos
-      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read` (alimenta o seletor de departamento dos administradores). Resposta: `[{id, name, userCount, documentCount}]`."
+      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read` (alimenta o seletor de departamento dos administradores). Resposta: `[{id, name, isFinalistic, userCount, documentCount}]`. Com `finalistic=true`, só as áreas finalísticas."
       security: [{adminBearer: []}]
+      parameters:
+        - {name: finalistic, in: query, required: false, schema: {type: boolean}, description: "true devolve só os departamentos marcados como área finalística (os que podem ser indicados para enquadrar um projeto)."}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
@@ -495,7 +497,7 @@ paths:
     post:
       tags: [Departamentos]
       summary: Cria um departamento
-      description: "Nome único (409 `department_name_taken`). Permissão: `admin::settings.departments.create`."
+      description: "Nome único (409 `department_name_taken`). `isFinalistic` omitido vale falso. Permissão: `admin::settings.departments.create`."
       security: [{adminBearer: []}]
       requestBody:
         required: true
@@ -506,6 +508,7 @@ paths:
               required: [name]
               properties:
                 name: {type: string, maxLength: 100}
+                isFinalistic: {type: boolean, description: "Área finalística: só departamento marcado pode ser indicado para enquadrar um projeto."}
       responses:
         "201": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
@@ -527,8 +530,8 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
     put:
       tags: [Departamentos]
-      summary: Renomeia um departamento
-      description: "Permissão: `admin::settings.departments.update`."
+      summary: Renomeia um departamento e/ou muda o marcador de área finalística
+      description: "`isFinalistic` omitido mantém o valor atual. Desmarcar só afeta indicações novas. Permissão: `admin::settings.departments.update`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -541,6 +544,7 @@ paths:
               required: [name]
               properties:
                 name: {type: string, maxLength: 100}
+                isFinalistic: {type: boolean, description: "Omitido = inalterado."}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}

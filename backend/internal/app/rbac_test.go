@@ -152,7 +152,7 @@ func TestEdicaoDeAdministrador(t *testing.T) {
 	e.mkRole("redator")
 	_, bia := e.newAdmin(boss, "bia@exemplo.com", "redator")
 	_, caio := e.newAdmin(boss, "caio@exemplo.com", "redator")
-	dept, err := db.New(e.pool).UpsertDepartment(context.Background(), "Financeiro")
+	dept, err := db.New(e.pool).UpsertDepartment(context.Background(), db.UpsertDepartmentParams{Name: "Financeiro"})
 	require.NoError(t, err)
 
 	r := e.do("PUT", "/api/admin/users/"+bia, map[string]any{"departmentId": dept.ID.String()}, boss)

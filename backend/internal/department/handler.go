@@ -49,10 +49,12 @@ func idParam(r *http.Request) (uuid.UUID, error) {
 
 type input struct {
 	Name string `json:"name" validate:"required,max=100"`
+	// IsFinalistic é opcional: omitido, a criação vale falso e a atualização mantém o valor atual.
+	IsFinalistic *bool `json:"isFinalistic"`
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	list, err := h.svc.List(r.Context())
+	list, err := h.svc.List(r.Context(), r.URL.Query().Get("finalistic") == "true")
 	if err != nil {
 		httpapi.Error(w, r, err)
 		return
@@ -80,7 +82,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, r, err)
 		return
 	}
-	v, err := h.svc.Create(r.Context(), actor(r), in.Name)
+	v, err := h.svc.Create(r.Context(), actor(r), Input(in))
 	if err != nil {
 		httpapi.Error(w, r, err)
 		return
@@ -99,7 +101,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, r, err)
 		return
 	}
-	v, err := h.svc.Update(r.Context(), actor(r), id, in.Name)
+	v, err := h.svc.Update(r.Context(), actor(r), id, Input(in))
 	if err != nil {
 		httpapi.Error(w, r, err)
 		return

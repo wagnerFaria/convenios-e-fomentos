@@ -118,15 +118,20 @@ const listDepartmentsByName = `-- name: ListDepartmentsByName :many
 SELECT id, name FROM departments WHERE name = ANY($1::text[])
 `
 
-func (q *Queries) ListDepartmentsByName(ctx context.Context, dollar_1 []string) ([]Department, error) {
+type ListDepartmentsByNameRow struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+func (q *Queries) ListDepartmentsByName(ctx context.Context, dollar_1 []string) ([]ListDepartmentsByNameRow, error) {
 	rows, err := q.db.Query(ctx, listDepartmentsByName, dollar_1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Department{}
+	items := []ListDepartmentsByNameRow{}
 	for rows.Next() {
-		var i Department
+		var i ListDepartmentsByNameRow
 		if err := rows.Scan(&i.ID, &i.Name); err != nil {
 			return nil, err
 		}

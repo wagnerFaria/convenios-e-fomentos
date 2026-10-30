@@ -12,13 +12,18 @@ import (
 )
 
 const createDepartment = `-- name: CreateDepartment :one
-INSERT INTO departments (name) VALUES ($1) RETURNING id, name
+INSERT INTO departments (name, is_finalistic) VALUES ($1, $2) RETURNING id, name, is_finalistic
 `
 
-func (q *Queries) CreateDepartment(ctx context.Context, name string) (Department, error) {
-	row := q.db.QueryRow(ctx, createDepartment, name)
+type CreateDepartmentParams struct {
+	Name         string `json:"name"`
+	IsFinalistic bool   `json:"is_finalistic"`
+}
+
+func (q *Queries) CreateDepartment(ctx context.Context, arg CreateDepartmentParams) (Department, error) {
+	row := q.db.QueryRow(ctx, createDepartment, arg.Name, arg.IsFinalistic)
 	var i Department
-	err := row.Scan(&i.ID, &i.Name)
+	err := row.Scan(&i.ID, &i.Name, &i.IsFinalistic)
 	return i, err
 }
 
@@ -35,7 +40,7 @@ func (q *Queries) DeleteDepartment(ctx context.Context, id uuid.UUID) (int64, er
 }
 
 const getDepartmentForUpdate = `-- name: GetDepartmentForUpdate :one
-SELECT id, name FROM departments WHERE id = $1 FOR UPDATE
+SELECT id, name, is_finalistic FROM departments WHERE id = $1 FOR UPDATE
 `
 
 // Trava a linha: inserções/atualizações de administradores e documentos que referenciam o
@@ -43,12 +48,12 @@ SELECT id, name FROM departments WHERE id = $1 FOR UPDATE
 func (q *Queries) GetDepartmentForUpdate(ctx context.Context, id uuid.UUID) (Department, error) {
 	row := q.db.QueryRow(ctx, getDepartmentForUpdate, id)
 	var i Department
-	err := row.Scan(&i.ID, &i.Name)
+	err := row.Scan(&i.ID, &i.Name, &i.IsFinalistic)
 	return i, err
 }
 
 const getDepartmentWithCounts = `-- name: GetDepartmentWithCounts :one
-SELECT d.id, d.name,
+SELECT d.id, d.name, d.is_finalistic,
        (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
        (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
 FROM departments d
@@ -58,6 +63,7 @@ WHERE d.id = $1
 type GetDepartmentWithCountsRow struct {
 	ID            uuid.UUID `json:"id"`
 	Name          string    `json:"name"`
+	IsFinalistic  bool      `json:"is_finalistic"`
 	UserCount     int64     `json:"user_count"`
 	DocumentCount int64     `json:"document_count"`
 }
@@ -68,6 +74,7 @@ func (q *Queries) GetDepartmentWithCounts(ctx context.Context, id uuid.UUID) (Ge
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
+		&i.IsFinalistic,
 		&i.UserCount,
 		&i.DocumentCount,
 	)
@@ -75,7 +82,7 @@ func (q *Queries) GetDepartmentWithCounts(ctx context.Context, id uuid.UUID) (Ge
 }
 
 const listDepartments = `-- name: ListDepartments :many
-SELECT id, name FROM departments ORDER BY name
+SELECT id, name, is_finalistic FROM departments ORDER BY name
 `
 
 func (q *Queries) ListDepartments(ctx context.Context) ([]Department, error) {
@@ -87,7 +94,7 @@ func (q *Queries) ListDepartments(ctx context.Context) ([]Department, error) {
 	items := []Department{}
 	for rows.Next() {
 		var i Department
-		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+		if err := rows.Scan(&i.ID, &i.Name, &i.IsFinalistic); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -99,22 +106,25 @@ func (q *Queries) ListDepartments(ctx context.Context) ([]Department, error) {
 }
 
 const listDepartmentsWithCounts = `-- name: ListDepartmentsWithCounts :many
-SELECT d.id, d.name,
+SELECT d.id, d.name, d.is_finalistic,
        (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
        (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
 FROM departments d
+WHERE (NOT $1::boolean OR d.is_finalistic)
 ORDER BY d.name
 `
 
 type ListDepartmentsWithCountsRow struct {
 	ID            uuid.UUID `json:"id"`
 	Name          string    `json:"name"`
+	IsFinalistic  bool      `json:"is_finalistic"`
 	UserCount     int64     `json:"user_count"`
 	DocumentCount int64     `json:"document_count"`
 }
 
-func (q *Queries) ListDepartmentsWithCounts(ctx context.Context) ([]ListDepartmentsWithCountsRow, error) {
-	rows, err := q.db.Query(ctx, listDepartmentsWithCounts)
+// only_finalistic = true devolve só as áreas finalísticas.
+func (q *Queries) ListDepartmentsWithCounts(ctx context.Context, onlyFinalistic bool) ([]ListDepartmentsWithCountsRow, error) {
+	rows, err := q.db.Query(ctx, listDepartmentsWithCounts, onlyFinalistic)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +135,7 @@ func (q *Queries) ListDepartmentsWithCounts(ctx context.Context) ([]ListDepartme
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
+			&i.IsFinalistic,
 			&i.UserCount,
 			&i.DocumentCount,
 		); err != nil {
@@ -139,30 +150,38 @@ func (q *Queries) ListDepartmentsWithCounts(ctx context.Context) ([]ListDepartme
 }
 
 const updateDepartment = `-- name: UpdateDepartment :one
-UPDATE departments SET name = $2 WHERE id = $1 RETURNING id, name
+UPDATE departments SET name = $1, is_finalistic = $2 WHERE id = $3 RETURNING id, name, is_finalistic
 `
 
 type UpdateDepartmentParams struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
+	Name         string    `json:"name"`
+	IsFinalistic bool      `json:"is_finalistic"`
+	ID           uuid.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateDepartment(ctx context.Context, arg UpdateDepartmentParams) (Department, error) {
-	row := q.db.QueryRow(ctx, updateDepartment, arg.ID, arg.Name)
+	row := q.db.QueryRow(ctx, updateDepartment, arg.Name, arg.IsFinalistic, arg.ID)
 	var i Department
-	err := row.Scan(&i.ID, &i.Name)
+	err := row.Scan(&i.ID, &i.Name, &i.IsFinalistic)
 	return i, err
 }
 
 const upsertDepartment = `-- name: UpsertDepartment :one
-INSERT INTO departments (name) VALUES ($1)
+INSERT INTO departments (name, is_finalistic) VALUES ($1, $2)
 ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-RETURNING id, name
+RETURNING id, name, is_finalistic
 `
 
-func (q *Queries) UpsertDepartment(ctx context.Context, name string) (Department, error) {
-	row := q.db.QueryRow(ctx, upsertDepartment, name)
+type UpsertDepartmentParams struct {
+	Name         string `json:"name"`
+	IsFinalistic bool   `json:"is_finalistic"`
+}
+
+// Cria o departamento com o marcador informado. Se já existe, só confirma o nome: o marcador NÃO é alterado, para um novo seed
+// não desfazer a escolha de quem administra os departamentos.
+func (q *Queries) UpsertDepartment(ctx context.Context, arg UpsertDepartmentParams) (Department, error) {
+	row := q.db.QueryRow(ctx, upsertDepartment, arg.Name, arg.IsFinalistic)
 	var i Department
-	err := row.Scan(&i.ID, &i.Name)
+	err := row.Scan(&i.ID, &i.Name, &i.IsFinalistic)
 	return i, err
 }

@@ -62,6 +62,9 @@ const (
 )
 
 // Departamentos de exemplo.
+// Departments são os departamentos de exemplo. Em desenvolvimento nascem como área finalística; em produção nascem sem a marca,
+// porque quem administra decide quais departamentos recebem projetos para enquadramento. O marcador só vale na criação: um novo
+// seed nunca altera a escolha feita depois.
 var Departments = []string{"Financeiro", "Jurídico"}
 
 const endUserFlag = "seed.enduser-permissions"
@@ -152,7 +155,7 @@ func Run(ctx context.Context, d Deps) error {
 		return fmt.Errorf("padrões de usuário final: %w", err)
 	}
 	for _, name := range Departments {
-		if _, err := q.UpsertDepartment(ctx, name); err != nil {
+		if _, err := q.UpsertDepartment(ctx, db.UpsertDepartmentParams{Name: name, IsFinalistic: d.Development}); err != nil {
 			return fmt.Errorf("departamento %q: %w", name, err)
 		}
 	}

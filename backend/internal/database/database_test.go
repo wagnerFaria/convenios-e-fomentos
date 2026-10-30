@@ -36,9 +36,9 @@ func TestMigracoesEConsultas(t *testing.T) {
 	require.NoError(t, m.Up(ctx), "Up deve ser idempotente")
 
 	q := db.New(pool)
-	d1, err := q.UpsertDepartment(ctx, "Financeiro")
+	d1, err := q.UpsertDepartment(ctx, db.UpsertDepartmentParams{Name: "Financeiro"})
 	require.NoError(t, err)
-	d2, err := q.UpsertDepartment(ctx, "Financeiro")
+	d2, err := q.UpsertDepartment(ctx, db.UpsertDepartmentParams{Name: "Financeiro"})
 	require.NoError(t, err)
 	require.Equal(t, d1.ID, d2.ID)
 

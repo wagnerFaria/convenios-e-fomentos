@@ -14,7 +14,7 @@ import (
 // mkDept cria o departamento (se não existir) e devolve o ID.
 func (e *env) mkDept(name string) string {
 	e.t.Helper()
-	d, err := db.New(e.pool).UpsertDepartment(context.Background(), name)
+	d, err := db.New(e.pool).UpsertDepartment(context.Background(), db.UpsertDepartmentParams{Name: name})
 	require.NoError(e.t, err)
 	return d.ID.String()
 }
@@ -123,8 +123,8 @@ func TestDepartamentosSaoAuditadosEAuditoriaTrazONomeDoAtor(t *testing.T) {
 	}
 	upd := e.do("GET", "/api/admin/audit-logs?action=department.update", nil, boss).list()[0].(map[string]any)
 	payload := upd["payload"].(map[string]any)
-	assert.Equal(t, map[string]any{"name": "TI"}, payload["before"])
-	assert.Equal(t, map[string]any{"name": "Tecnologia"}, payload["after"])
+	assert.Equal(t, map[string]any{"name": "TI", "isFinalistic": false}, payload["before"])
+	assert.Equal(t, map[string]any{"name": "Tecnologia", "isFinalistic": false}, payload["after"])
 
 	// A Ana foi criada sem nome (CLI) e só o primeiro acesso completa os dados: o nome vem do MT Login.
 	assert.Equal(t, "Ana Teste", upd["actorName"])
@@ -139,4 +139,45 @@ func TestDepartamentosSaoAuditadosEAuditoriaTrazONomeDoAtor(t *testing.T) {
 	sys := e.do("GET", "/api/admin/audit-logs?actorType=system", nil, boss).list()
 	require.NotEmpty(t, sys, "EnsureSuperAdmin grava como system")
 	assert.Nil(t, sys[0].(map[string]any)["actorName"])
+}
+
+func TestDepartamentoAreaFinalistica(t *testing.T) {
+	e, boss := setup(t)
+	e.mkDept("Jurídico")
+
+	// Criar sem o campo vale falso; com o campo grava.
+	r := e.do("POST", "/api/admin/departments", map[string]any{"name": "Obras"}, boss)
+	require.Equal(t, 201, r.Status, r.Body)
+	assert.Equal(t, false, r.data()["isFinalistic"])
+	obras := r.data()["id"].(string)
+	r = e.do("POST", "/api/admin/departments", map[string]any{"name": "Cultura", "isFinalistic": true}, boss)
+	require.Equal(t, 201, r.Status, r.Body)
+	assert.Equal(t, true, r.data()["isFinalistic"])
+	cultura := r.data()["id"].(string)
+
+	// O filtro devolve só as áreas finalísticas.
+	r = e.do("GET", "/api/admin/departments?finalistic=true", nil, boss)
+	require.Equal(t, 200, r.Status)
+	require.Len(t, r.list(), 1)
+	assert.Equal(t, "Cultura", r.list()[0].(map[string]any)["name"])
+	assert.Len(t, e.do("GET", "/api/admin/departments", nil, boss).list(), 3, "sem o filtro, todos")
+
+	// PUT sem o campo mantém o valor (um cliente antigo não desmarca sem querer); com o campo, muda.
+	r = e.do("PUT", "/api/admin/departments/"+cultura, map[string]any{"name": "Cultura e Turismo"}, boss)
+	require.Equal(t, 200, r.Status, r.Body)
+	assert.Equal(t, true, r.data()["isFinalistic"], "campo omitido mantém")
+	r = e.do("PUT", "/api/admin/departments/"+obras, map[string]any{"name": "Obras", "isFinalistic": true}, boss)
+	require.Equal(t, 200, r.Status)
+	assert.Equal(t, true, r.data()["isFinalistic"])
+	r = e.do("PUT", "/api/admin/departments/"+cultura, map[string]any{"name": "Cultura e Turismo", "isFinalistic": false}, boss)
+	require.Equal(t, 200, r.Status)
+	assert.Equal(t, false, r.data()["isFinalistic"])
+
+	// A mudança do marcador fica na auditoria, com antes e depois.
+	var before, after bool
+	require.NoError(t, e.pool.QueryRow(context.Background(),
+		`SELECT (payload->'before'->>'isFinalistic')::boolean, (payload->'after'->>'isFinalistic')::boolean
+		 FROM audit_logs WHERE entity = 'department' AND entity_id = $1 AND action = 'department.update' ORDER BY created_at DESC LIMIT 1`, cultura).Scan(&before, &after))
+	assert.True(t, before)
+	assert.False(t, after)
 }

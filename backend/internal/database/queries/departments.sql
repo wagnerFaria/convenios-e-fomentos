@@ -1,20 +1,24 @@
 -- name: ListDepartments :many
-SELECT id, name FROM departments ORDER BY name;
+SELECT id, name, is_finalistic FROM departments ORDER BY name;
 
+-- Cria o departamento com o marcador informado. Se já existe, só confirma o nome: o marcador NÃO é alterado, para um novo seed
+-- não desfazer a escolha de quem administra os departamentos.
 -- name: UpsertDepartment :one
-INSERT INTO departments (name) VALUES ($1)
+INSERT INTO departments (name, is_finalistic) VALUES (sqlc.arg(name), sqlc.arg(is_finalistic))
 ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-RETURNING id, name;
+RETURNING id, name, is_finalistic;
 
+-- only_finalistic = true devolve só as áreas finalísticas.
 -- name: ListDepartmentsWithCounts :many
-SELECT d.id, d.name,
+SELECT d.id, d.name, d.is_finalistic,
        (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
        (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
 FROM departments d
+WHERE (NOT sqlc.arg(only_finalistic)::boolean OR d.is_finalistic)
 ORDER BY d.name;
 
 -- name: GetDepartmentWithCounts :one
-SELECT d.id, d.name,
+SELECT d.id, d.name, d.is_finalistic,
        (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
        (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
 FROM departments d
@@ -23,13 +27,13 @@ WHERE d.id = $1;
 -- Trava a linha: inserções/atualizações de administradores e documentos que referenciam o
 -- departamento esperam a transação terminar.
 -- name: GetDepartmentForUpdate :one
-SELECT id, name FROM departments WHERE id = $1 FOR UPDATE;
+SELECT id, name, is_finalistic FROM departments WHERE id = $1 FOR UPDATE;
 
 -- name: CreateDepartment :one
-INSERT INTO departments (name) VALUES ($1) RETURNING id, name;
+INSERT INTO departments (name, is_finalistic) VALUES (sqlc.arg(name), sqlc.arg(is_finalistic)) RETURNING id, name, is_finalistic;
 
 -- name: UpdateDepartment :one
-UPDATE departments SET name = $2 WHERE id = $1 RETURNING id, name;
+UPDATE departments SET name = sqlc.arg(name), is_finalistic = sqlc.arg(is_finalistic) WHERE id = sqlc.arg(id) RETURNING id, name, is_finalistic;
 
 -- name: DeleteDepartment :execrows
 DELETE FROM departments WHERE id = $1;
