@@ -9,6 +9,8 @@ export const departmentActions = {
 export interface Department {
   id: string;
   name: string;
+  /** Área finalística: só departamento marcado pode ser indicado para enquadrar um projeto. */
+  isFinalistic: boolean;
   userCount: number;
   documentCount: number;
 }

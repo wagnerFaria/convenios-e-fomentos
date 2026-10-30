@@ -9,11 +9,16 @@ export async function listDepartments() {
   return (await apiClient<ApiResponse<Department[]>>(base)).data;
 }
 
-export async function createDepartment(input: { name: string }) {
+export interface DepartmentInput {
+  name: string;
+  isFinalistic: boolean;
+}
+
+export async function createDepartment(input: DepartmentInput) {
   return (await apiClient<ApiResponse<Department>>(base, { method: 'POST', ...json(input) })).data;
 }
 
-export async function updateDepartment(id: string, input: { name: string }) {
+export async function updateDepartment(id: string, input: DepartmentInput) {
   return (
     await apiClient<ApiResponse<Department>>(`${base}/${id}`, { method: 'PUT', ...json(input) })
   ).data;
