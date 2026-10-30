@@ -104,7 +104,7 @@ func TestSeedIdempotenteEEstrutura(t *testing.T) {
 		}
 	}
 	before := snapshot()
-	assert.Equal(t, []int{7, 47, 2, 5, 1, 11, 2, 2}, before, "7 roles de admin (inclui Proponente, Supervisor e Analista) e 47 permissões")
+	assert.Equal(t, []int{8, 54, 2, 9, 1, 11, 2, 2}, before, "8 roles de admin (inclui Proponente, Supervisor, Analista e Secretário), 54 permissões e 9 administradores (o chefe e 8 de desenvolvimento)")
 
 	// Segunda execução: nada novo, e as senhas não são repetidas no log.
 	assert.Empty(t, e.runSeed(true))
@@ -132,7 +132,8 @@ func TestSeedIdempotenteEEstrutura(t *testing.T) {
 	assert.Contains(t, author["admin::content.document.delete"], `["admin::is-creator"]`)
 	assert.NotContains(t, author, "admin::content.document.publish", "Author não publica")
 	rev := perms("department-reviewer")
-	assert.Equal(t, `["observacao_interna", "status"] ["admin::same-department"]`, rev["admin::content.document.update"])
+	assert.NotContains(t, rev, "admin::content.document.update", "o Revisor não tem mais permissões sobre documentos")
+	assert.Equal(t, `null ["admin::project-submitted-same-department"]`, rev["admin::projects.read"], "o Revisor lê só projetos enviados do próprio departamento")
 
 	// Roles de usuário final.
 	endPerms := func(typ string) int {
@@ -157,13 +158,13 @@ func TestSeedIdempotenteEEstrutura(t *testing.T) {
 	require.NoError(t, e2.pool.QueryRow(context.Background(), "SELECT count(*) FROM admins").Scan(&n))
 	assert.Equal(t, 1, n)
 	require.NoError(t, e2.pool.QueryRow(context.Background(), "SELECT count(*) FROM admin_roles").Scan(&n))
-	assert.Equal(t, 7, n)
+	assert.Equal(t, 8, n)
 }
 
 func TestUsuariosDeDesenvolvimentoFuncionam(t *testing.T) {
 	e, _ := setup(t)
 	pw := e.runSeed(true)
-	for _, email := range []string{"super@dev.local", "editor@dev.local", "author@dev.local", "revisor@dev.local"} {
+	for _, email := range []string{"super@dev.local", "editor@dev.local", "author@dev.local", "revisor@dev.local", "revisor.juridico@dev.local", "analista@dev.local", "supervisor@dev.local", "secretario@dev.local"} {
 		me := e.do("GET", "/api/admin/auth/me", nil, e.devToken(email))
 		assert.Equal(t, 200, me.Status, email)
 	}
@@ -324,8 +325,20 @@ func TestAuthorEditaSoOQueCriou(t *testing.T) {
 	assert.Equal(t, "document", upd["subject"])
 }
 
+// grantLegacyReviewerDocs devolve ao Revisor do Departamento as permissões sobre documentos que ele tinha antes da migração 00024.
+// O perfil real não as tem mais, mas a condição same-department e a restrição por campo continuam valendo para qualquer perfil que
+// as receba; estes testes seguem cobrindo isso com o Revisor, que já tem departamento no cadastro.
+func grantLegacyReviewerDocs(e *env) {
+	e.t.Helper()
+	e.grant("department-reviewer", "admin::content.document.read", "", "[]")
+	e.grant("department-reviewer", "admin::content.document.file.read", "", "[]")
+	e.grant("department-reviewer", "admin::content.document.update", `["status","observacao_interna"]`, `["admin::same-department"]`)
+	e.grant("department-reviewer", "admin::content.document.publish", "", `["admin::same-department"]`)
+}
+
 func TestRevisorDoDepartamento(t *testing.T) {
 	e, _, login := seeded(t)
+	grantLegacyReviewerDocs(e)
 	editor, rev := login("editor@dev.local"), login("revisor@dev.local")
 	fin, jur := e.deptID("Financeiro"), e.deptID("Jurídico")
 	a := e.docID(editor, map[string]any{"titulo": "Financeiro 1", "department_id": fin})

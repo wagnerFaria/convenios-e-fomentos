@@ -3,6 +3,7 @@ package database_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -42,6 +43,23 @@ func TestMigracoesEConsultas(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, d1.ID, d2.ID)
 
+	// A 00024 altera permissões direto no banco. O cache do motor não tem prazo de validade, então a migração avisa as instâncias em
+	// execução pelo canal authz_invalidate (lista vazia = recarregar todos os perfis), tanto ao subir quanto ao descer.
+	conn, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+	t.Cleanup(conn.Release)
+	_, err = conn.Exec(ctx, "LISTEN authz_invalidate")
+	require.NoError(t, err)
+	expectInvalidation := func(when string) {
+		t.Helper()
+		wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		n, err := conn.Conn().WaitForNotification(wctx)
+		require.NoError(t, err, "a migração deve avisar o cache ao %s", when)
+		require.Equal(t, "[]", n.Payload)
+	}
 	require.NoError(t, m.Down(ctx))
+	expectInvalidation("descer")
 	require.NoError(t, m.Up(ctx))
+	expectInvalidation("subir")
 }

@@ -544,7 +544,7 @@ func TestCatalogo(t *testing.T) {
 	for _, c := range conds {
 		ids = append(ids, c.(map[string]any)["id"].(string))
 	}
-	assert.Equal(t, []string{"admin::is-creator", "admin::has-same-role-as-creator", "admin::same-department", "admin::project-member", "admin::project-editor"}, ids)
+	assert.Equal(t, []string{"admin::is-creator", "admin::has-same-role-as-creator", "admin::same-department", "admin::project-member", "admin::project-editor", "admin::project-submitted", "admin::project-submitted-same-department"}, ids)
 }
 
 func TestAuditoriaFiltrosEPaginacao(t *testing.T) {

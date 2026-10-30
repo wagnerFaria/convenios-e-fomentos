@@ -96,12 +96,18 @@ Comandos do `Makefile`: `run`, `dev`, `build`, `test`, `test-unit`, `cover-authz
 
 Idempotente e **não destrutivo**: rodar de novo não duplica nada nem desfaz o que os administradores mudaram.
 
-- Roles de admin **Super Admin**, **Editor**, **Author**, **Proponente** (`proponent`) e **Revisor do Departamento**
-  (`department-reviewer`). As permissões padrão só são aplicadas quando a role é criada.
+- Roles de admin **Super Admin**, **Editor**, **Author**, **Proponente** (`proponent`), **Revisor do Departamento**
+  (`department-reviewer`), **Analista** (`analyst`), **Supervisor Administrador** (`administrative-supervisor`) e **Secretário de
+  Estado** (`state-secretary`). As permissões padrão só são aplicadas quando a role é criada; os perfis de equipe vêm das migrações
+  `00022` a `00024` (o seed declara os mesmos valores, e um teste confere que batem).
   - Editor: cria, lê, atualiza, exclui e publica qualquer documento.
   - Author: cria e lê; atualiza e exclui só o que criou (`admin::is-creator`); não publica.
-  - Revisor: lê tudo; só altera `status` e `observacao_interna` dos documentos do próprio departamento
-    (`admin::same-department`) e publica nesse departamento.
+  - Revisor: lê só os projetos enviados do próprio departamento (`admin::project-submitted-same-department`); sem departamento no
+    cadastro, não lê nenhum (403). Não tem mais permissões sobre o módulo genérico de documentos.
+  - Analista: lê projetos enviados, pede complementação e arquiva; lê, edita e exclui departamentos (não cria).
+  - Supervisor Administrador: lê projetos enviados, somente leitura.
+  - Secretário de Estado: lê projetos enviados e nega (arquiva na hora).
+  - A equipe nunca lê rascunho: todas as ações de projeto da equipe levam `admin::project-submitted` (ou a variante com departamento).
   - Proponente: lê os catálogos (tipos de entidade, municípios, parlamentares) e os parâmetros de regras, edita o próprio perfil e
     cria/edita/exclui só os projetos que criou (`admin::is-creator`). Como o conjunto cresce a cada fase, o seed **acrescenta** à role
     existente as permissões padrão que faltam (sem alterar nem remover as que já tem). **Quem entra pelo MT
@@ -109,11 +115,11 @@ Idempotente e **não destrutivo**: rodar de novo não duplica nada nem desfaz o 
     dá a quem já tinha entrado e está sem nenhuma role.
 - Roles de usuário final **Public** (`find`, `findOne`) e **Authenticated** (também `create`, `update`, `delete`), aplicadas uma
   única vez (marcador `seed.enduser-permissions`). Configurações avançadas e templates de e-mail padrão em português.
-- Departamentos de exemplo: Financeiro e Jurídico.
+- Departamentos de exemplo: Financeiro e Jurídico. Em desenvolvimento nascem como **área finalística** (`is_finalistic`); fora dele nascem sem a marca, e quem administra marca os que podem receber projetos para enquadramento. O seed nunca altera a marca de um departamento que já existe.
 - **Cadastros de referência** — tipos de entidade, os 5.571 municípios do IBGE e os parâmetros de regras com os valores das normas —
   são carregados pelo próprio servidor ao subir (`App.Start`), só no que ainda não existe; não precisam do seed.
 - Os Super Admins listados em `SEED_SUPER_ADMIN_CPF` (qualquer ambiente).
-- **Somente com `APP_ENV=development`**: um administrador de exemplo por role (`super@`, `editor@`, `author@`, `revisor@dev.local`)
+- **Somente com `APP_ENV=development`**: um administrador de exemplo por role (`super@`, `editor@`, `author@`, `revisor@` (Financeiro), `revisor.juridico@`, `analista@`, `supervisor@`, `secretario@dev.local`)
   com **CPFs fictícios** (não entram pelo MT Login; `seed.DevUsers`) e o usuário final `usuario@dev.local`, com senha aleatória
   **exibida no log só na primeira execução**.
 - Avisa as instâncias em execução (LISTEN/NOTIFY) para recarregarem as permissões.
