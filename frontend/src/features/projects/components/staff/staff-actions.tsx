@@ -6,7 +6,13 @@ import { Icons } from '@/components/icons';
 import { LoadingButton } from '@/components/ui/loading-button';
 import { useCan } from '@/features/auth/session-provider';
 import { projectKeys } from '../../api/queries';
-import { archiveProject, confirmFraming, refuseFraming, startAnalysis } from '../../api/service';
+import {
+  archiveProject,
+  confirmFraming,
+  denyProject,
+  refuseFraming,
+  startAnalysis
+} from '../../api/service';
 import { projectActions, type Project } from '../../api/types';
 import { AssignDepartmentDialog, ComplementDialog, ConfirmDialog, NoteDialog } from './dialogs';
 import { reportStaffError } from './errors';
@@ -119,12 +125,33 @@ function ReviewerActions({ project }: { project: Project }) {
   );
 }
 
+/** Ação do Secretário de Estado: negar o projeto em qualquer etapa. Arquiva na hora e avisa todos. */
+function SecretaryActions({ project }: { project: Project }) {
+  const can = useCan();
+  if (!can(projectActions.deny) || project.status !== 'submitted') return null;
+  return (
+    <NoteDialog
+      project={project}
+      button={{ label: 'Negar projeto', variant: 'destructive' }}
+      title='Negar o projeto'
+      description='A negação vale em qualquer etapa e dispensa o parecer.'
+      warning='O projeto será arquivado agora, sem volta. O proponente, o Revisor do Departamento (se já houver), o Analista e os Supervisores serão avisados por e-mail.'
+      label='Motivo da negação (obrigatório)'
+      confirmLabel='Negar e arquivar'
+      success='Projeto negado e arquivado.'
+      destructive
+      submit={(note) => denyProject(project.id, note)}
+    />
+  );
+}
+
 /** Barra de ações da equipe sobre o projeto, conforme o perfil, a etapa e a situação do enquadramento. */
 export function StaffActions({ project }: { project: Project }) {
   return (
     <div className='flex flex-wrap items-center gap-2'>
       <AnalystActions project={project} />
       <ReviewerActions project={project} />
+      <SecretaryActions project={project} />
     </div>
   );
 }
