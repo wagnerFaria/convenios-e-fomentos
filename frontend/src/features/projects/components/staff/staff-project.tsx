@@ -21,6 +21,7 @@ import { ProponentStep } from '../proponent-step';
 import { ProposalStep } from '../proposal-step';
 import { HistoryPanel } from './history-panel';
 import { ReviewPanel } from './review-panel';
+import { StaffActions } from './staff-actions';
 import { StaffBanner } from './staff-banner';
 
 // A equipe só lê: os formulários do cadastro abrem em modo somente leitura e nada é salvo.
@@ -94,6 +95,7 @@ export function StaffProjectView({ project }: { project: Project }) {
         {project.analyst && <> · Analista: {project.analyst.name}</>}
       </p>
       <StaffBanner project={project} />
+      <StaffActions project={project} />
 
       <Tabs value={current.key} onValueChange={(v) => void setTab(v)}>
         <TabsList className='h-auto flex-wrap justify-start'>
