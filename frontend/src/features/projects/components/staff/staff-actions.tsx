@@ -6,9 +6,9 @@ import { Icons } from '@/components/icons';
 import { LoadingButton } from '@/components/ui/loading-button';
 import { useCan } from '@/features/auth/session-provider';
 import { projectKeys } from '../../api/queries';
-import { archiveProject, startAnalysis } from '../../api/service';
+import { archiveProject, confirmFraming, refuseFraming, startAnalysis } from '../../api/service';
 import { projectActions, type Project } from '../../api/types';
-import { AssignDepartmentDialog, ComplementDialog, NoteDialog } from './dialogs';
+import { AssignDepartmentDialog, ComplementDialog, ConfirmDialog, NoteDialog } from './dialogs';
 import { reportStaffError } from './errors';
 
 function StartAnalysisButton({ project }: { project: Project }) {
@@ -87,8 +87,44 @@ function AnalystActions({ project }: { project: Project }) {
   );
 }
 
+/** Ações do Revisor do Departamento: decidir o enquadramento pendente. `round` é a rodada que ele está vendo. */
+function ReviewerActions({ project }: { project: Project }) {
+  const can = useCan();
+  const framing = project.framing;
+  if (!can(projectActions.reviewFraming) || project.status !== 'submitted') return null;
+  if (!framing || framing.decision !== 'pending') return null;
+  return (
+    <>
+      <ConfirmDialog
+        project={project}
+        button={{ label: 'Confirmar enquadramento' }}
+        title='Confirmar o enquadramento?'
+        description={`O projeto se enquadra no departamento ${framing.department.name} e passa a aguardar o parecer. Vale a primeira decisão de qualquer Revisor do departamento.`}
+        confirmLabel='Confirmar enquadramento'
+        success='Enquadramento confirmado. O projeto aguarda o parecer.'
+        submit={() => confirmFraming(project.id, framing.round)}
+      />
+      <NoteDialog
+        project={project}
+        button={{ label: 'Recusar enquadramento', variant: 'outline' }}
+        title='Recusar o enquadramento'
+        description={`O projeto não se enquadra no departamento ${framing.department.name}. Ele sai da sua fila e volta ao Analista, que indicará outro departamento. Os Supervisores são avisados.`}
+        label='Justificativa (obrigatória)'
+        confirmLabel='Recusar enquadramento'
+        success='Enquadramento recusado. O projeto voltou ao Analista.'
+        destructive
+        submit={(note) => refuseFraming(project.id, framing.round, note)}
+      />
+    </>
+  );
+}
+
 /** Barra de ações da equipe sobre o projeto, conforme o perfil, a etapa e a situação do enquadramento. */
 export function StaffActions({ project }: { project: Project }) {
-  const actions = <AnalystActions project={project} />;
-  return <div className='flex flex-wrap items-center gap-2'>{actions}</div>;
+  return (
+    <div className='flex flex-wrap items-center gap-2'>
+      <AnalystActions project={project} />
+      <ReviewerActions project={project} />
+    </div>
+  );
 }

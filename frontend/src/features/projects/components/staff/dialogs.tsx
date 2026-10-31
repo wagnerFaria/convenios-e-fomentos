@@ -391,3 +391,58 @@ export function AssignDepartmentDialog({
     </>
   );
 }
+
+/** Confirmação simples de uma ação sem texto (por exemplo, confirmar o enquadramento). */
+export function ConfirmDialog({
+  project,
+  button,
+  title,
+  description,
+  confirmLabel,
+  success,
+  submit
+}: {
+  project: Project;
+  button: OpenButton;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  success: string;
+  submit: () => Promise<Project>;
+}) {
+  const after = useAfterAction(project);
+  const [open, setOpen] = useState(false);
+  const run = useMutation({
+    mutationFn: submit,
+    onSuccess: async (saved) => {
+      await after.saved(saved);
+      toast.success(success);
+      setOpen(false);
+    },
+    onError: async (err) => {
+      await after.failed(err);
+      setOpen(false);
+    }
+  });
+  return (
+    <>
+      <OpenDialogButton button={button} onOpen={() => setOpen(true)} />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setOpen(false)}>
+              Voltar
+            </Button>
+            <LoadingButton loading={run.isPending} onClick={() => run.mutate()}>
+              {confirmLabel}
+            </LoadingButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

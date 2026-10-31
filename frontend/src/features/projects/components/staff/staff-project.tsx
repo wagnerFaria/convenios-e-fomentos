@@ -19,6 +19,7 @@ import { FundingStep } from '../funding-step';
 import { InstitutionStep } from '../institution-step';
 import { ProponentStep } from '../proponent-step';
 import { ProposalStep } from '../proposal-step';
+import { FramingPanel } from './framing-panel';
 import { HistoryPanel } from './history-panel';
 import { ReviewPanel } from './review-panel';
 import { StaffActions } from './staff-actions';
@@ -53,12 +54,18 @@ export function StaffProjectView({ project }: { project: Project }) {
 
   // A conferência é a primeira aba de quem confere; os demais perfis começam pelo cadastro.
   const reviewTab: TabSpec[] = project.review ? [{ key: 'conferencia', label: 'Conferência' }] : [];
+  const framingTab: TabSpec[] =
+    project.status === 'draft' ? [] : [{ key: 'enquadramento', label: 'Enquadramento' }];
   const tabs: TabSpec[] = [
     ...reviewTab,
+    ...framingTab,
     ...registrationTabs,
     { key: 'historico', label: 'Histórico' }
   ];
-  const first = project.review && can(projectActions.reviewItem) ? 'conferencia' : 'proponente';
+  // Cada perfil começa onde trabalha: o Analista na conferência, o Revisor no enquadramento.
+  let first = 'proponente';
+  if (project.review && can(projectActions.reviewItem)) first = 'conferencia';
+  else if (project.framing && can(projectActions.reviewFraming)) first = 'enquadramento';
   const current = tabs.find((t) => t.key === tab) ?? tabs.find((t) => t.key === first) ?? tabs[0];
   const pending = project.review?.summary.pending ?? 0;
   const common = { project, onSaved: noop, onDirty: noop, readOnly: true };
@@ -116,6 +123,9 @@ export function StaffProjectView({ project }: { project: Project }) {
         </TabsList>
         <TabsContent value='conferencia'>
           <ReviewPanel project={project} onGoTab={(t) => void setTab(t)} />
+        </TabsContent>
+        <TabsContent value='enquadramento'>
+          <FramingPanel project={project} />
         </TabsContent>
         <TabsContent value='proponente' className='max-w-3xl'>
           <ProponentStep key={project.version} {...common} />
