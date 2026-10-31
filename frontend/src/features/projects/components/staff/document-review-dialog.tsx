@@ -20,7 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { filePreviewQueryOptions, projectKeys } from '../../api/queries';
-import { getFileDownload, markFileViewed, reviewItem } from '../../api/service';
+import { getFileDownload, markFileRead, markFileViewed, reviewItem } from '../../api/service';
 import type { Project, ReviewDecision, ReviewItem } from '../../api/types';
 import { staffErrorMessage, reportStaffError } from './errors';
 import { DocumentViewer } from './viewer/document-viewer';
@@ -91,6 +91,22 @@ export function DocumentReviewDialog({
     viewed.mutate(file.id);
   };
 
+  // Chegar ao fim do arquivo é a prova para aprovar (o servidor também confere); só ver basta para reprovar.
+  const sentRead = useRef(new Set<string>());
+  const readToEnd = useMutation({
+    mutationFn: (id: string) => markFileRead(project.id, id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.detail(project.id) }),
+    onError: (err, id) => {
+      sentRead.current.delete(id);
+      reportStaffError(err);
+    }
+  });
+  const handleEnd = () => {
+    if (!file || file.read || sentRead.current.has(file.id)) return;
+    sentRead.current.add(file.id);
+    readToEnd.mutate(file.id);
+  };
+
   const decide = useMutation({
     mutationFn: (v: { decision: ReviewDecision; note?: string }) =>
       reviewItem(project.id, { kind: item.kind, target: item.target, ...v }),
@@ -115,8 +131,10 @@ export function DocumentReviewDialog({
   });
 
   const unseen = item.files.filter((f) => !f.opened).length;
+  const unread = item.files.filter((f) => !f.read).length;
   const canDecide = canReview && !item.blocking;
   const mustSee = unseen > 0;
+  const mustRead = unread > 0;
   const download = () =>
     fileId &&
     downloadOriginal(project.id, fileId).catch((err: unknown) => {
@@ -163,13 +181,21 @@ export function DocumentReviewDialog({
                     f.id === fileId ? 'border-primary bg-primary/5' : 'hover:bg-muted'
                   )}
                 >
-                  {f.opened ? (
+                  {f.read ? (
                     <Icons.circleCheck className='size-4 shrink-0 text-green-600' aria-hidden />
+                  ) : f.opened ? (
+                    <Icons.eye className='text-muted-foreground size-4 shrink-0' aria-hidden />
                   ) : (
                     <Icons.circle className='text-muted-foreground size-4 shrink-0' aria-hidden />
                   )}
                   <span className='min-w-0 flex-1 truncate'>{f.filename}</span>
-                  <span className='sr-only'>{f.opened ? 'Visto' : 'Ainda não visto'}</span>
+                  <span className='sr-only'>
+                    {f.read
+                      ? 'Lido até o fim'
+                      : f.opened
+                        ? 'Visto, falta ler até o fim'
+                        : 'Ainda não visto'}
+                  </span>
                 </button>
               ))}
             </nav>
@@ -190,6 +216,7 @@ export function DocumentReviewDialog({
                 preview={preview.data}
                 filename={file.filename}
                 onShown={handleShown}
+                onReachedEnd={handleEnd}
                 onRetry={reload}
                 onDownload={() => void download()}
               />
@@ -223,10 +250,11 @@ export function DocumentReviewDialog({
               </p>
             </div>
           )}
-          {canDecide && mustSee && (
-            <p className='text-muted-foreground text-sm'>
-              Veja {unseen === 1 ? 'o arquivo' : `os ${unseen} arquivos`} que{' '}
-              {unseen === 1 ? 'falta' : 'faltam'} para poder decidir.
+          {canDecide && mustRead && item.status !== 'approved' && (
+            <p className='text-muted-foreground text-sm' aria-live='polite'>
+              {mustSee ? 'Veja os arquivos do documento para poder reprovar. ' : ''}
+              Role até o fim {unread === 1 ? 'do arquivo' : `dos ${unread} arquivos`} para liberar{' '}
+              <strong>Aprovar</strong>.
             </p>
           )}
           <div className='flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end'>
@@ -279,7 +307,7 @@ export function DocumentReviewDialog({
                 {item.status !== 'approved' && (
                   <LoadingButton
                     loading={decide.isPending}
-                    disabled={mustSee}
+                    disabled={mustRead}
                     onClick={() => decide.mutate({ decision: 'approved' })}
                   >
                     Aprovar

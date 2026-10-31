@@ -374,8 +374,10 @@ export type ReviewKind = 'section' | 'document' | 'extra';
 export interface ReviewFile {
   id: string;
   filename: string;
-  /** De quem consulta: cada Analista vê os arquivos que ele mesmo viu no visualizador. */
+  /** De quem consulta: cada Analista vê os arquivos que ele mesmo viu no visualizador (a primeira página apareceu). */
   opened: boolean;
+  /** Chegou ao fim do arquivo: é o que libera "Aprovar" (reprovar só pede ter visto). */
+  read: boolean;
 }
 
 /** Decisão sobre um item da conferência; `pending` desfaz. */

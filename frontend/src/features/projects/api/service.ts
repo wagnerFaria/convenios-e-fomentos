@@ -160,6 +160,11 @@ export async function markFileViewed(id: string, fileId: string) {
   await apiClient<void>(`${docs(id)}/files/${fileId}/viewed`, { method: 'POST' });
 }
 
+/** Registra que quem consulta rolou até o fim do arquivo: é a prova exigida para aprovar o documento. */
+export async function markFileRead(id: string, fileId: string) {
+  await apiClient<void>(`${docs(id)}/files/${fileId}/read`, { method: 'POST' });
+}
+
 export async function deleteProjectFile(id: string, fileId: string) {
   await apiClient<void>(`${docs(id)}/files/${fileId}`, { method: 'DELETE' });
 }

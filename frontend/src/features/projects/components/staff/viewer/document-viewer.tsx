@@ -16,12 +16,14 @@ export function DocumentViewer({
   preview,
   filename,
   onShown,
+  onReachedEnd,
   onRetry,
   onDownload
 }: {
   preview: FilePreview;
   filename: string;
   onShown: () => void;
+  onReachedEnd: () => void;
   onRetry: () => void;
   onDownload: () => void;
 }) {
@@ -32,6 +34,7 @@ export function DocumentViewer({
         url={preview.url}
         filename={filename}
         onShown={onShown}
+        onReachedEnd={onReachedEnd}
         onRetry={onRetry}
         onDownload={onDownload}
       />
@@ -42,6 +45,7 @@ export function DocumentViewer({
       key={preview.url}
       url={preview.url}
       onShown={onShown}
+      onReachedEnd={onReachedEnd}
       onRetry={onRetry}
       onDownload={onDownload}
     />

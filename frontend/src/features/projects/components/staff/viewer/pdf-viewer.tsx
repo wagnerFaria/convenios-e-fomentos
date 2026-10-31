@@ -103,11 +103,14 @@ function LazyPage({ pageNumber, width, estimatedHeight, root, onRendered }: Lazy
 export function PdfViewer({
   url,
   onShown,
+  onReachedEnd,
   onRetry,
   onDownload
 }: {
   url: string;
   onShown: () => void;
+  /** Avisa uma vez que a pessoa chegou ao fim do documento (última página desenhada e rolagem no fim). */
+  onReachedEnd: () => void;
   onRetry: () => void;
   onDownload: () => void;
 }) {
@@ -119,6 +122,9 @@ export function PdfViewer({
   const [current, setCurrent] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const shown = useRef(false);
+  const ended = useRef(false);
+  const lastRendered = useRef(false);
+  const pagesRef = useRef(0);
   const file = useMemo(() => ({ url }), [url]);
 
   useEffect(() => {
@@ -140,6 +146,14 @@ export function PdfViewer({
     setCurrent(best);
   }, [root]);
 
+  const checkEnd = useCallback(() => {
+    if (ended.current || !root || !lastRendered.current) return;
+    if (root.scrollTop + root.clientHeight >= root.scrollHeight - 24) {
+      ended.current = true;
+      onReachedEnd();
+    }
+  }, [root, onReachedEnd]);
+
   const goTo = (page: number) => {
     const target = Math.min(Math.max(page, 1), pages);
     root?.querySelector<HTMLElement>(`[data-page="${target}"]`)?.scrollIntoView({ block: 'start' });
@@ -152,8 +166,12 @@ export function PdfViewer({
         shown.current = true;
         onShown();
       }
+      if (pageNumber === pagesRef.current) {
+        lastRendered.current = true;
+        checkEnd();
+      }
     },
-    [onShown]
+    [onShown, checkEnd]
   );
 
   const width = Math.max(200, (areaWidth - PADDING * 2) * zoom);
@@ -185,7 +203,10 @@ export function PdfViewer({
       </ViewerToolbar>
       <div
         ref={setRoot}
-        onScroll={track}
+        onScroll={() => {
+          track();
+          checkEnd();
+        }}
         // Região rolável precisa de foco para rolar pelo teclado (WCAG 2.1.1).
         // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
@@ -203,6 +224,7 @@ export function PdfViewer({
             error={null}
             noData={null}
             onLoadSuccess={async (pdf) => {
+              pagesRef.current = pdf.numPages;
               setPages(pdf.numPages);
               const first = await pdf.getPage(1);
               const v = first.getViewport({ scale: 1 });

@@ -23,6 +23,11 @@ export function staffErrorMessage(err: unknown): string {
         const names = files.map((f) => f.filename).join(', ');
         return `Visualize todos os arquivos deste documento antes de decidir.${names ? ` Faltam: ${names}.` : ''}`;
       }
+      case 'file_not_read': {
+        const files = Array.isArray(d.files) ? (d.files as { filename: string }[]) : [];
+        const names = files.map((f) => f.filename).join(', ');
+        return `Role até o fim de cada arquivo antes de aprovar.${names ? ` Faltam: ${names}.` : ''}`;
+      }
       case 'review_incomplete': {
         const pending = Number(d.pending ?? 0);
         const rejected = Number(d.rejected ?? 0);

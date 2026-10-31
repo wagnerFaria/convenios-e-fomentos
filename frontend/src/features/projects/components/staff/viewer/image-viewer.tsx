@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ViewerError } from './viewer-error';
 import { ViewerToolbar } from './viewer-toolbar';
@@ -10,25 +10,44 @@ export function ImageViewer({
   url,
   filename,
   onShown,
+  onReachedEnd,
   onRetry,
   onDownload
 }: {
   url: string;
   filename: string;
   onShown: () => void;
+  /** Avisa uma vez que a imagem foi vista por inteiro (cabe na área ou a rolagem chegou ao fim). */
+  onReachedEnd: () => void;
   onRetry: () => void;
   onDownload: () => void;
 }) {
   const [zoom, setZoom] = useState(1);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const area = useRef<HTMLDivElement>(null);
+  const ended = useRef(false);
+
+  const checkEnd = () => {
+    const el = area.current;
+    if (ended.current || !el) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
+      ended.current = true;
+      onReachedEnd();
+    }
+  };
 
   return (
     <div className='flex h-full min-h-0 flex-col'>
       <ViewerToolbar zoom={zoom} onZoom={setZoom} />
-      {/* Região rolável precisa de foco para rolar pelo teclado (WCAG 2.1.1). */}
-      {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
-      <div className='bg-muted/40 min-h-0 flex-1 overflow-auto p-4' tabIndex={0}>
+      <div
+        ref={area}
+        onScroll={checkEnd}
+        className='bg-muted/40 min-h-0 flex-1 overflow-auto p-4'
+        // Região rolável precisa de foco para rolar pelo teclado (WCAG 2.1.1).
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={0}
+      >
         {failed ? (
           <ViewerError
             message='Não foi possível exibir a imagem. O link pode ter expirado.'
@@ -45,6 +64,8 @@ export function ImageViewer({
               onLoad={() => {
                 setLoaded(true);
                 onShown();
+                // O layout só assenta depois do onLoad: confere o fim no quadro seguinte.
+                requestAnimationFrame(checkEnd);
               }}
               onError={() => setFailed(true)}
               style={{ width: `${zoom * 100}%`, maxWidth: zoom === 1 ? '100%' : 'none' }}
