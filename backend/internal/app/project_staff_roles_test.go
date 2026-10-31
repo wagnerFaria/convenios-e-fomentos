@@ -182,6 +182,17 @@ func TestMatrizDeDecisaoDaEquipe(t *testing.T) {
 			assert.Equal(t, 403, deny(tok, shared.id), "%s: negar", name)
 		}
 	})
+	t.Run("a equipe só lê o cadastro: nenhuma seção é gravada por ela", func(t *testing.T) {
+		for name, tok := range map[string]string{
+			"analista": staff.analyst, "secretário": staff.secretary, "supervisor": staff.supervisor,
+			"revisor do mesmo departamento": staff.reviewerSame,
+		} {
+			for _, section := range []string{"proponent", "institution", "proposal", "funding", "document-options"} {
+				assert.Equal(t, 403, p.do("PUT", "/api/admin/projects/"+shared.id+"/"+section, map[string]any{}, tok).Status,
+					"%s: %s", name, section)
+			}
+		}
+	})
 	t.Run("o Analista não nega e o Secretário não devolve nem arquiva", func(t *testing.T) {
 		assert.Equal(t, 403, deny(staff.analyst, shared.id))
 		assert.Equal(t, 403, complement(staff.secretary, shared.id))
