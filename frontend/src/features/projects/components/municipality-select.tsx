@@ -13,6 +13,7 @@ import {
   CommandList
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useFormReadOnly } from '@/lib/form-context';
 import { cn } from '@/lib/utils';
 import { municipalitiesByUfQueryOptions } from '@/features/municipalities/api/queries';
 
@@ -30,6 +31,7 @@ export function MunicipalitySelect({
   onChange: (ibgeCode: string) => void;
   invalid?: boolean;
 }) {
+  const readOnly = useFormReadOnly();
   const [open, setOpen] = useState(false);
   const list = useQuery(municipalitiesByUfQueryOptions(uf));
   const selected = list.data?.find((m) => m.ibgeCode === value);
@@ -42,7 +44,7 @@ export function MunicipalitySelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        disabled={!uf || list.isLoading}
+        disabled={readOnly || !uf || list.isLoading}
         render={
           <Button
             id={id}

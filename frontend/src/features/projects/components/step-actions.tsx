@@ -19,6 +19,8 @@ export function StepActions({
   last?: boolean;
   disabled?: boolean;
 }) {
+  // Sem permissão de gravar, não há o que salvar: os botões nem aparecem.
+  if (disabled) return null;
   return (
     <div className='flex flex-wrap gap-2 pt-2'>
       <LoadingButton type='submit' loading={saving} disabled={saving || disabled} onClick={onSave}>

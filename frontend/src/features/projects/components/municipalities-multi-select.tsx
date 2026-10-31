@@ -14,6 +14,7 @@ import {
   CommandList
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useFormReadOnly } from '@/lib/form-context';
 import { cn } from '@/lib/utils';
 import { municipalitiesByUfQueryOptions } from '@/features/municipalities/api/queries';
 
@@ -29,6 +30,7 @@ export function MunicipalitiesMultiSelect({
   value: string[];
   onChange: (codes: string[]) => void;
 }) {
+  const readOnly = useFormReadOnly();
   const [open, setOpen] = useState(false);
   const list = useQuery(municipalitiesByUfQueryOptions('MT'));
   const names = new Map(list.data?.map((m) => [m.ibgeCode, m.name]));
@@ -40,7 +42,7 @@ export function MunicipalitiesMultiSelect({
     <div className='space-y-2'>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          disabled={list.isLoading}
+          disabled={readOnly || list.isLoading}
           render={
             <Button
               id={id}
@@ -90,14 +92,16 @@ export function MunicipalitiesMultiSelect({
             <li key={code}>
               <Badge variant='secondary' className='gap-1 pr-1'>
                 {names.get(code) ?? code}
-                <button
-                  type='button'
-                  onClick={() => toggle(code)}
-                  aria-label={`Remover ${names.get(code) ?? code}`}
-                  className='hover:bg-muted-foreground/20 rounded-sm p-0.5'
-                >
-                  <Icons.close className='h-3 w-3' aria-hidden />
-                </button>
+                {!readOnly && (
+                  <button
+                    type='button'
+                    onClick={() => toggle(code)}
+                    aria-label={`Remover ${names.get(code) ?? code}`}
+                    className='hover:bg-muted-foreground/20 rounded-sm p-0.5'
+                  >
+                    <Icons.close className='h-3 w-3' aria-hidden />
+                  </button>
+                )}
               </Badge>
             </li>
           ))}

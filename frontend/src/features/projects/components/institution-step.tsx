@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { entityTypesQueryOptions } from '@/features/entity-types/api/queries';
 import { UFS } from '@/features/municipalities/api/queries';
+import { ReadOnlyScope } from '@/components/forms/read-only-scope';
 import { useAppForm } from '@/lib/form';
 import { projectKeys } from '../api/queries';
 import { saveInstitution } from '../api/service';
@@ -89,7 +90,8 @@ export function InstitutionStep({
 
   const form = useAppForm({
     defaultValues: defaults(),
-    onSubmit: ({ value }) => save.mutateAsync(value).catch(() => undefined)
+    // Somente leitura (a equipe, ou projeto que o proponente não pode mais alterar): nada é enviado ao servidor.
+    onSubmit: ({ value }) => (readOnly ? undefined : save.mutateAsync(value).catch(() => undefined))
   });
   const dirty = useStore(form.store, (s) => s.isDirty);
   useEffect(() => onDirty(dirty), [dirty, onDirty]);
@@ -113,211 +115,213 @@ export function InstitutionStep({
         void form.handleSubmit();
       }}
     >
-      <FieldGroup>
-        <form.AppField
-          name='instrument'
-          children={(f) => (
-            <f.RadioGroupField
-              label='Instrumento'
-              required
-              description='Convênio: parceria com órgão ou entidade pública (também aceito para entidade privada). Termo de Fomento: somente para organização da sociedade civil sem fins lucrativos.'
-              options={instrumentOptions}
-            />
-          )}
-        />
-        <form.AppField
-          name='cnpj'
-          children={(f) => (
-            <f.TextField
-              label='CNPJ'
-              required
-              inputMode='numeric'
-              placeholder='00.000.000/0000-00'
-            />
-          )}
-        />
-        <form.AppField
-          name='name'
-          children={(f) => (
-            <f.TextField label='Nome do órgão ou instituição' required maxLength={200} />
-          )}
-        />
-        <form.AppField
-          name='entityTypeId'
-          children={(f) => (
-            <f.SelectField
-              label='Tipo de entidade'
-              required
-              placeholder='Escolha o tipo'
-              options={options}
-            />
-          )}
-        />
-        {isOther && (
-          <>
-            <form.AppField
-              name='entityTypeOther'
-              children={(f) => (
-                <f.TextField
-                  label='Qual o tipo de entidade?'
-                  required
-                  maxLength={100}
-                  description='Descreva por extenso.'
-                />
-              )}
-            />
-            <form.AppField
-              name='nature'
-              children={(f) => (
-                <f.SelectField
-                  label='Natureza'
-                  required
-                  placeholder='Pública ou privada'
-                  options={natureOptions}
-                />
-              )}
-            />
-            {values.nature === 'private' && (
+      <ReadOnlyScope readOnly={readOnly}>
+        <FieldGroup>
+          <form.AppField
+            name='instrument'
+            children={(f) => (
+              <f.RadioGroupField
+                label='Instrumento'
+                required
+                description='Convênio: parceria com órgão ou entidade pública (também aceito para entidade privada). Termo de Fomento: somente para organização da sociedade civil sem fins lucrativos.'
+                options={instrumentOptions}
+              />
+            )}
+          />
+          <form.AppField
+            name='cnpj'
+            children={(f) => (
+              <f.TextField
+                label='CNPJ'
+                required
+                inputMode='numeric'
+                placeholder='00.000.000/0000-00'
+              />
+            )}
+          />
+          <form.AppField
+            name='name'
+            children={(f) => (
+              <f.TextField label='Nome do órgão ou instituição' required maxLength={200} />
+            )}
+          />
+          <form.AppField
+            name='entityTypeId'
+            children={(f) => (
+              <f.SelectField
+                label='Tipo de entidade'
+                required
+                placeholder='Escolha o tipo'
+                options={options}
+              />
+            )}
+          />
+          {isOther && (
+            <>
               <form.AppField
-                name='nonProfit'
+                name='entityTypeOther'
                 children={(f) => (
-                  <f.SwitchField
-                    label='Sem fins lucrativos'
-                    description='Necessário para o Termo de Fomento.'
+                  <f.TextField
+                    label='Qual o tipo de entidade?'
+                    required
+                    maxLength={100}
+                    description='Descreva por extenso.'
                   />
                 )}
               />
-            )}
-          </>
-        )}
-        {chosen && !isOther && (
-          <p className='text-muted-foreground text-sm'>
-            Natureza:{' '}
-            {chosen.nature === 'public'
-              ? 'pública'
-              : chosen.nonProfit
-                ? 'privada, sem fins lucrativos'
-                : 'privada'}
-            .
-          </p>
-        )}
-        {fomentoBlocked && (
-          <Alert variant='destructive'>
-            <AlertDescription>
-              O Termo de Fomento só pode ser firmado por entidade privada sem fins lucrativos. Para
-              esta entidade, escolha Convênio.
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <div className='grid gap-4 sm:grid-cols-[8rem_1fr]'>
-          <form.AppField
-            name='uf'
-            children={(f) => (
-              <f.SelectField label='UF da sede' required placeholder='UF' options={ufOptions} />
-            )}
-          />
-          <form.Field
-            name='municipalityIbge'
-            children={(f) => (
-              <Field>
-                <FieldLabel htmlFor='institution-municipality'>Município da sede *</FieldLabel>
-                <MunicipalitySelect
-                  id='institution-municipality'
-                  uf={values.uf}
-                  value={f.state.value}
-                  onChange={f.handleChange}
-                />
-                <FieldDescription>
-                  Pode ser de qualquer estado; a execução do projeto é que precisa ser em Mato
-                  Grosso.
-                </FieldDescription>
-              </Field>
-            )}
-          />
-        </div>
-        <div className='grid gap-4 sm:grid-cols-[10rem_1fr_8rem]'>
-          <form.AppField
-            name='zip'
-            children={(f) => (
-              <f.TextField label='CEP' required inputMode='numeric' placeholder='00000-000' />
-            )}
-          />
-          <form.AppField
-            name='street'
-            children={(f) => <f.TextField label='Logradouro' required maxLength={150} />}
-          />
-          <form.AppField
-            name='number'
-            children={(f) => <f.TextField label='Número' required maxLength={20} />}
-          />
-        </div>
-        <div className='grid gap-4 sm:grid-cols-2'>
-          <form.AppField
-            name='complement'
-            children={(f) => <f.TextField label='Complemento' maxLength={100} />}
-          />
-          <form.AppField
-            name='district'
-            children={(f) => <f.TextField label='Bairro' required maxLength={100} />}
-          />
-        </div>
-        <div className='grid gap-4 sm:grid-cols-2'>
-          <form.AppField
-            name='email'
-            children={(f) => <f.TextField label='E-mail institucional' type='email' required />}
-          />
-          <form.AppField
-            name='phone'
-            children={(f) => (
-              <f.TextField
-                label='Telefone institucional'
-                required
-                inputMode='tel'
-                placeholder='(65) 3333-4444'
+              <form.AppField
+                name='nature'
+                children={(f) => (
+                  <f.SelectField
+                    label='Natureza'
+                    required
+                    placeholder='Pública ou privada'
+                    options={natureOptions}
+                  />
+                )}
               />
-            )}
-          />
-        </div>
-
-        <fieldset className='space-y-4 rounded-lg border p-4'>
-          <legend className='px-1 text-sm font-medium'>Certidão de Habilitação do SIGCon</legend>
-          <p className='text-muted-foreground text-sm'>
-            A habilitação é feita na SEFAZ, pelo SIFI/MT. Para dar entrada é preciso ter a Certidão
-            de Habilitação <strong>Plena</strong>; o arquivo da certidão é anexado na etapa de
-            documentos.
-          </p>
-          <div className='grid gap-4 sm:grid-cols-3'>
-            <form.AppField
-              name='habilitationStatus'
-              children={(f) => (
-                <f.SelectField
-                  label='Situação'
-                  required
-                  placeholder='Plena ou parcial'
-                  options={habilitationOptions}
+              {values.nature === 'private' && (
+                <form.AppField
+                  name='nonProfit'
+                  children={(f) => (
+                    <f.SwitchField
+                      label='Sem fins lucrativos'
+                      description='Necessário para o Termo de Fomento.'
+                    />
+                  )}
                 />
+              )}
+            </>
+          )}
+          {chosen && !isOther && (
+            <p className='text-muted-foreground text-sm'>
+              Natureza:{' '}
+              {chosen.nature === 'public'
+                ? 'pública'
+                : chosen.nonProfit
+                  ? 'privada, sem fins lucrativos'
+                  : 'privada'}
+              .
+            </p>
+          )}
+          {fomentoBlocked && (
+            <Alert variant='destructive'>
+              <AlertDescription>
+                O Termo de Fomento só pode ser firmado por entidade privada sem fins lucrativos.
+                Para esta entidade, escolha Convênio.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <div className='grid gap-4 sm:grid-cols-[8rem_1fr]'>
+            <form.AppField
+              name='uf'
+              children={(f) => (
+                <f.SelectField label='UF da sede' required placeholder='UF' options={ufOptions} />
+              )}
+            />
+            <form.Field
+              name='municipalityIbge'
+              children={(f) => (
+                <Field>
+                  <FieldLabel htmlFor='institution-municipality'>Município da sede *</FieldLabel>
+                  <MunicipalitySelect
+                    id='institution-municipality'
+                    uf={values.uf}
+                    value={f.state.value}
+                    onChange={f.handleChange}
+                  />
+                  <FieldDescription>
+                    Pode ser de qualquer estado; a execução do projeto é que precisa ser em Mato
+                    Grosso.
+                  </FieldDescription>
+                </Field>
+              )}
+            />
+          </div>
+          <div className='grid gap-4 sm:grid-cols-[10rem_1fr_8rem]'>
+            <form.AppField
+              name='zip'
+              children={(f) => (
+                <f.TextField label='CEP' required inputMode='numeric' placeholder='00000-000' />
               )}
             />
             <form.AppField
-              name='habilitationNumber'
-              children={(f) => <f.TextField label='Número da certidão' required maxLength={50} />}
+              name='street'
+              children={(f) => <f.TextField label='Logradouro' required maxLength={150} />}
             />
             <form.AppField
-              name='habilitationValidUntil'
-              children={(f) => <f.TextField label='Válida até' type='date' required />}
+              name='number'
+              children={(f) => <f.TextField label='Número' required maxLength={20} />}
             />
           </div>
-        </fieldset>
+          <div className='grid gap-4 sm:grid-cols-2'>
+            <form.AppField
+              name='complement'
+              children={(f) => <f.TextField label='Complemento' maxLength={100} />}
+            />
+            <form.AppField
+              name='district'
+              children={(f) => <f.TextField label='Bairro' required maxLength={100} />}
+            />
+          </div>
+          <div className='grid gap-4 sm:grid-cols-2'>
+            <form.AppField
+              name='email'
+              children={(f) => <f.TextField label='E-mail institucional' type='email' required />}
+            />
+            <form.AppField
+              name='phone'
+              children={(f) => (
+                <f.TextField
+                  label='Telefone institucional'
+                  required
+                  inputMode='tel'
+                  placeholder='(65) 3333-4444'
+                />
+              )}
+            />
+          </div>
 
-        <ServerErrors error={save.error} />
-        <StepActions
-          saving={save.isPending}
-          disabled={readOnly}
-          onSave={() => (advance.current = false)}
-          onSaveAndContinue={() => (advance.current = true)}
-        />
-      </FieldGroup>
+          <fieldset className='space-y-4 rounded-lg border p-4'>
+            <legend className='px-1 text-sm font-medium'>Certidão de Habilitação do SIGCon</legend>
+            <p className='text-muted-foreground text-sm'>
+              A habilitação é feita na SEFAZ, pelo SIFI/MT. Para dar entrada é preciso ter a
+              Certidão de Habilitação <strong>Plena</strong>; o arquivo da certidão é anexado na
+              etapa de documentos.
+            </p>
+            <div className='grid gap-4 sm:grid-cols-3'>
+              <form.AppField
+                name='habilitationStatus'
+                children={(f) => (
+                  <f.SelectField
+                    label='Situação'
+                    required
+                    placeholder='Plena ou parcial'
+                    options={habilitationOptions}
+                  />
+                )}
+              />
+              <form.AppField
+                name='habilitationNumber'
+                children={(f) => <f.TextField label='Número da certidão' required maxLength={50} />}
+              />
+              <form.AppField
+                name='habilitationValidUntil'
+                children={(f) => <f.TextField label='Válida até' type='date' required />}
+              />
+            </div>
+          </fieldset>
+
+          <ServerErrors error={save.error} />
+          <StepActions
+            saving={save.isPending}
+            disabled={readOnly}
+            onSave={() => (advance.current = false)}
+            onSaveAndContinue={() => (advance.current = true)}
+          />
+        </FieldGroup>
+      </ReadOnlyScope>
     </form>
   );
 }

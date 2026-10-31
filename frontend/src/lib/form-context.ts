@@ -1,6 +1,7 @@
 'use client';
 
 import { createFormHookContexts } from '@tanstack/react-form';
+import { createContext, useContext } from 'react';
 
 export const { fieldContext, formContext, useFieldContext, useFormContext } =
   createFormHookContexts();
@@ -21,3 +22,13 @@ export type BaseFieldProps = {
   /** Appends ' *' to the label. Purely visual — rules live in the schema. */
   required?: boolean;
 };
+
+const FormReadOnlyContext = createContext(false);
+
+/** Provider do modo somente leitura; use `ReadOnlyScope` (components/forms/read-only-scope) para ligar um formulário inteiro. */
+export const FormReadOnlyProvider = FormReadOnlyContext.Provider;
+
+/** O formulário está só para leitura: os campos mostram o valor, mas não deixam alterá-lo. */
+export function useFormReadOnly() {
+  return useContext(FormReadOnlyContext);
+}
