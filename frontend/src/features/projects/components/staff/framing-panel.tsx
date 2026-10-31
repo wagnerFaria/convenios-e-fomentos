@@ -2,8 +2,8 @@
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatDateTime } from '@/lib/format';
 import { framingDecisionLabels, type Framing, type Project } from '../../api/types';
+import { formatDateTimeCuiaba } from '../../format';
 
 function FramingRow({ f, current }: { f: Framing; current: boolean }) {
   return (
@@ -18,10 +18,10 @@ function FramingRow({ f, current }: { f: Framing; current: boolean }) {
         {current && <Badge variant='outline'>Em curso</Badge>}
       </div>
       <p className='text-muted-foreground text-xs'>
-        Indicado por {f.indicatedBy || '—'} em {formatDateTime(f.indicatedAt)}
+        Indicado por {f.indicatedBy || '—'} em {formatDateTimeCuiaba(f.indicatedAt)}
         {f.decidedAt && (
           <>
-            {' · '}decidido por {f.decidedBy || '—'} em {formatDateTime(f.decidedAt)}
+            {' · '}decidido por {f.decidedBy || '—'} em {formatDateTimeCuiaba(f.decidedAt)}
           </>
         )}
       </p>

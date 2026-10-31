@@ -2,8 +2,8 @@
 
 import { Icons } from '@/components/icons';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { formatDateTime } from '@/lib/format';
 import { archiveReasonLabels, type Project } from '../../api/types';
+import { formatDateTimeCuiaba } from '../../format';
 
 /** Faixa de situação do projeto para a equipe: arquivamento, correções com o proponente, decisão do departamento ou parecer. */
 export function StaffBanner({ project }: { project: Project }) {
@@ -15,7 +15,9 @@ export function StaffBanner({ project }: { project: Project }) {
         <Icons.alertCircle aria-hidden />
         <AlertTitle>Projeto arquivado: {archiveReasonLabels[project.archive.reason]}</AlertTitle>
         <AlertDescription>
-          <p>Arquivado em {formatDateTime(project.archive.at)}. O projeto é somente leitura.</p>
+          <p>
+            Arquivado em {formatDateTimeCuiaba(project.archive.at)}. O projeto é somente leitura.
+          </p>
           {project.archive.note && (
             <p className='mt-1 whitespace-pre-line'>{project.archive.note}</p>
           )}
@@ -32,8 +34,8 @@ export function StaffBanner({ project }: { project: Project }) {
         <AlertTitle>Aguardando as correções do proponente</AlertTitle>
         <AlertDescription>
           <p>
-            Prazo: <strong>{formatDateTime(c.dueAt)}</strong> (horário de Cuiabá). Se vencer sem o
-            reenvio, o projeto é arquivado.
+            Prazo: <strong>{formatDateTimeCuiaba(c.dueAt)}</strong> (horário de Cuiabá). Se vencer
+            sem o reenvio, o projeto é arquivado.
           </p>
           {c.message && <p className='mt-2 whitespace-pre-line'>{c.message}</p>}
           <p className='mt-3 text-sm font-medium'>Itens devolvidos</p>
@@ -70,8 +72,8 @@ export function StaffBanner({ project }: { project: Project }) {
         <AlertTitle>Aguardando a decisão do departamento</AlertTitle>
         <AlertDescription>
           O departamento <strong>{project.framing.department.name}</strong> foi indicado em{' '}
-          {formatDateTime(project.framing.indicatedAt)} (indicação nº {project.framing.round}) e o
-          Revisor do Departamento ainda não decidiu.
+          {formatDateTimeCuiaba(project.framing.indicatedAt)} (indicação nº {project.framing.round})
+          e o Revisor do Departamento ainda não decidiu.
         </AlertDescription>
       </Alert>
     );

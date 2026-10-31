@@ -2,8 +2,8 @@
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatDateTime } from '@/lib/format';
 import type { Project } from '../../api/types';
+import { formatDateTimeCuiaba } from '../../format';
 
 /** Histórico do projeto para a equipe: o pedido de complementação mais recente. */
 export function HistoryPanel({ project }: { project: Project }) {
@@ -20,8 +20,8 @@ export function HistoryPanel({ project }: { project: Project }) {
           ) : (
             <>
               <p>
-                Pedido nº {c.number} em {formatDateTime(c.requestedAt)}, com prazo até{' '}
-                {formatDateTime(c.dueAt)}.{' '}
+                Pedido nº {c.number} em {formatDateTimeCuiaba(c.requestedAt)}, com prazo até{' '}
+                {formatDateTimeCuiaba(c.dueAt)}.{' '}
                 <Badge variant='outline'>
                   {
                     {

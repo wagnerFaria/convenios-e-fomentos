@@ -62,12 +62,13 @@ function AnalystActions({ project }: { project: Project }) {
       {showAssign && (
         <AssignDepartmentDialog
           project={project}
-          button={{
-            label: 'Indicar departamento',
-            disabled: !readyToAssign,
-            title: readyToAssign ? undefined : `Aprove todos os itens da conferência (${missing}).`
-          }}
+          button={{ label: 'Indicar departamento', disabled: !readyToAssign }}
         />
+      )}
+      {showAssign && !readyToAssign && (
+        <p className='text-muted-foreground w-full text-sm'>
+          Para indicar o departamento, aprove todos os itens da conferência ({missing}).
+        </p>
       )}
       {can(projectActions.requestComplement) && working && !framingPending && (
         <ComplementDialog
@@ -80,7 +81,7 @@ function AnalystActions({ project }: { project: Project }) {
           project={project}
           title='Arquivar por falta de documentos obrigatórios'
           description='O projeto é arquivado e deixa de andar (Portaria 71, art. 1º, §2º). O proponente, o Revisor do Departamento, o Analista e os Supervisores são avisados por e-mail.'
-          warning='O arquivamento é definitivo. Se o objetivo é pedir ajustes, use "Devolver para complementação".'
+          warning='O arquivamento é definitivo. Se o objetivo é pedir ajustes, use “Devolver para complementação”.'
           label='Motivo (obrigatório)'
           confirmLabel='Arquivar projeto'
           success='Projeto arquivado.'

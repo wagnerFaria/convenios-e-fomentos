@@ -254,7 +254,8 @@ export function ComplementDialog({ project, button }: { project: Project; button
                         onChange={(e) =>
                           setChosen((prev) => ({ ...prev, [key(i)]: e.target.value }))
                         }
-                        placeholder='O que precisa ser corrigido (opcional)'
+                        placeholder='Ex.: o CEP não confere com o comprovante…'
+                        autoComplete='off'
                         aria-label={`Observação sobre ${i.label}`}
                         maxLength={MAX_ITEM_NOTE}
                       />
@@ -336,9 +337,7 @@ export function AssignDepartmentDialog({
           )}
           <fieldset className='space-y-2'>
             <legend className='text-sm font-medium'>Departamento (área finalística)</legend>
-            {departments.isLoading && (
-              <p className='text-muted-foreground text-sm'>Carregando...</p>
-            )}
+            {departments.isLoading && <p className='text-muted-foreground text-sm'>Carregando…</p>}
             {!departments.isLoading && list.length === 0 && (
               <p className='text-muted-foreground text-sm'>
                 Nenhum departamento está marcado como área finalística. Peça a quem administra os

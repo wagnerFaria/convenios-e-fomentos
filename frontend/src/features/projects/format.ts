@@ -38,3 +38,16 @@ const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' 
 
 /** Centavos → "R$ 1.234,56". */
 export const formatBrl = (cents: number) => brl.format(cents / 100);
+
+const cuiabaDateTime = new Intl.DateTimeFormat('pt-BR', {
+  dateStyle: 'short',
+  timeStyle: 'short',
+  timeZone: 'America/Cuiaba'
+});
+
+/** Data e hora no fuso de Cuiabá (o mesmo dos prazos e dos e-mails), igual no servidor e no navegador. */
+export function formatDateTimeCuiaba(value: string | Date | null | undefined) {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : cuiabaDateTime.format(d);
+}

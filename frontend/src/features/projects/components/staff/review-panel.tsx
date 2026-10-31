@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { LoadingButton } from '@/components/ui/loading-button';
 import { Progress } from '@/components/ui/progress';
 import { useCan } from '@/features/auth/session-provider';
-import { formatDateTime } from '@/lib/format';
 import { projectKeys } from '../../api/queries';
 import { getFileDownload, reviewItem } from '../../api/service';
 import {
@@ -20,6 +19,7 @@ import {
   type ReviewKind
 } from '../../api/types';
 import { reportStaffError } from './errors';
+import { formatDateTimeCuiaba } from '../../format';
 
 /** Aba do cadastro que mostra cada seção da conferência. */
 const sectionTab: Record<string, string> = {
@@ -133,7 +133,6 @@ function ReviewRow({
               variant={approved ? 'outline' : 'default'}
               loading={change.isPending}
               disabled={!approved && !allOpened}
-              title={!approved && !allOpened ? 'Abra todos os arquivos para aprovar.' : undefined}
               onClick={() => change.mutate(!approved)}
             >
               {approved ? 'Desfazer' : 'Aprovar'}
@@ -144,10 +143,13 @@ function ReviewRow({
       {item.blocking && item.reason && (
         <p className='text-sm'>{item.reason} Devolva o item ao proponente ou arquive o projeto.</p>
       )}
+      {canReview && !item.blocking && !approved && !allOpened && (
+        <p className='text-muted-foreground text-xs'>Abra todos os arquivos para poder aprovar.</p>
+      )}
       {approved && item.reviewedBy && (
         <p className='text-muted-foreground text-xs'>
           Aprovado por {item.reviewedBy}
-          {item.reviewedAt ? ` em ${formatDateTime(item.reviewedAt)}` : ''}
+          {item.reviewedAt ? ` em ${formatDateTimeCuiaba(item.reviewedAt)}` : ''}
         </p>
       )}
       {item.files.length > 0 && (

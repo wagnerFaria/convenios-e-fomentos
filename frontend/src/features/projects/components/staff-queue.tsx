@@ -32,7 +32,6 @@ import { departmentsQueryOptions } from '@/features/departments/api/queries';
 import { departmentActions } from '@/features/departments/api/types';
 import { useCan } from '@/features/auth/session-provider';
 import { useDebounce } from '@/hooks/use-debounce';
-import { formatDateTime } from '@/lib/format';
 import { projectsQueryOptions } from '../api/queries';
 import {
   archiveReasonLabels,
@@ -42,7 +41,7 @@ import {
   statusLabels,
   type ProjectSummary
 } from '../api/types';
-import { formatBrl, formatCnpj } from '../format';
+import { formatBrl, formatCnpj, formatDateTimeCuiaba } from '../format';
 import { queueTabsFor } from '../queues';
 
 const ALL = 'all';
@@ -65,7 +64,7 @@ function Situation({ p }: { p: ProjectSummary }) {
       )}
       {p.status === 'submitted' && p.complementDueAt && (
         <span className='text-xs font-medium'>
-          Prazo das correções: {formatDateTime(p.complementDueAt)}
+          Prazo das correções: {formatDateTimeCuiaba(p.complementDueAt)}
         </span>
       )}
       {p.status === 'archived' && p.archiveReason && (
@@ -124,7 +123,8 @@ export function StaffQueue() {
         <Input
           value={filters.q}
           onChange={(e) => void setFilters({ q: e.target.value, page: 1 })}
-          placeholder='Buscar por título, instituição, CNPJ ou nº do SIGCon'
+          placeholder='Buscar por título, instituição, CNPJ ou nº do SIGCon…'
+          autoComplete='off'
           aria-label='Buscar projetos'
           className='max-w-md'
         />
@@ -241,7 +241,9 @@ export function StaffQueue() {
                       <TableCell>
                         {p.analyst?.name ?? <span className='text-muted-foreground'>—</span>}
                       </TableCell>
-                      <TableCell className='tabular-nums'>{formatDateTime(p.updatedAt)}</TableCell>
+                      <TableCell className='tabular-nums'>
+                        {formatDateTimeCuiaba(p.updatedAt)}
+                      </TableCell>
                       <TableCell>
                         <Link
                           href={`/dashboard/projetos/${p.id}`}
