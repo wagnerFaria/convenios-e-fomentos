@@ -30,6 +30,7 @@ import { ProponentStep } from './proponent-step';
 import { ProposalStep } from './proposal-step';
 import { DuplicateButton, WithdrawButton } from './project-actions';
 import { ReviewStep } from './review-step';
+import { StaffProjectView } from './staff/staff-project';
 
 const steps: SectionKey[] = [
   'proponent',
@@ -54,6 +55,8 @@ export function ProjectWizard({ id }: { id: string }) {
   if (query.isError) return <QueryError error={query.error} what='o projeto' />;
   if (query.isLoading || !query.data) return <Skeleton className='h-96 w-full' />;
   const project = query.data;
+  // Quem não é titular nem membro (a equipe) vê o projeto por outra tela: somente leitura, com a conferência e as decisões.
+  if (project.access === '') return <StaffProjectView project={project} />;
   // Projeto já enviado abre na tela do envio (código e comprovante); o rascunho, na primeira etapa.
   const step: SectionKey = chosen ?? (project.status === 'draft' ? 'proponent' : 'submission');
 

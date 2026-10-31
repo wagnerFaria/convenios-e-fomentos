@@ -99,6 +99,10 @@ function OptionsForm({ project, readOnly }: { project: Project; readOnly: boolea
   );
 }
 
+/**
+ * `onContinue` é do proponente (leva à revisão e envio). A equipe, que só lê, não o passa: some a barra de "continuar" e o texto sobre
+ * o que se aceita anexar.
+ */
 export function DocumentsStep({
   project,
   access,
@@ -106,7 +110,7 @@ export function DocumentsStep({
 }: {
   project: Project;
   access: Access;
-  onContinue: () => void;
+  onContinue?: () => void;
 }) {
   const checklist = useQuery(checklistQueryOptions(project.id));
   const [onlyMissing, setOnlyMissing] = useState(false);
@@ -164,10 +168,12 @@ export function DocumentsStep({
                 impedem de continuar.
               </p>
             )}
-            <p className='text-muted-foreground text-xs'>
-              Aceitamos PDF, DOCX, PNG, JPEG e WebP, com até 10 arquivos por documento. Os modelos
-              são os publicados pela SEDEC.
-            </p>
+            {onContinue && (
+              <p className='text-muted-foreground text-xs'>
+                Aceitamos PDF, DOCX, PNG, JPEG e WebP, com até 10 arquivos por documento. Os modelos
+                são os publicados pela SEDEC.
+              </p>
+            )}
           </div>
           <OptionsForm
             key={project.version}
@@ -210,7 +216,7 @@ export function DocumentsStep({
             docs={checklist.data.extraDocuments}
             access={access}
           />
-          <ContinueBar blockers={blockers} onContinue={onContinue} />
+          {onContinue && <ContinueBar blockers={blockers} onContinue={onContinue} />}
         </>
       )}
     </div>
