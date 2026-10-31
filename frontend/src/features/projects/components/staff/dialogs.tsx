@@ -174,6 +174,16 @@ export function ComplementDialog({ project, button }: { project: Project; button
     (i): i is ReviewItem & { kind: 'section' | 'document' } => i.kind !== 'extra'
   );
   const selected = candidates.filter((i) => key(i) in chosen);
+  // Os itens reprovados na conferência já vêm marcados, com a justificativa como observação ao proponente.
+  const openDialog = () => {
+    setChosen((prev) => {
+      const next = { ...prev };
+      for (const i of candidates)
+        if (i.status === 'rejected' && !(key(i) in next)) next[key(i)] = i.note ?? '';
+      return next;
+    });
+    setOpen(true);
+  };
 
   const run = useMutation({
     mutationFn: () =>
@@ -199,7 +209,7 @@ export function ComplementDialog({ project, button }: { project: Project; button
 
   return (
     <>
-      <OpenDialogButton button={button} onOpen={() => setOpen(true)} />
+      <OpenDialogButton button={button} onOpen={openDialog} />
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-2xl'>
           <DialogHeader>

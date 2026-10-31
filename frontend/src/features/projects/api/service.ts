@@ -20,6 +20,8 @@ import type {
   ProjectSummary,
   ProponentSection,
   ProposalInput,
+  FilePreview,
+  ReviewDecision,
   ReviewKind
 } from './types';
 
@@ -146,6 +148,16 @@ export async function getFileDownload(id: string, fileId: string) {
       `${docs(id)}/files/${fileId}/download`
     )
   ).data;
+}
+
+/** URL para exibir o arquivo no navegador (o Word vem convertido em PDF). Não conta como ter visto: use `markFileViewed`. */
+export async function getFilePreview(id: string, fileId: string) {
+  return (await apiClient<ApiResponse<FilePreview>>(`${docs(id)}/files/${fileId}/preview`)).data;
+}
+
+/** Registra que o arquivo foi exibido para quem consulta: é a prova exigida para aprovar ou reprovar o documento. */
+export async function markFileViewed(id: string, fileId: string) {
+  await apiClient<void>(`${docs(id)}/files/${fileId}/viewed`, { method: 'POST' });
 }
 
 export async function deleteProjectFile(id: string, fileId: string) {
@@ -318,10 +330,13 @@ const post = async (id: string, path: string, body?: unknown) =>
 /** O Analista assume a análise ("Aguardando análise de checklist" passa a "Em análise"). */
 export const startAnalysis = (id: string) => post(id, 'start-analysis');
 
-/** Aprova ou desfaz a aprovação de um item. Aprovar documento com arquivo exige ter aberto cada arquivo. */
+/**
+ * Aprova, reprova (com justificativa) ou desfaz a decisão sobre um item. Decidir sobre documento com arquivo exige ter visto cada
+ * arquivo no visualizador.
+ */
 export async function reviewItem(
   id: string,
-  input: { kind: ReviewKind; target: string; approved: boolean }
+  input: { kind: ReviewKind; target: string; decision: ReviewDecision; note?: string }
 ) {
   return (
     await apiClient<ApiResponse<Project>>(`/admin/projects/${id}/review/items`, {

@@ -21,12 +21,13 @@ export function staffErrorMessage(err: unknown): string {
       case 'file_not_opened': {
         const files = Array.isArray(d.files) ? (d.files as { filename: string }[]) : [];
         const names = files.map((f) => f.filename).join(', ');
-        return `Abra todos os arquivos deste documento antes de aprovar.${names ? ` Faltam: ${names}.` : ''}`;
+        return `Visualize todos os arquivos deste documento antes de decidir.${names ? ` Faltam: ${names}.` : ''}`;
       }
       case 'review_incomplete': {
         const pending = Number(d.pending ?? 0);
+        const rejected = Number(d.rejected ?? 0);
         const blockers = Number(d.blockers ?? 0);
-        return `Ainda há ${pending} item(ns) pendente(s) e ${blockers} impedimento(s) na conferência.`;
+        return `Ainda há ${pending} item(ns) pendente(s), ${rejected} reprovado(s) e ${blockers} impedimento(s) na conferência.`;
       }
       case 'framing_already_decided':
       case 'framing_round_stale':

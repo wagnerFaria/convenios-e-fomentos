@@ -36,6 +36,7 @@ import {
   IconDotsVertical,
   IconEdit,
   IconExternalLink,
+  IconDownload,
   IconEye,
   IconEyeOff,
   IconFile,
@@ -98,7 +99,9 @@ import {
   IconUsers,
   IconVideo,
   IconCrown,
-  IconX
+  IconX,
+  IconZoomIn,
+  IconZoomOut
 } from '@tabler/icons-react';
 
 export type Icon = React.ComponentType<IconProps>;
@@ -176,6 +179,9 @@ export const Icons = {
   copy: IconCopy,
   refresh: IconRefresh,
   eye: IconEye,
+  download: IconDownload,
+  zoomIn: IconZoomIn,
+  zoomOut: IconZoomOut,
   history: IconHistory,
   building: IconBuilding,
   userCheck: IconUserCheck,

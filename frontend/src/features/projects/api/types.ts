@@ -374,8 +374,21 @@ export type ReviewKind = 'section' | 'document' | 'extra';
 export interface ReviewFile {
   id: string;
   filename: string;
-  /** De quem consulta: cada Analista vê os arquivos que ele mesmo abriu. */
+  /** De quem consulta: cada Analista vê os arquivos que ele mesmo viu no visualizador. */
   opened: boolean;
+}
+
+/** Decisão sobre um item da conferência; `pending` desfaz. */
+export type ReviewDecision = 'approved' | 'rejected' | 'pending';
+
+/** Como exibir o arquivo no navegador: PDF (inclusive o Word convertido) ou imagem. */
+export interface FilePreview {
+  url: string;
+  expiresAt: string;
+  kind: 'pdf' | 'image';
+  contentType: string;
+  /** O que se vê é o PDF gerado a partir do Word, não o arquivo enviado. */
+  converted: boolean;
 }
 
 export interface ReviewItem {
@@ -383,7 +396,9 @@ export interface ReviewItem {
   /** Seção, chave do documento (`codigo` ou `codigo@emenda`) ou id do documento adicional. */
   target: string;
   label: string;
-  status: 'pending' | 'approved';
+  status: ReviewDecision;
+  /** Justificativa da reprovação. */
+  note?: string;
   /** Impedimento: documento obrigatório sem arquivo nem justificativa. Não há o que aprovar. */
   blocking: boolean;
   reason?: string;
@@ -394,8 +409,8 @@ export interface ReviewItem {
 
 export interface Review {
   items: ReviewItem[];
-  summary: { total: number; approved: number; pending: number; blockers: number };
-  /** Há itens, todos aprovados e nenhum impedimento: condição para indicar o departamento. */
+  summary: { total: number; approved: number; rejected: number; pending: number; blockers: number };
+  /** Há itens, todos aprovados e nenhum reprovado nem impedimento: condição para indicar o departamento. */
   allApproved: boolean;
 }
 
