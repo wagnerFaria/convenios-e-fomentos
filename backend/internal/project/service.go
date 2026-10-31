@@ -180,8 +180,11 @@ func refOf(r db.Project) Ref {
 }
 
 func (s *Service) view(ctx context.Context, q *db.Queries, r db.Project, actor Actor) (*Project, error) {
-	p, _, err := s.viewWithChecklist(ctx, q, r, actor)
-	return p, err
+	p, cl, err := s.viewWithChecklist(ctx, q, r, actor)
+	if err != nil {
+		return nil, err
+	}
+	return p, s.attachReview(ctx, q, r, p, cl, actor)
 }
 
 // viewWithChecklist monta o projeto e, junto, o checklist de documentos (já calculado para o resumo e as pendências).

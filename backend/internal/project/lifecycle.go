@@ -184,6 +184,10 @@ func (s *Service) RequestComplement(ctx context.Context, actor Actor, id uuid.UU
 			if err := q.AddComplementItem(ctx, db.AddComplementItemParams{RequestID: req.ID, Kind: it.Kind, Target: it.Target, Note: multiline(it.Note)}); err != nil {
 				return err
 			}
+			// O que volta ao proponente deixa de estar aprovado; o resto da conferência fica como está.
+			if err := q.ResetItemReview(ctx, db.ResetItemReviewParams{ProjectID: id, Kind: it.Kind, Target: it.Target}); err != nil {
+				return err
+			}
 		}
 		row, err := q.SetProjectStage(ctx, db.SetProjectStageParams{ID: id, Stage: ptr(StageAwaitingProponent), UpdatedByID: &actor.ID})
 		if err != nil {
@@ -360,7 +364,7 @@ func (s *Service) archive(ctx context.Context, actor Actor, id uuid.UUID, reason
 		if err := s.audit.Record(ctx, q, actor.entry("project.archive", id, map[string]any{"reason": reason})); err != nil {
 			return err
 		}
-		return s.notifyArchived(ctx, q, out, row.DepartmentID)
+		return s.notifyArchived(ctx, q, out, row.DepartmentID, row.AnalystID)
 	})
 	if err != nil {
 		return nil, err
@@ -433,7 +437,7 @@ func (s *Service) ExpireComplements(ctx context.Context) (int, error) {
 			if err != nil {
 				return err
 			}
-			if err := s.notifyArchived(ctx, q, p, row.DepartmentID); err != nil {
+			if err := s.notifyArchived(ctx, q, p, row.DepartmentID, row.AnalystID); err != nil {
 				return err
 			}
 			archived++

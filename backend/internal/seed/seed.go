@@ -147,6 +147,8 @@ func adminRoles() []roleSpec {
 				staffRead,
 				{Action: project.ActionRequestComplement, Conditions: []string{project.ConditionSubmitted}},
 				{Action: project.ActionArchive, Conditions: []string{project.ConditionSubmitted}},
+				{Action: project.ActionStartAnalysis, Conditions: []string{project.ConditionSubmitted}},
+				{Action: project.ActionReviewItem, Conditions: []string{project.ConditionSubmitted}},
 				{Action: actionDepartmentsRead}, {Action: actionDepartmentsUpdate}, {Action: actionDepartmentsDelete},
 			}, staffReference()...),
 		},

@@ -1594,7 +1594,7 @@ paths:
     get:
       tags: [Projetos]
       summary: URL temporária para baixar um arquivo confirmado
-      description: "Resposta: `{url, expiresAt}`. Arquivo pendente: 404. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
+      description: "Resposta: `{url, expiresAt}`. Arquivo pendente: 404. Quando quem baixa é da equipe (nem titular nem membro), o pedido é **registrado por pessoa**: é a prova de que abriu o documento, exigida para aprová-lo na conferência (`PUT .../review/items`). Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1804,7 +1804,7 @@ paths:
       tags: [Projetos]
       summary: Arquiva o projeto (equipe)
       description: |
-        Arquiva o projeto enviado por `missing_documents` (falta de documentos obrigatórios) ou `other`, com o motivo em `note`. O proponente recebe um e-mail.
+        Arquiva o projeto enviado por `missing_documents` (falta de documentos obrigatórios) ou `other`, com o motivo em `note`. O proponente, os Revisores do departamento (se já havia um), o Analista responsável (ou, sem responsável, os Analistas) e os Supervisores recebem um e-mail.
         Permissão: `admin::projects.archive`. Responde o projeto completo.
       security: [{adminBearer: []}]
       parameters:
@@ -1819,6 +1819,57 @@ paths:
               properties:
                 reason: {type: string, enum: [missing_documents, other]}
                 note: {type: string, minLength: 3, maxLength: 1000}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/start-analysis:
+    post:
+      tags: [Projetos]
+      summary: Assume a análise do projeto (Analista)
+      description: |
+        "Aguardando análise de checklist" passa a "Em análise" e quem assumiu vira o **analista responsável** (informativo: qualquer Analista pode agir no projeto).
+        Idempotente: repetir não muda nada, e outro Analista que chame depois não troca o responsável. Se o projeto já está em análise mas sem responsável (voltou de uma
+        complementação pedida antes de alguém assumir), o primeiro a assumir vira o responsável. Erros: 409 `project_not_submitted` (rascunho ou arquivado) e 409
+        `project_stage_invalid` (aguardando o proponente). Permissão: `admin::projects.start-analysis`. Responde o projeto completo, na visão da equipe.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/review/items:
+    put:
+      tags: [Projetos]
+      summary: Aprova ou desfaz a aprovação de um item da conferência (Analista)
+      description: |
+        Exige o projeto em análise (409 `analysis_not_started` antes de assumir; 409 `project_stage_invalid` aguardando o proponente). `kind` e `target`:
+        `section` (`proponent`, `institution`, `proposal`, `funding`, `document-options`), `document` (`codigo` ou `codigo@id-da-emenda` do checklist) e `extra`
+        (id do documento adicional). Item inexistente, ou documento obrigatório sem arquivo nem justificativa: 422 `item_not_reviewable`.
+        **Aprovar documento com arquivo exige que o próprio Analista tenha aberto cada arquivo atual**: senão 422 `file_not_opened` com `details.files`
+        (até 20) e `details.total`. "Abrir" é pedir o link de download do arquivo (`GET .../documents/files/{fileId}/download`), que a equipe tem registrado por pessoa.
+        Aprovar e desfazer são idempotentes. Responde o projeto completo com `review` (itens, `summary`, `allApproved`) e `analyst`, que **só a equipe** recebe.
+        Cada arquivo em `review.items[].files` traz `opened`: se o administrador que consulta já o abriu. Permissão: `admin::projects.review-item`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, target, approved]
+              properties:
+                kind: {type: string, enum: [section, document, extra]}
+                target: {type: string}
+                approved: {type: boolean}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}

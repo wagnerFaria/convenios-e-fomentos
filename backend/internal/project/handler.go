@@ -77,6 +77,8 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(g(ActionWithdraw)).Post("/admin/projects/{id}/withdraw", h.withdraw)
 	r.With(g(ActionRequestComplement)).Post("/admin/projects/{id}/complement-requests", h.requestComplement)
 	r.With(g(ActionArchive)).Post("/admin/projects/{id}/archive", h.archive)
+	r.With(g(ActionStartAnalysis)).Post("/admin/projects/{id}/start-analysis", h.startAnalysis)
+	r.With(g(ActionReviewItem)).Put("/admin/projects/{id}/review/items", h.reviewItem)
 	r.With(g(ActionDeny)).Post("/admin/projects/{id}/deny", h.deny)
 	r.With(g(ActionCreate), heavy).Post("/admin/projects/{id}/duplicate", h.duplicate)
 	r.With(g(ActionRead), heavy).Get("/admin/projects/{id}/receipt", h.receipt)
@@ -682,6 +684,26 @@ func (h *Handler) requestComplement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := h.svc.RequestComplement(r.Context(), actorOf(r), id, in, dec)
+	respond(w, r, v, err)
+}
+
+func (h *Handler) startAnalysis(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	dec, _ := admin.DecisionFrom(r.Context())
+	v, err := h.svc.StartAnalysis(r.Context(), actorOf(r), id, dec)
+	respond(w, r, v, err)
+}
+
+func (h *Handler) reviewItem(w http.ResponseWriter, r *http.Request) {
+	in, id, dec, ok := decode[ReviewInput](w, r)
+	if !ok {
+		return
+	}
+	v, err := h.svc.ReviewItem(r.Context(), actorOf(r), id, in, dec)
 	respond(w, r, v, err)
 }
 

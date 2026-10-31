@@ -677,6 +677,9 @@ func (s *Service) Download(ctx context.Context, actor Actor, id, fileID uuid.UUI
 	if f.Status != FileConfirmed {
 		return DownloadLink{}, httpapi.ErrNotFound()
 	}
+	if err := s.recordStaffOpening(ctx, id, fileID, actor); err != nil {
+		return DownloadLink{}, err
+	}
 	u, exp, err := s.store.PresignDownload(ctx, f.ObjectKey, f.Filename, f.ContentType, s.downloadTTL)
 	if err != nil {
 		return DownloadLink{}, err

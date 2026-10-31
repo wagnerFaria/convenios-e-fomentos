@@ -2,10 +2,12 @@ package project
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/outbox"
@@ -123,12 +125,13 @@ var archiveReasonText = map[string]string{
 }
 
 // notifyArchived avisa o arquivamento (de qualquer motivo, inclusive a desistência) ao proponente, aos Revisores do departamento do
-// projeto (se já havia um), ao Analista e aos Supervisores. Quem tem mais de um papel, ou o mesmo e-mail em dois deles, recebe uma só
+// projeto (se já havia um), ao Analista responsável (ou, sem responsável ou se ele não pode receber, a todos os Analistas) e aos
+// Supervisores. Quem tem mais de um papel, ou o mesmo e-mail em dois deles, recebe uma só
 // mensagem; o proponente recebe a dele, com a orientação de duplicar o projeto.
 //
 // A mensagem da equipe traz só a identificação do projeto, o motivo (a categoria) e o link: o texto livre do motivo e os dados
 // pessoais ficam no sistema, atrás de login.
-func (s *Service) notifyArchived(ctx context.Context, q *db.Queries, p *Project, departmentID *uuid.UUID) error {
+func (s *Service) notifyArchived(ctx context.Context, q *db.Queries, p *Project, departmentID, analystID *uuid.UUID) error {
 	if p.Archive == nil {
 		return nil
 	}
@@ -164,13 +167,16 @@ func (s *Service) notifyArchived(ctx context.Context, q *db.Queries, p *Project,
 		}
 		staff = append(staff, list...)
 	}
-	for _, role := range []string{roleAnalyst, roleSupervisor} {
-		list, err := q.ListStaffEmailsByRole(ctx, role)
-		if err != nil {
-			return err
-		}
-		staff = append(staff, list...)
+	analysts, err := s.analystRecipients(ctx, q, analystID)
+	if err != nil {
+		return err
 	}
+	staff = append(staff, analysts...)
+	supervisors, err := q.ListStaffEmailsByRole(ctx, roleSupervisor)
+	if err != nil {
+		return err
+	}
+	staff = append(staff, supervisors...)
 	var b strings.Builder
 	fmt.Fprintf(&b, "O projeto %s foi arquivado por %s.\n\n", p.Code, archivedByText[reason])
 	fmt.Fprintf(&b, "Título: %s\nInstituição: %s\n\n", p.Proposal.Title, p.Institution.Name)
@@ -184,6 +190,20 @@ func (s *Service) notifyArchived(ctx context.Context, q *db.Queries, p *Project,
 		}
 	}
 	return nil
+}
+
+// analystRecipients: o Analista responsável, se houver e puder receber (ativo e não bloqueado); senão, todos os Analistas ativos.
+func (s *Service) analystRecipients(ctx context.Context, q *db.Queries, analystID *uuid.UUID) ([]string, error) {
+	if analystID != nil {
+		email, err := q.GetNotifiableAdminEmailByID(ctx, *analystID)
+		if err == nil && email != "" {
+			return []string{email}, nil
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	return q.ListStaffEmailsByRole(ctx, roleAnalyst)
 }
 
 // notifyInvited avisa o convidado por e-mail. O e-mail da conta que tem o CPF tem prioridade e nunca é revelado ao titular; sem conta,

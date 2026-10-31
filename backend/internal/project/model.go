@@ -24,7 +24,10 @@ const (
 	ActionWithdraw          = "admin::projects.withdraw"
 	ActionRequestComplement = "admin::projects.request-complement"
 	ActionArchive           = "admin::projects.archive"
-	ActionDeny              = "admin::projects.deny"
+	// Conferência da análise (Analista): assumir a análise e aprovar/desfazer itens.
+	ActionStartAnalysis = "admin::projects.start-analysis"
+	ActionReviewItem    = "admin::projects.review-item"
+	ActionDeny          = "admin::projects.deny"
 
 	ActionProfileRead   = "admin::proponent-profile.read"
 	ActionProfileUpdate = "admin::proponent-profile.update"
@@ -103,6 +106,8 @@ func Register(reg *authz.Registry) {
 		proj(ActionWithdraw, "Desistir de projetos enviados", true),
 		proj(ActionRequestComplement, "Pedir complementação de projetos", true),
 		proj(ActionArchive, "Arquivar projetos (falta de documentos ou outro motivo)", true),
+		proj(ActionStartAnalysis, "Assumir a análise de projetos enviados", true),
+		proj(ActionReviewItem, "Aprovar ou desfazer a aprovação de itens na conferência da análise", true),
 		proj(ActionDeny, "Negar projetos (decisão do Secretário)", true),
 		proj(ActionShare, "Gerir o acesso aos projetos (convidar por CPF e revogar)", true),
 		profile(ActionProfileRead, "Ler o próprio perfil de proponente"),
@@ -273,8 +278,11 @@ type Project struct {
 	SubmittedAt    *time.Time `json:"submittedAt"`
 	LateSubmission bool       `json:"lateSubmission"`
 	// Complement é o pedido de complementação aberto ou, não havendo, o mais recente. Archive só existe em projeto arquivado.
-	Complement      *Complement  `json:"complement"`
-	Archive         *ArchiveInfo `json:"archive"`
+	Complement *Complement  `json:"complement"`
+	Archive    *ArchiveInfo `json:"archive"`
+	// Analyst e Review só vão para a equipe (a conferência é interna). Analyst some enquanto ninguém assumiu a análise.
+	Analyst         *AnalystInfo `json:"analyst,omitempty"`
+	Review          *Review      `json:"review,omitempty"`
 	OriginProjectID string       `json:"originProjectId"`
 	OriginCode      string       `json:"originCode"`
 	CreatedAt       time.Time    `json:"createdAt"`

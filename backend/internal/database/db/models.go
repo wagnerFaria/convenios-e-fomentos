@@ -345,6 +345,7 @@ type Project struct {
 	OriginProjectID             *uuid.UUID  `json:"origin_project_id"`
 	ProponentPersonal           []byte      `json:"proponent_personal"`
 	LegalRepPersonal            []byte      `json:"legal_rep_personal"`
+	AnalystID                   *uuid.UUID  `json:"analyst_id"`
 }
 
 type ProjectAmendment struct {
@@ -437,6 +438,21 @@ type ProjectFile struct {
 	Locked       bool       `json:"locked"`
 	SupersededAt *time.Time `json:"superseded_at"`
 	Sha256       *string    `json:"sha256"`
+}
+
+type ProjectFileView struct {
+	FileID   uuid.UUID `json:"file_id"`
+	AdminID  uuid.UUID `json:"admin_id"`
+	OpenedAt time.Time `json:"opened_at"`
+}
+
+type ProjectItemReview struct {
+	ProjectID    uuid.UUID  `json:"project_id"`
+	Kind         string     `json:"kind"`
+	Target       string     `json:"target"`
+	Status       string     `json:"status"`
+	ReviewedByID *uuid.UUID `json:"reviewed_by_id"`
+	ReviewedAt   *time.Time `json:"reviewed_at"`
 }
 
 type ProjectMember struct {

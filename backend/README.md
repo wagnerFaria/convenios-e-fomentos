@@ -104,7 +104,7 @@ Idempotente e **não destrutivo**: rodar de novo não duplica nada nem desfaz o 
   - Author: cria e lê; atualiza e exclui só o que criou (`admin::is-creator`); não publica.
   - Revisor: lê só os projetos enviados do próprio departamento (`admin::project-submitted-same-department`); sem departamento no
     cadastro, não lê nenhum (403). Não tem mais permissões sobre o módulo genérico de documentos.
-  - Analista: lê projetos enviados, pede complementação e arquiva; lê, edita e exclui departamentos (não cria).
+  - Analista: lê projetos enviados, assume a análise (`start-analysis`) e confere os itens (`review-item`), pede complementação e arquiva; lê, edita e exclui departamentos (não cria). Aprovar um documento com arquivo exige que ele mesmo o tenha aberto (`project_file_views`); aprovações são por item e a devolução zera só os itens devolvidos.
   - Supervisor Administrador: lê projetos enviados, somente leitura.
   - Secretário de Estado: lê projetos enviados e nega (arquiva na hora).
   - A equipe nunca lê rascunho: todas as ações de projeto da equipe levam `admin::project-submitted` (ou a variante com departamento).
