@@ -7,7 +7,10 @@
     "url": "https://github.com/Kiranism"
   },
   "scripts": {
+    "pdfjs:assets": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "bun run pdfjs:assets",
     "dev": "next dev",
+    "prebuild": "bun run pdfjs:assets",
     "build": "next build",
     "start": "next start",
     "cleanup": "node scripts/cleanup.js",

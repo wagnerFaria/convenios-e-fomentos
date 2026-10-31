@@ -16,6 +16,16 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
+// Arquivos que o pdf.js busca ao abrir o PDF, copiados do pacote para public/pdfjs (scripts/copy-pdfjs-assets.mjs). O wasm decodifica
+// imagens de scanner (JBIG2 e CCITT fax), JPEG 2000 e perfis de cor: sem ele essas páginas saem em branco. Os CMaps e as fontes padrão
+// cobrem PDFs que não embutem a fonte.
+const documentOptions = {
+  wasmUrl: '/pdfjs/wasm/',
+  cMapUrl: '/pdfjs/cmaps/',
+  cMapPacked: true,
+  standardFontDataUrl: '/pdfjs/standard_fonts/'
+};
+
 /** Margem (em px) em volta da área visível em que as páginas ficam desenhadas; as de fora saem da memória. */
 const RENDER_MARGIN = 1200;
 const PAGE_GAP = 12;
@@ -187,6 +197,7 @@ export function PdfViewer({
         ) : (
           <Document
             file={file}
+            options={documentOptions}
             suspense={false}
             loading={<Skeleton className='mx-auto my-4 h-[70vh] w-11/12' />}
             error={null}
