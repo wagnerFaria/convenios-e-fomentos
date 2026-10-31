@@ -259,7 +259,7 @@ func (q *Queries) GetNotifiableAdminEmailByID(ctx context.Context, id uuid.UUID)
 }
 
 const listFileViewsOfAdmin = `-- name: ListFileViewsOfAdmin :many
-SELECT v.file_id
+SELECT v.file_id, (v.read_at IS NOT NULL)::boolean AS read
 FROM project_file_views v
 JOIN project_files f ON f.id = v.file_id
 JOIN project_document_items i ON i.id = f.item_id
@@ -271,20 +271,25 @@ type ListFileViewsOfAdminParams struct {
 	AdminID   uuid.UUID `json:"admin_id"`
 }
 
-// Arquivos do projeto que este administrador já abriu.
-func (q *Queries) ListFileViewsOfAdmin(ctx context.Context, arg ListFileViewsOfAdminParams) ([]uuid.UUID, error) {
+type ListFileViewsOfAdminRow struct {
+	FileID uuid.UUID `json:"file_id"`
+	Read   bool      `json:"read"`
+}
+
+// Arquivos do projeto que este administrador já viu, e se leu cada um até o fim.
+func (q *Queries) ListFileViewsOfAdmin(ctx context.Context, arg ListFileViewsOfAdminParams) ([]ListFileViewsOfAdminRow, error) {
 	rows, err := q.db.Query(ctx, listFileViewsOfAdmin, arg.ProjectID, arg.AdminID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []uuid.UUID{}
+	items := []ListFileViewsOfAdminRow{}
 	for rows.Next() {
-		var file_id uuid.UUID
-		if err := rows.Scan(&file_id); err != nil {
+		var i ListFileViewsOfAdminRow
+		if err := rows.Scan(&i.FileID, &i.Read); err != nil {
 			return nil, err
 		}
-		items = append(items, file_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -333,6 +338,22 @@ func (q *Queries) ListItemReviews(ctx context.Context, projectID uuid.UUID) ([]L
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordFileRead = `-- name: RecordFileRead :exec
+INSERT INTO project_file_views (file_id, admin_id, read_at) VALUES ($1, $2, now())
+ON CONFLICT (file_id, admin_id) DO UPDATE SET read_at = COALESCE(project_file_views.read_at, now())
+`
+
+type RecordFileReadParams struct {
+	FileID  uuid.UUID `json:"file_id"`
+	AdminID uuid.UUID `json:"admin_id"`
+}
+
+// O administrador chegou ao fim do arquivo (e, por consequência, também o viu). Mantém a data da primeira leitura completa.
+func (q *Queries) RecordFileRead(ctx context.Context, arg RecordFileReadParams) error {
+	_, err := q.db.Exec(ctx, recordFileRead, arg.FileID, arg.AdminID)
+	return err
 }
 
 const recordFileView = `-- name: RecordFileView :exec

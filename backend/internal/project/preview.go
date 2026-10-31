@@ -135,9 +135,10 @@ func (s *Service) convertedKey(ctx context.Context, objectKey string, fileID uui
 	return key, nil
 }
 
-// MarkViewed registra que a pessoa da equipe viu o arquivo no visualizador. É a prova exigida para aprovar ou reprovar o documento; o
-// titular e os membros do projeto não geram registro. O cliente chama depois de exibir o conteúdo, não ao pedir a URL.
-func (s *Service) MarkViewed(ctx context.Context, actor Actor, id, fileID uuid.UUID, read authz.Decision) error {
+// MarkViewed registra que a pessoa da equipe viu o arquivo no visualizador (toEnd: chegou ao fim dele). Ver é a prova exigida para
+// reprovar o documento; chegar ao fim, para aprová-lo. O titular e os membros do projeto não geram registro. O cliente chama depois de
+// exibir o conteúdo (e de rolar até o fim), não ao pedir a URL.
+func (s *Service) MarkViewed(ctx context.Context, actor Actor, id, fileID uuid.UUID, read authz.Decision, toEnd bool) error {
 	f, err := s.projectFile(ctx, id, fileID, read, httpapi.ErrNotFound)
 	if err != nil {
 		return err
@@ -145,5 +146,5 @@ func (s *Service) MarkViewed(ctx context.Context, actor Actor, id, fileID uuid.U
 	if f.Status != FileConfirmed {
 		return httpapi.ErrNotFound()
 	}
-	return s.recordStaffOpening(ctx, id, fileID, actor)
+	return s.recordStaffOpening(ctx, id, fileID, actor, toEnd)
 }

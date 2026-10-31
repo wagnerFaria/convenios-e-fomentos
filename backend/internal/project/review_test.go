@@ -81,12 +81,24 @@ func TestTudoAprovado(t *testing.T) {
 		assert.Equal(t, ReviewSummary{Total: 6, Pending: 6}, r.Summary)
 	})
 	t.Run("tudo aprovado", func(t *testing.T) {
-		r := buildReview(ts, approveAll(), map[uuid.UUID]bool{f.ID: true})
+		r := buildReview(ts, approveAll(), map[uuid.UUID]fileSeen{f.ID: {Opened: true, Read: true}})
 		assert.True(t, r.AllApproved)
 		assert.Equal(t, ReviewSummary{Total: 6, Approved: 6}, r.Summary)
 		assert.Equal(t, "Ana", r.Items[0].ReviewedBy)
 		require.Len(t, r.Items[5].Files, 1)
 		assert.True(t, r.Items[5].Files[0].Opened)
+		assert.True(t, r.Items[5].Files[0].Read)
+	})
+	t.Run("reprovado conta à parte, mostra a justificativa e impede", func(t *testing.T) {
+		saved := approveAll()
+		saved["section:funding"] = reviewRow{Status: ReviewRejected, Note: "Valores não batem.", By: "Ana", At: &now}
+		r := buildReview(ts, saved, nil)
+		assert.False(t, r.AllApproved)
+		assert.Equal(t, ReviewSummary{Total: 6, Approved: 5, Rejected: 1}, r.Summary)
+		assert.Equal(t, ReviewRejected, r.Items[3].Status)
+		assert.Equal(t, "Valores não batem.", r.Items[3].Note)
+		assert.Equal(t, "Ana", r.Items[3].ReviewedBy)
+		assert.Empty(t, r.Items[0].Note, "aprovado não tem justificativa")
 	})
 	t.Run("um item pendente impede", func(t *testing.T) {
 		saved := approveAll()
@@ -115,11 +127,26 @@ func TestTudoAprovado(t *testing.T) {
 	})
 }
 
-func TestArquivosNaoAbertos(t *testing.T) {
+func TestArquivosNaoVistosENaoLidos(t *testing.T) {
 	a, b := confirmedFile("a.pdf"), confirmedFile("b.pdf")
 	tg := reviewTarget{Kind: ReviewDocument, Target: "x", Files: []DocFile{a, b}}
-	assert.Equal(t, []DocFile{a, b}, unopened(tg, nil))
-	assert.Equal(t, []DocFile{b}, unopened(tg, map[uuid.UUID]bool{a.ID: true}))
-	assert.Empty(t, unopened(tg, map[uuid.UUID]bool{a.ID: true, b.ID: true}))
-	assert.Empty(t, unopened(reviewTarget{Kind: ReviewSection, Target: "proponent"}, nil), "seção não exige abertura")
+	opened := func(ids ...uuid.UUID) map[uuid.UUID]fileSeen {
+		m := map[uuid.UUID]fileSeen{}
+		for _, id := range ids {
+			m[id] = fileSeen{Opened: true}
+		}
+		return m
+	}
+	assert.Equal(t, []DocFile{a, b}, unseen(tg, nil, false))
+	assert.Equal(t, []DocFile{b}, unseen(tg, opened(a.ID), false))
+	assert.Empty(t, unseen(tg, opened(a.ID, b.ID), false))
+	assert.Empty(t, unseen(reviewTarget{Kind: ReviewSection, Target: "proponent"}, nil, true), "seção não exige abertura nem leitura")
+
+	// Ler até o fim é mais que ver: vistos mas não lidos ainda faltam para aprovar.
+	assert.Equal(t, []DocFile{a, b}, unseen(tg, opened(a.ID, b.ID), true))
+	seen := opened(a.ID, b.ID)
+	seen[a.ID] = fileSeen{Opened: true, Read: true}
+	assert.Equal(t, []DocFile{b}, unseen(tg, seen, true))
+	// Ler sem constar como visto não vale (o servidor sempre grava os dois juntos).
+	assert.Equal(t, []DocFile{a, b}, unseen(tg, map[uuid.UUID]fileSeen{a.ID: {Read: true}, b.ID: {Read: true}}, true))
 }

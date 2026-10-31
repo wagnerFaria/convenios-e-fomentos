@@ -442,9 +442,10 @@ type ProjectFile struct {
 }
 
 type ProjectFileView struct {
-	FileID   uuid.UUID `json:"file_id"`
-	AdminID  uuid.UUID `json:"admin_id"`
-	OpenedAt time.Time `json:"opened_at"`
+	FileID   uuid.UUID  `json:"file_id"`
+	AdminID  uuid.UUID  `json:"admin_id"`
+	OpenedAt time.Time  `json:"opened_at"`
+	ReadAt   *time.Time `json:"read_at"`
 }
 
 type ProjectFraming struct {

@@ -18,9 +18,17 @@ func (p *projEnv) review(tok, id, kind, target string, approved bool) resp {
 	return p.do("PUT", "/api/admin/projects/"+id+"/review/items", map[string]any{"kind": kind, "target": target, "approved": approved}, tok)
 }
 
-// openFile registra que o arquivo foi exibido no visualizador, como a tela faz depois de mostrar o conteúdo.
-func (p *projEnv) openFile(tok, id, fileID string) int {
+// viewFile registra que o arquivo foi exibido no visualizador (a primeira página apareceu).
+func (p *projEnv) viewFile(tok, id, fileID string) int {
 	return p.do("POST", docsPath(id, "/files/", fileID, "/viewed"), nil, tok).Status
+}
+
+// openFile vê o arquivo e rola até o fim, como o Analista faz antes de aprovar.
+func (p *projEnv) openFile(tok, id, fileID string) int {
+	if st := p.viewFile(tok, id, fileID); st != 204 {
+		return st
+	}
+	return p.do("POST", docsPath(id, "/files/", fileID, "/read"), nil, tok).Status
 }
 
 // reject reprova um item com a justificativa.

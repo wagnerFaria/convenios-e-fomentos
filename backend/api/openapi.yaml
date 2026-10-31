@@ -1632,7 +1632,21 @@ paths:
     post:
       tags: [Projetos]
       summary: Registra que o arquivo foi exibido para quem consulta
-      description: "O cliente chama depois de mostrar o conteúdo no visualizador. Quando quem consulta é da equipe (nem titular nem membro), o registro é **por pessoa** e é a prova exigida para aprovar ou reprovar o documento na conferência (`PUT .../review/items`); do titular e dos membros não gera registro. Idempotente. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
+      description: "O cliente chama depois de mostrar o conteúdo no visualizador (a primeira página apareceu). Quando quem consulta é da equipe (nem titular nem membro), o registro é **por pessoa** e é a prova exigida para **reprovar** o documento na conferência (`PUT .../review/items`); do titular e dos membros não gera registro. Idempotente. Para aprovar é preciso também `POST .../read`. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}/read:
+    post:
+      tags: [Projetos]
+      summary: Registra que quem consulta chegou ao fim do arquivo
+      description: "O cliente chama quando a pessoa rolou até o fim do documento no visualizador (também conta como ter visto). Para a equipe, o registro é **por pessoa** e é a prova exigida para **aprovar** o documento: sem ele, 422 `file_not_read` com `details.files`. Do titular e dos membros não gera registro. Idempotente. Permissão: `admin::projects.read`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1893,11 +1907,12 @@ paths:
         `decision`: `approved`, `rejected` (exige `note`, a justificativa, de 1 a 500 caracteres; documento adicional só pode ser aprovado) ou `pending` (desfaz). O campo antigo
         `approved` (true aprova, false desfaz) continua aceito quando `decision` vem vazio. Reprovar não devolve o item: ele só vai ao proponente num pedido de complementação,
         que o volta a pendente. Item reprovado impede indicar o departamento (409 `review_incomplete`, com `details.rejected`).
-        **Aprovar ou reprovar documento com arquivo exige que o próprio Analista tenha visto cada arquivo atual**: senão 422 `file_not_opened` com `details.files`
-        (até 20) e `details.total`. "Ver" é a exibição no visualizador, registrada por pessoa em `POST .../documents/files/{fileId}/viewed`; baixar o arquivo não conta.
+        **Reprovar documento com arquivo exige que o próprio Analista tenha visto cada arquivo atual** (422 `file_not_opened`, com `details.files` (até 20) e
+        `details.total`), e **aprovar exige que tenha chegado ao fim de cada um** (422 `file_not_read`). "Ver" é a exibição no visualizador (`POST .../documents/files/{fileId}/viewed`) e
+        "ler até o fim" é rolar até o final (`POST .../read`); ambos são registrados por pessoa, e baixar o arquivo não conta.
         Aprovar, reprovar e desfazer são idempotentes. A justificativa **não** vai para a auditoria (texto livre). Responde o projeto completo com `review` (itens, `summary` com `rejected`, `allApproved`)
         e `analyst`, que **só a equipe** recebe. Cada item traz `status` (`pending`, `approved` ou `rejected`) e, se reprovado, `note`. Cada arquivo em `review.items[].files`
-        traz `opened`: se o administrador que consulta já o viu. Permissão: `admin::projects.review-item`.
+        traz `opened` (o administrador que consulta já o viu) e `read` (já chegou ao fim). Permissão: `admin::projects.review-item`.
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}

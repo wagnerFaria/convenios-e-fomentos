@@ -106,6 +106,7 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(g(ActionRead)).Get("/admin/projects/{id}/documents/files/{fileId}/download", h.download)
 	r.With(g(ActionRead)).Get("/admin/projects/{id}/documents/files/{fileId}/preview", h.preview)
 	r.With(g(ActionRead)).Post("/admin/projects/{id}/documents/files/{fileId}/viewed", h.viewed)
+	r.With(g(ActionRead)).Post("/admin/projects/{id}/documents/files/{fileId}/read", h.readToEnd)
 	r.With(g(ActionUpdate)).Delete("/admin/projects/{id}/documents/files/{fileId}", h.deleteFile)
 }
 
@@ -580,8 +581,13 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, http.StatusOK, v, nil)
 }
 
-// viewed registra que o arquivo foi exibido para a pessoa da equipe (prova para aprovar ou reprovar o documento).
-func (h *Handler) viewed(w http.ResponseWriter, r *http.Request) {
+// viewed registra que o arquivo foi exibido para a pessoa da equipe (prova para reprovar o documento).
+func (h *Handler) viewed(w http.ResponseWriter, r *http.Request) { h.markViewed(w, r, false) }
+
+// readToEnd registra que a pessoa da equipe chegou ao fim do arquivo (prova para aprovar o documento).
+func (h *Handler) readToEnd(w http.ResponseWriter, r *http.Request) { h.markViewed(w, r, true) }
+
+func (h *Handler) markViewed(w http.ResponseWriter, r *http.Request, toEnd bool) {
 	id, err := idParam(r)
 	fileID, err2 := fileIDParam(r)
 	if err != nil || err2 != nil {
@@ -589,7 +595,7 @@ func (h *Handler) viewed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	read, _ := admin.DecisionFrom(r.Context())
-	if err := h.svc.MarkViewed(r.Context(), actorOf(r), id, fileID, read); err != nil {
+	if err := h.svc.MarkViewed(r.Context(), actorOf(r), id, fileID, read, toEnd); err != nil {
 		httpapi.Error(w, r, err)
 		return
 	}

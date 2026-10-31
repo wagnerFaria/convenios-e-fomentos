@@ -52,7 +52,7 @@ func TestReprovarItemComJustificativa(t *testing.T) {
 	file := fileIDOf(reviewItems(p.project(staff.analyst, fp.id))["document:requerimento_apoio"])
 
 	t.Run("exige justificativa e decisão válida", func(t *testing.T) {
-		require.Equal(t, 204, p.openFile(staff.analyst, fp.id, file))
+		require.Equal(t, 204, p.viewFile(staff.analyst, fp.id, file))
 		assert.Equal(t, 422, p.reject(staff.analyst, fp.id, "document", "requerimento_apoio", "   ").Status)
 		assert.Equal(t, 422, p.reject(staff.analyst, fp.id, "document", "requerimento_apoio", strings.Repeat("x", 501)).Status)
 		bad := p.do("PUT", "/api/admin/projects/"+fp.id+"/review/items", map[string]any{"kind": "document", "target": "requerimento_apoio", "decision": "talvez"}, staff.analyst)
@@ -62,6 +62,21 @@ func TestReprovarItemComJustificativa(t *testing.T) {
 		other, _ := p.newAdmin(p.boss, "m.analista3@exemplo.com", "analyst")
 		r := p.reject(other, fp.id, "document", "requerimento_apoio", "Ilegível.")
 		assert.Equal(t, "file_not_opened", r.errCode())
+	})
+	t.Run("só ver basta para reprovar, mas aprovar exige ler até o fim", func(t *testing.T) {
+		other, _ := p.newAdmin(p.boss, "m.analista4@exemplo.com", "analyst")
+		require.Equal(t, 200, p.startAnalysis(other, fp.id).Status)
+		require.Equal(t, 204, p.viewFile(other, fp.id, file))
+		r := p.review(other, fp.id, "document", "requerimento_apoio", true)
+		assert.Equal(t, 422, r.Status)
+		assert.Equal(t, "file_not_read", r.errCode())
+		assert.Equal(t, 200, p.reject(other, fp.id, "document", "requerimento_apoio", "Primeira página já mostra o erro.").Status)
+		require.Equal(t, 200, p.review(other, fp.id, "document", "requerimento_apoio", false).Status)
+		require.Equal(t, 204, p.do("POST", docsPath(fp.id, "/files/", file, "/read"), nil, other).Status)
+		assert.Equal(t, 200, p.review(other, fp.id, "document", "requerimento_apoio", true).Status)
+		it := reviewItems(p.project(other, fp.id))["document:requerimento_apoio"]
+		assert.Equal(t, true, it["files"].([]any)[0].(map[string]any)["read"])
+		require.Equal(t, 200, p.review(other, fp.id, "document", "requerimento_apoio", false).Status)
 	})
 	t.Run("reprova, mostra a justificativa e conta à parte", func(t *testing.T) {
 		r := p.reject(staff.analyst, fp.id, "document", "requerimento_apoio", "  Documento ilegível.  ")
@@ -83,6 +98,7 @@ func TestReprovarItemComJustificativa(t *testing.T) {
 		assert.EqualValues(t, 0, summaryOf(r)["pending"])
 	})
 	t.Run("aprovar depois substitui a reprovação e apaga a justificativa", func(t *testing.T) {
+		require.Equal(t, 204, p.openFile(staff.analyst, fp.id, file), "ler até o fim")
 		r := p.review(staff.analyst, fp.id, "document", "requerimento_apoio", true)
 		require.Equal(t, 200, r.Status, r.Body)
 		it := reviewItems(r)["document:requerimento_apoio"]

@@ -97,11 +97,15 @@ func findTarget(targets []reviewTarget, kind, target string) (reviewTarget, bool
 	return reviewTarget{}, false
 }
 
-// unopened devolve os arquivos do item que o administrador ainda não abriu.
-func unopened(t reviewTarget, opened map[uuid.UUID]bool) []DocFile {
+// fileSeen é o que o administrador fez com um arquivo no visualizador: Opened, ver o conteúdo; Read, chegar ao fim dele.
+type fileSeen struct{ Opened, Read bool }
+
+// unseen devolve os arquivos do item que o administrador ainda não viu (ou, com needRead, ainda não leu até o fim).
+func unseen(t reviewTarget, seen map[uuid.UUID]fileSeen, needRead bool) []DocFile {
 	var out []DocFile
 	for _, f := range t.Files {
-		if !opened[f.ID] {
+		s := seen[f.ID]
+		if !s.Opened || (needRead && !s.Read) {
 			out = append(out, f)
 		}
 	}
@@ -116,11 +120,13 @@ type reviewRow struct {
 	At     *time.Time
 }
 
-// ReviewFile é um arquivo de um item conferido. Opened é de quem consulta: cada Analista vê o que ele mesmo abriu.
+// ReviewFile é um arquivo de um item conferido. Opened (viu o conteúdo) e Read (chegou ao fim) são de quem consulta: cada Analista vê o
+// que ele mesmo fez.
 type ReviewFile struct {
 	ID       uuid.UUID `json:"id"`
 	Filename string    `json:"filename"`
 	Opened   bool      `json:"opened"`
+	Read     bool      `json:"read"`
 }
 
 // ReviewItem é um item na visão da equipe.
@@ -155,12 +161,12 @@ type Review struct {
 }
 
 // buildReview junta os itens conferíveis com o que foi gravado e com os arquivos que o administrador abriu.
-func buildReview(targets []reviewTarget, saved map[string]reviewRow, opened map[uuid.UUID]bool) Review {
+func buildReview(targets []reviewTarget, saved map[string]reviewRow, seen map[uuid.UUID]fileSeen) Review {
 	r := Review{Items: make([]ReviewItem, 0, len(targets))}
 	for _, t := range targets {
 		it := ReviewItem{Kind: t.Kind, Target: t.Target, Label: t.Label, Status: ReviewPending, Blocking: t.Blocking, Reason: t.Reason, Files: []ReviewFile{}}
 		for _, f := range t.Files {
-			it.Files = append(it.Files, ReviewFile{ID: f.ID, Filename: f.Filename, Opened: opened[f.ID]})
+			it.Files = append(it.Files, ReviewFile{ID: f.ID, Filename: f.Filename, Opened: seen[f.ID].Opened, Read: seen[f.ID].Read})
 		}
 		if row, ok := saved[t.key()]; ok && !t.Blocking {
 			it.Status, it.ReviewedBy, it.ReviewedAt = row.Status, row.By, row.At

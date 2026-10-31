@@ -160,13 +160,18 @@ func (s *Service) ReviewItem(ctx context.Context, actor Actor, id uuid.UUID, in 
 				Details: map[string]any{"fields": []httpapi.FieldError{{Field: "target", Message: "Item inexistente ou sem o que conferir (documento obrigatório sem arquivo nem justificativa)."}}}}
 		}
 		if decision != ReviewPending {
-			// Aprovar ou reprovar exige ter visto cada arquivo do item: não se julga o que não se viu.
-			opened, err := s.openedBy(ctx, q, id, actor.ID)
+			// Reprovar exige ter visto cada arquivo do item; aprovar, ter chegado ao fim de cada um: não se julga o que não se viu.
+			seen, err := s.openedBy(ctx, q, id, actor.ID)
 			if err != nil {
 				return err
 			}
-			if missing := unopened(t, opened); len(missing) > 0 {
+			if missing := unseen(t, seen, false); len(missing) > 0 {
 				return errFileNotOpened(missing, decision)
+			}
+			if decision == ReviewApproved {
+				if missing := unseen(t, seen, true); len(missing) > 0 {
+					return errFileNotRead(missing)
+				}
 			}
 		}
 		switch decision {
@@ -191,15 +196,27 @@ func (s *Service) ReviewItem(ctx context.Context, actor Actor, id uuid.UUID, in 
 	return out, err
 }
 
-func errFileNotOpened(missing []DocFile, decision string) error {
-	type file struct {
-		ID       uuid.UUID `json:"id"`
-		Filename string    `json:"filename"`
-	}
-	listed := make([]file, 0, min(len(missing), maxUnopenedListed))
+type listedFile struct {
+	ID       uuid.UUID `json:"id"`
+	Filename string    `json:"filename"`
+}
+
+func listFiles(missing []DocFile) []listedFile {
+	listed := make([]listedFile, 0, min(len(missing), maxUnopenedListed))
 	for _, f := range missing[:min(len(missing), maxUnopenedListed)] {
-		listed = append(listed, file{f.ID, f.Filename})
+		listed = append(listed, listedFile{f.ID, f.Filename})
 	}
+	return listed
+}
+
+// errFileNotRead: todos os arquivos foram vistos, mas algum não foi lido até o fim.
+func errFileNotRead(missing []DocFile) error {
+	return &httpapi.APIError{Status: 422, Code: "file_not_read", Message: "Leia cada arquivo do documento até o fim antes de aprová-lo.",
+		Details: map[string]any{"files": listFiles(missing), "total": len(missing)}}
+}
+
+func errFileNotOpened(missing []DocFile, decision string) error {
+	listed := listFiles(missing)
 	msg := "Visualize todos os arquivos do documento antes de aprová-lo."
 	if decision == ReviewRejected {
 		msg = "Visualize todos os arquivos do documento antes de reprová-lo."
@@ -208,22 +225,22 @@ func errFileNotOpened(missing []DocFile, decision string) error {
 		Details: map[string]any{"files": listed, "total": len(missing)}}
 }
 
-// openedBy devolve os arquivos do projeto que o administrador já abriu.
-func (s *Service) openedBy(ctx context.Context, q *db.Queries, projectID, adminID uuid.UUID) (map[uuid.UUID]bool, error) {
-	ids, err := q.ListFileViewsOfAdmin(ctx, db.ListFileViewsOfAdminParams{ProjectID: projectID, AdminID: adminID})
+// openedBy devolve o que o administrador já fez com cada arquivo do projeto (viu, e se leu até o fim).
+func (s *Service) openedBy(ctx context.Context, q *db.Queries, projectID, adminID uuid.UUID) (map[uuid.UUID]fileSeen, error) {
+	rows, err := q.ListFileViewsOfAdmin(ctx, db.ListFileViewsOfAdminParams{ProjectID: projectID, AdminID: adminID})
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[uuid.UUID]bool, len(ids))
-	for _, id := range ids {
-		out[id] = true
+	out := make(map[uuid.UUID]fileSeen, len(rows))
+	for _, r := range rows {
+		out[r.FileID] = fileSeen{Opened: true, Read: r.Read}
 	}
 	return out, nil
 }
 
-// recordStaffOpening registra que o administrador pediu o link do arquivo, se ele é da equipe (nem titular nem membro). Quem baixa o
-// próprio arquivo não gera registro. Se o registro falhar o download falha: melhor do que permitir aprovar sem a prova.
-func (s *Service) recordStaffOpening(ctx context.Context, projectID, fileID uuid.UUID, actor Actor) error {
+// recordStaffOpening registra que o administrador viu o arquivo (ou, com read, chegou ao fim dele), se ele é da equipe (nem titular
+// nem membro). Quem vê o próprio arquivo não gera registro. Se o registro falhar a chamada falha: melhor do que permitir aprovar sem a prova.
+func (s *Service) recordStaffOpening(ctx context.Context, projectID, fileID uuid.UUID, actor Actor, read bool) error {
 	if actor.ID == uuid.Nil {
 		return nil
 	}
@@ -235,11 +252,14 @@ func (s *Service) recordStaffOpening(ctx context.Context, projectID, fileID uuid
 	if err != nil || access != "" {
 		return err
 	}
+	if read {
+		return s.q.RecordFileRead(ctx, db.RecordFileReadParams{FileID: fileID, AdminID: actor.ID})
+	}
 	return s.q.RecordFileView(ctx, db.RecordFileViewParams{FileID: fileID, AdminID: actor.ID})
 }
 
 // reviewState monta a conferência a partir do que está gravado. opened pode ser nulo quando só interessa o resultado (allApproved).
-func (s *Service) reviewState(ctx context.Context, q *db.Queries, projectID uuid.UUID, cl *Checklist, opened map[uuid.UUID]bool) (Review, error) {
+func (s *Service) reviewState(ctx context.Context, q *db.Queries, projectID uuid.UUID, cl *Checklist, seen map[uuid.UUID]fileSeen) (Review, error) {
 	rows, err := q.ListItemReviews(ctx, projectID)
 	if err != nil {
 		return Review{}, err
@@ -248,7 +268,7 @@ func (s *Service) reviewState(ctx context.Context, q *db.Queries, projectID uuid
 	for _, x := range rows {
 		saved[x.Kind+":"+x.Target] = reviewRow{Status: x.Status, Note: str(x.Note), By: x.ReviewedByName, At: x.ReviewedAt}
 	}
-	return buildReview(reviewTargets(cl), saved, opened), nil
+	return buildReview(reviewTargets(cl), saved, seen), nil
 }
 
 // attachReview acrescenta à visão da equipe o analista responsável e a conferência. O titular e os membros não recebem (é interna),

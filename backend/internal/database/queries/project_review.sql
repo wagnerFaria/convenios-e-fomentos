@@ -34,9 +34,14 @@ DO UPDATE SET status = 'pending', note = NULL, reviewed_by_id = NULL, reviewed_a
 -- name: RecordFileView :exec
 INSERT INTO project_file_views (file_id, admin_id) VALUES ($1, $2) ON CONFLICT (file_id, admin_id) DO NOTHING;
 
--- Arquivos do projeto que este administrador já abriu.
+-- O administrador chegou ao fim do arquivo (e, por consequência, também o viu). Mantém a data da primeira leitura completa.
+-- name: RecordFileRead :exec
+INSERT INTO project_file_views (file_id, admin_id, read_at) VALUES ($1, $2, now())
+ON CONFLICT (file_id, admin_id) DO UPDATE SET read_at = COALESCE(project_file_views.read_at, now());
+
+-- Arquivos do projeto que este administrador já viu, e se leu cada um até o fim.
 -- name: ListFileViewsOfAdmin :many
-SELECT v.file_id
+SELECT v.file_id, (v.read_at IS NOT NULL)::boolean AS read
 FROM project_file_views v
 JOIN project_files f ON f.id = v.file_id
 JOIN project_document_items i ON i.id = f.item_id
