@@ -29,7 +29,17 @@ export const navGroups: NavGroup[] = [
         icon: 'kanban',
         isActive: false,
         shortcut: ['m', 'p'],
-        access: { permission: 'admin::projects.read' },
+        // Só quem cadastra projetos: a equipe também tem `projects.read`, e veria todos os projetos sob este título.
+        access: { permission: 'admin::projects.read', when: 'project-proponent' },
+        items: []
+      },
+      {
+        title: 'Análise de projetos',
+        url: '/dashboard/analise',
+        icon: 'forms',
+        isActive: false,
+        shortcut: ['a', 'n'],
+        access: { permission: 'admin::projects.read', when: 'project-staff' },
         items: []
       },
       {

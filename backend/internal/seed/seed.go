@@ -59,9 +59,32 @@ const (
 	RoleSupervisor = "administrative-supervisor"
 	// RoleAnalyst também é criado pela migração 00023.
 	RoleAnalyst = "analyst"
+	// RoleSecretary é criado pela migração 00024.
+	RoleSecretary = "state-secretary"
 )
 
+// Ações de departamentos que o Analista recebe (ele os administra, menos criar).
+const (
+	actionDepartmentsRead   = "admin::settings.departments.read"
+	actionDepartmentsUpdate = "admin::settings.departments.update"
+	actionDepartmentsDelete = "admin::settings.departments.delete"
+)
+
+// staffRead é a leitura de projeto da equipe: só projeto enviado ou arquivado, nunca rascunho.
+var staffRead = authz.Permission{Action: project.ActionRead, Conditions: []string{project.ConditionSubmitted}}
+
+// staffReference são as leituras de catálogo e de parâmetros que todos os perfis de equipe têm.
+func staffReference() []authz.Permission {
+	return []authz.Permission{
+		{Action: catalog.ActionEntityTypesRead}, {Action: catalog.ActionMunicipalitiesRead},
+		{Action: catalog.ActionParliamentariansRead}, {Action: rules.ActionRead},
+	}
+}
+
 // Departamentos de exemplo.
+// Departments são os departamentos de exemplo. Em desenvolvimento nascem como área finalística; em produção nascem sem a marca,
+// porque quem administra decide quais departamentos recebem projetos para enquadramento. O marcador só vale na criação: um novo
+// seed nunca altera a escolha feita depois.
 var Departments = []string{"Financeiro", "Jurídico"}
 
 const endUserFlag = "seed.enduser-permissions"
@@ -114,30 +137,47 @@ func adminRoles() []roleSpec {
 			},
 		},
 		{
-			code: RoleReviewer, name: "Revisor do Departamento", description: "Lê documentos; só altera status e observação interna dos documentos do próprio departamento.",
-			perms: []authz.Permission{
-				{Action: document.ActionAdminRead}, {Action: document.ActionAdminFileRead},
-				{Action: document.ActionAdminUpdate, Fields: []string{"status", "observacao_interna"}, Conditions: []string{"admin::same-department"}},
-				{Action: document.ActionAdminPublish, Conditions: []string{"admin::same-department"}},
-			},
+			code: RoleReviewer, name: "Revisor do Departamento", description: "Vê os projetos enviados do próprio departamento e confirma ou recusa o enquadramento.",
+			perms: append([]authz.Permission{
+				{Action: project.ActionRead, Conditions: []string{project.ConditionSubmittedSameDepartment}},
+				{Action: project.ActionReviewFraming, Conditions: []string{project.ConditionSubmittedSameDepartment}},
+			}, staffReference()...),
 		},
 		{
-			code: RoleAnalyst, name: "Analista", description: "Vê todos os projetos enviados, confere a documentação, pede complementação ao proponente ou arquiva o projeto.", system: true,
-			perms: []authz.Permission{
-				{Action: project.ActionRead}, {Action: project.ActionRequestComplement}, {Action: project.ActionArchive},
-				{Action: catalog.ActionEntityTypesRead}, {Action: catalog.ActionMunicipalitiesRead},
-				{Action: catalog.ActionParliamentariansRead}, {Action: rules.ActionRead},
-			},
+			code: RoleAnalyst, name: "Analista", system: true,
+			description: "Assume a análise dos projetos enviados, confere documentos e informações, devolve para complementação, arquiva por falta de documentos obrigatórios e administra os departamentos.",
+			perms: append([]authz.Permission{
+				staffRead,
+				{Action: project.ActionRequestComplement, Conditions: []string{project.ConditionSubmitted}},
+				{Action: project.ActionArchive, Conditions: []string{project.ConditionSubmitted}},
+				{Action: project.ActionStartAnalysis, Conditions: []string{project.ConditionSubmitted}},
+				{Action: project.ActionReviewItem, Conditions: []string{project.ConditionSubmitted}},
+				{Action: project.ActionAssignDepartment, Conditions: []string{project.ConditionSubmitted}},
+				{Action: actionDepartmentsRead}, {Action: actionDepartmentsUpdate}, {Action: actionDepartmentsDelete},
+			}, staffReference()...),
 		},
 		{
-			code: RoleSupervisor, name: "Supervisor Administrador", description: "Acompanha todos os projetos enviados e conduz a análise: pede complementação, arquiva ou nega.", system: true,
-			perms: []authz.Permission{
-				{Action: project.ActionRead}, {Action: project.ActionRequestComplement}, {Action: project.ActionArchive}, {Action: project.ActionDeny},
-				{Action: catalog.ActionEntityTypesRead}, {Action: catalog.ActionMunicipalitiesRead},
-				{Action: catalog.ActionParliamentariansRead}, {Action: rules.ActionRead},
-			},
+			code: RoleSupervisor, name: "Supervisor Administrador", system: true,
+			description: "Acompanha todos os projetos enviados, somente leitura. Recebe e-mails sobre documentação regular, enquadramento recusado e arquivamento.",
+			perms:       append([]authz.Permission{staffRead}, staffReference()...),
+		},
+		{
+			code: RoleSecretary, name: "Secretário de Estado", system: true,
+			description: "Vê todos os projetos enviados e pode negá-los a qualquer momento, arquivando-os na hora.",
+			perms:       append([]authz.Permission{staffRead, {Action: project.ActionDeny, Conditions: []string{project.ConditionSubmitted}}}, staffReference()...),
 		},
 	}
+}
+
+// DefaultPermissions devolve as permissões padrão do perfil de sistema com esse código (nil se não existe). Os perfis de equipe
+// nascem nas migrações e o seed só declara os mesmos valores, então os testes usam esta função para conferir que os dois batem.
+func DefaultPermissions(code string) []authz.Permission {
+	for _, spec := range adminRoles() {
+		if spec.code == code {
+			return spec.perms
+		}
+	}
+	return nil
 }
 
 var endUserDefaults = map[string][]string{
@@ -152,7 +192,7 @@ func Run(ctx context.Context, d Deps) error {
 		return fmt.Errorf("padrões de usuário final: %w", err)
 	}
 	for _, name := range Departments {
-		if _, err := q.UpsertDepartment(ctx, name); err != nil {
+		if _, err := q.UpsertDepartment(ctx, db.UpsertDepartmentParams{Name: name, IsFinalistic: d.Development}); err != nil {
 			return fmt.Errorf("departamento %q: %w", name, err)
 		}
 	}
@@ -287,6 +327,10 @@ var DevUsers = []DevUser{
 	{"22233344405", "editor@dev.local", "Eda", "Editora", RoleEditor, ""},
 	{"33322211169", "author@dev.local", "Augusto", "Autor", RoleAuthor, "Financeiro"},
 	{"44455566619", "revisor@dev.local", "Regina", "Revisora", RoleReviewer, "Financeiro"},
+	{"88899900078", "revisor.juridico@dev.local", "Rui", "Revisor", RoleReviewer, "Jurídico"},
+	{"55566677720", "analista@dev.local", "Ana", "Analista", RoleAnalyst, ""},
+	{"66677788830", "supervisor@dev.local", "Sérgio", "Supervisor", RoleSupervisor, ""},
+	{"77788899941", "secretario@dev.local", "Sílvia", "Secretária", RoleSecretary, ""},
 }
 
 func (d Deps) devUsers(ctx context.Context, q *db.Queries) error {

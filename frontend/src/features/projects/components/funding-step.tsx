@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useStore } from '@tanstack/react-form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { FieldGroup } from '@/components/ui/field';
+import { ReadOnlyScope } from '@/components/forms/read-only-scope';
 import { useAppForm } from '@/lib/form';
 import { projectKeys } from '../api/queries';
 import { saveFunding } from '../api/service';
@@ -98,7 +99,8 @@ export function FundingStep({
 
   const form = useAppForm({
     defaultValues: defaults(),
-    onSubmit: ({ value }) => save.mutateAsync(value).catch(() => undefined)
+    // Somente leitura (a equipe, ou projeto que o proponente não pode mais alterar): nada é enviado ao servidor.
+    onSubmit: ({ value }) => (readOnly ? undefined : save.mutateAsync(value).catch(() => undefined))
   });
   const dirty = useStore(form.store, (s) => s.isDirty);
   useEffect(() => onDirty(dirty), [dirty, onDirty]);
@@ -128,102 +130,36 @@ export function FundingStep({
         void form.handleSubmit();
       }}
     >
-      <FieldGroup>
-        {!instrument && (
-          <Alert>
-            <AlertDescription>
-              Escolha o instrumento na etapa Instituição: ele define as regras de contrapartida,
-              custos indiretos e chamamento público.
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <form.AppField
-          name='type'
-          children={(field) => (
-            <field.RadioGroupField
-              label='Tipo de recurso'
-              required
-              description='"Recurso próprio" é o recurso orçamentário da SEDEC; a contrapartida do proponente é informada mais abaixo.'
-              options={typeOptions}
-            />
+      <ReadOnlyScope readOnly={readOnly}>
+        <FieldGroup>
+          {!instrument && (
+            <Alert>
+              <AlertDescription>
+                Escolha o instrumento na etapa Instituição: ele define as regras de contrapartida,
+                custos indiretos e chamamento público.
+              </AlertDescription>
+            </Alert>
           )}
-        />
 
-        {hasOwn && (
-          <form.Field
-            name='ownAmountCents'
-            children={(field) => (
-              <MoneyField
-                id='own-amount'
-                label='Valor do recurso próprio da SEDEC'
-                required
-                value={field.state.value}
-                onChange={field.handleChange}
-              />
-            )}
-          />
-        )}
-        {hasAmendments && (
-          <form.Field
-            name='amendments'
-            children={(field) => (
-              <AmendmentsEditor
-                value={field.state.value}
-                onChange={field.handleChange}
-                disabled={readOnly}
-              />
-            )}
-          />
-        )}
-        {v.type && (
-          <dl
-            className='bg-muted/40 grid gap-1 rounded-lg border p-3 text-sm sm:grid-cols-3'
-            aria-label='Resumo dos valores'
-          >
-            {hasOwn && (
-              <div>
-                <dt className='text-muted-foreground'>Recurso próprio</dt>
-                <dd className='tabular-nums'>{formatBrl(v.ownAmountCents)}</dd>
-              </div>
-            )}
-            {hasAmendments && (
-              <div>
-                <dt className='text-muted-foreground'>Emendas</dt>
-                <dd className='tabular-nums'>{formatBrl(amendmentsTotal)}</dd>
-              </div>
-            )}
-            <div>
-              <dt className='text-muted-foreground'>Total solicitado</dt>
-              <dd className='font-semibold tabular-nums'>{formatBrl(total)}</dd>
-            </div>
-          </dl>
-        )}
-
-        <fieldset className='space-y-4 rounded-lg border p-4'>
-          <legend className='px-1 text-sm font-medium'>Contrapartida do proponente</legend>
-          <p className='text-muted-foreground text-sm'>
-            {instrument === 'fomento'
-              ? 'No Termo de Fomento a contrapartida não pode ser exigida em dinheiro: só em bens e serviços, com o valor em reais.'
-              : 'Convênio: os limites seguem a LDO do Estado. Em calamidade ou emergência a contrapartida é dispensada.'}
-          </p>
           <form.AppField
-            name='counterpartKind'
+            name='type'
             children={(field) => (
-              <field.SelectField
-                label='Tipo'
-                placeholder='Sem contrapartida'
-                options={[{ value: '', label: 'Sem contrapartida' }, ...counterpartOptions]}
+              <field.RadioGroupField
+                label='Tipo de recurso'
+                required
+                description='"Recurso próprio" é o recurso orçamentário da SEDEC; a contrapartida do proponente é informada mais abaixo.'
+                options={typeOptions}
               />
             )}
           />
-          {v.counterpartKind && (
+
+          {hasOwn && (
             <form.Field
-              name='counterpartCents'
+              name='ownAmountCents'
               children={(field) => (
                 <MoneyField
-                  id='counterpart'
-                  label='Valor da contrapartida'
+                  id='own-amount'
+                  label='Valor do recurso próprio da SEDEC'
                   required
                   value={field.state.value}
                   onChange={field.handleChange}
@@ -231,172 +167,236 @@ export function FundingStep({
               )}
             />
           )}
-          {v.counterpartKind === 'in_kind' && (
-            <form.AppField
-              name='counterpartDescription'
+          {hasAmendments && (
+            <form.Field
+              name='amendments'
               children={(field) => (
-                <field.TextareaField
-                  label='Bens e serviços oferecidos'
-                  required
-                  rows={3}
-                  maxLength={1000}
-                  showCount
-                />
+                <AmendmentsEditor value={field.state.value} onChange={field.handleChange} />
               )}
             />
           )}
-        </fieldset>
-
-        {instrument === 'fomento' && (
-          <fieldset className='space-y-4 rounded-lg border p-4'>
-            <legend className='px-1 text-sm font-medium'>Custos indiretos e preços</legend>
-            <form.Field
-              name='indirectCostsCents'
-              children={(field) => (
-                <MoneyField
-                  id='indirect-costs'
-                  label='Custos indiretos'
-                  description='Até 20% (teto de R$ 15 mil) para parcerias de até R$ 100 mil; 15% (R$ 50 mil) até R$ 500 mil; 10% (R$ 200 mil) acima disso. IN Conjunta 002/2026.'
-                  value={field.state.value}
-                  onChange={field.handleChange}
-                />
+          {v.type && (
+            <dl
+              className='bg-muted/40 grid gap-1 rounded-lg border p-3 text-sm sm:grid-cols-3'
+              aria-label='Resumo dos valores'
+            >
+              {hasOwn && (
+                <div>
+                  <dt className='text-muted-foreground'>Recurso próprio</dt>
+                  <dd className='tabular-nums'>{formatBrl(v.ownAmountCents)}</dd>
+                </div>
               )}
-            />
-            <form.AppField
-              name='priceOldestCollectedOn'
-              children={(field) => (
-                <field.TextField
-                  label='Data da referência de preço mais antiga'
-                  type='date'
-                  description='As referências de preço devem ter no máximo 60 dias.'
-                />
+              {hasAmendments && (
+                <div>
+                  <dt className='text-muted-foreground'>Emendas</dt>
+                  <dd className='tabular-nums'>{formatBrl(amendmentsTotal)}</dd>
+                </div>
               )}
-            />
-          </fieldset>
-        )}
+              <div>
+                <dt className='text-muted-foreground'>Total solicitado</dt>
+                <dd className='font-semibold tabular-nums'>{formatBrl(total)}</dd>
+              </div>
+            </dl>
+          )}
 
-        {(needsTender || v.tenderStatus) && instrument && (
           <fieldset className='space-y-4 rounded-lg border p-4'>
-            <legend className='px-1 text-sm font-medium'>Chamamento público</legend>
+            <legend className='px-1 text-sm font-medium'>Contrapartida do proponente</legend>
             <p className='text-muted-foreground text-sm'>
-              {needsTender
-                ? 'Este projeto exige chamamento público. Informe o chamamento realizado ou o fundamento da dispensa ou inexigibilidade.'
-                : 'Este projeto não exige chamamento público.'}
+              {instrument === 'fomento'
+                ? 'No Termo de Fomento a contrapartida não pode ser exigida em dinheiro: só em bens e serviços, com o valor em reais.'
+                : 'Convênio: os limites seguem a LDO do Estado. Em calamidade ou emergência a contrapartida é dispensada.'}
             </p>
             <form.AppField
-              name='tenderStatus'
+              name='counterpartKind'
               children={(field) => (
                 <field.SelectField
-                  label='Situação'
-                  required={needsTender}
-                  placeholder='Escolha'
-                  options={[{ value: '', label: 'Escolha' }, ...statusOptions]}
+                  label='Tipo'
+                  placeholder='Sem contrapartida'
+                  options={[{ value: '', label: 'Sem contrapartida' }, ...counterpartOptions]}
                 />
               )}
             />
-            {v.tenderStatus === 'held' && (
-              <div className='grid gap-4 sm:grid-cols-2'>
-                <form.AppField
-                  name='tenderNoticeNumber'
-                  children={(field) => (
-                    <field.TextField label='Nº do edital' required maxLength={50} />
-                  )}
-                />
-                <form.AppField
-                  name='tenderApprovedOn'
-                  children={(field) => (
-                    <field.TextField label='Data da homologação' type='date' required />
-                  )}
-                />
-              </div>
-            )}
-            {(v.tenderStatus === 'waived' || v.tenderStatus === 'unfeasible') && (
-              <>
-                <form.AppField
-                  name='tenderLegalBasis'
-                  children={(field) => (
-                    <field.SelectField
-                      label='Fundamento legal'
-                      required
-                      placeholder='Escolha'
-                      options={[{ value: '', label: 'Escolha' }, ...basisOptions]}
-                    />
-                  )}
-                />
-                <form.AppField
-                  name='tenderJustification'
-                  children={(field) => (
-                    <field.TextareaField
-                      label='Justificativa'
-                      required
-                      rows={3}
-                      maxLength={2000}
-                      showCount
-                    />
-                  )}
-                />
-              </>
-            )}
-          </fieldset>
-        )}
-
-        {hiring && (
-          <fieldset className='space-y-4 rounded-lg border p-4'>
-            <legend className='px-1 text-sm font-medium'>
-              Shows e eventos musicais (Lei Estadual 12.082/2023)
-            </legend>
-            <p className='text-muted-foreground text-sm'>
-              Repasse limitado ao teto vigente; cachês de no máximo 50% do repasse, sendo pelo menos
-              30% deles para artistas regionais; contrapartida mínima de 10% em convênio com
-              município. Os limites exatos aparecem nas pendências.
-            </p>
-            <div className='grid gap-4 sm:grid-cols-2'>
+            {v.counterpartKind && (
               <form.Field
-                name='artistFeesCents'
+                name='counterpartCents'
                 children={(field) => (
                   <MoneyField
-                    id='artist-fees'
-                    label='Total de cachês artísticos'
+                    id='counterpart'
+                    label='Valor da contrapartida'
                     required
                     value={field.state.value}
                     onChange={field.handleChange}
                   />
                 )}
               />
+            )}
+            {v.counterpartKind === 'in_kind' && (
+              <form.AppField
+                name='counterpartDescription'
+                children={(field) => (
+                  <field.TextareaField
+                    label='Bens e serviços oferecidos'
+                    required
+                    rows={3}
+                    maxLength={1000}
+                    showCount
+                  />
+                )}
+              />
+            )}
+          </fieldset>
+
+          {instrument === 'fomento' && (
+            <fieldset className='space-y-4 rounded-lg border p-4'>
+              <legend className='px-1 text-sm font-medium'>Custos indiretos e preços</legend>
               <form.Field
-                name='regionalArtistFeesCents'
+                name='indirectCostsCents'
                 children={(field) => (
                   <MoneyField
-                    id='regional-fees'
-                    label='Cachês de artistas regionais'
-                    description='Parte do total de cachês.'
+                    id='indirect-costs'
+                    label='Custos indiretos'
+                    description='Até 20% (teto de R$ 15 mil) para parcerias de até R$ 100 mil; 15% (R$ 50 mil) até R$ 500 mil; 10% (R$ 200 mil) acima disso. IN Conjunta 002/2026.'
                     value={field.state.value}
                     onChange={field.handleChange}
                   />
                 )}
               />
-            </div>
-            <form.AppField
-              name='governorWaiver'
-              children={(field) => (
-                <field.SwitchField
-                  label='Há autorização expressa do Governador para afastar os limites'
-                  description='Art. 5º da Lei 12.082/2023. O documento da autorização é anexado na etapa de documentos.'
-                />
-              )}
-            />
-          </fieldset>
-        )}
+              <form.AppField
+                name='priceOldestCollectedOn'
+                children={(field) => (
+                  <field.TextField
+                    label='Data da referência de preço mais antiga'
+                    type='date'
+                    description='As referências de preço devem ter no máximo 60 dias.'
+                  />
+                )}
+              />
+            </fieldset>
+          )}
 
-        <ServerErrors error={save.error} />
-        <StepActions
-          saving={save.isPending}
-          disabled={readOnly}
-          onSave={() => (advance.current = false)}
-          onSaveAndContinue={() => (advance.current = true)}
-          last
-        />
-      </FieldGroup>
+          {(needsTender || v.tenderStatus) && instrument && (
+            <fieldset className='space-y-4 rounded-lg border p-4'>
+              <legend className='px-1 text-sm font-medium'>Chamamento público</legend>
+              <p className='text-muted-foreground text-sm'>
+                {needsTender
+                  ? 'Este projeto exige chamamento público. Informe o chamamento realizado ou o fundamento da dispensa ou inexigibilidade.'
+                  : 'Este projeto não exige chamamento público.'}
+              </p>
+              <form.AppField
+                name='tenderStatus'
+                children={(field) => (
+                  <field.SelectField
+                    label='Situação'
+                    required={needsTender}
+                    placeholder='Escolha'
+                    options={[{ value: '', label: 'Escolha' }, ...statusOptions]}
+                  />
+                )}
+              />
+              {v.tenderStatus === 'held' && (
+                <div className='grid gap-4 sm:grid-cols-2'>
+                  <form.AppField
+                    name='tenderNoticeNumber'
+                    children={(field) => (
+                      <field.TextField label='Nº do edital' required maxLength={50} />
+                    )}
+                  />
+                  <form.AppField
+                    name='tenderApprovedOn'
+                    children={(field) => (
+                      <field.TextField label='Data da homologação' type='date' required />
+                    )}
+                  />
+                </div>
+              )}
+              {(v.tenderStatus === 'waived' || v.tenderStatus === 'unfeasible') && (
+                <>
+                  <form.AppField
+                    name='tenderLegalBasis'
+                    children={(field) => (
+                      <field.SelectField
+                        label='Fundamento legal'
+                        required
+                        placeholder='Escolha'
+                        options={[{ value: '', label: 'Escolha' }, ...basisOptions]}
+                      />
+                    )}
+                  />
+                  <form.AppField
+                    name='tenderJustification'
+                    children={(field) => (
+                      <field.TextareaField
+                        label='Justificativa'
+                        required
+                        rows={3}
+                        maxLength={2000}
+                        showCount
+                      />
+                    )}
+                  />
+                </>
+              )}
+            </fieldset>
+          )}
+
+          {hiring && (
+            <fieldset className='space-y-4 rounded-lg border p-4'>
+              <legend className='px-1 text-sm font-medium'>
+                Shows e eventos musicais (Lei Estadual 12.082/2023)
+              </legend>
+              <p className='text-muted-foreground text-sm'>
+                Repasse limitado ao teto vigente; cachês de no máximo 50% do repasse, sendo pelo
+                menos 30% deles para artistas regionais; contrapartida mínima de 10% em convênio com
+                município. Os limites exatos aparecem nas pendências.
+              </p>
+              <div className='grid gap-4 sm:grid-cols-2'>
+                <form.Field
+                  name='artistFeesCents'
+                  children={(field) => (
+                    <MoneyField
+                      id='artist-fees'
+                      label='Total de cachês artísticos'
+                      required
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                    />
+                  )}
+                />
+                <form.Field
+                  name='regionalArtistFeesCents'
+                  children={(field) => (
+                    <MoneyField
+                      id='regional-fees'
+                      label='Cachês de artistas regionais'
+                      description='Parte do total de cachês.'
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                    />
+                  )}
+                />
+              </div>
+              <form.AppField
+                name='governorWaiver'
+                children={(field) => (
+                  <field.SwitchField
+                    label='Há autorização expressa do Governador para afastar os limites'
+                    description='Art. 5º da Lei 12.082/2023. O documento da autorização é anexado na etapa de documentos.'
+                  />
+                )}
+              />
+            </fieldset>
+          )}
+
+          <ServerErrors error={save.error} />
+          <StepActions
+            saving={save.isPending}
+            disabled={readOnly}
+            onSave={() => (advance.current = false)}
+            onSaveAndContinue={() => (advance.current = true)}
+            last
+          />
+        </FieldGroup>
+      </ReadOnlyScope>
     </form>
   );
 }

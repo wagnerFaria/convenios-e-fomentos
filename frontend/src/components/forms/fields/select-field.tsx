@@ -9,7 +9,12 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
-import { useFieldContext, useFieldInvalid, type BaseFieldProps } from '@/lib/form-context';
+import {
+  useFieldContext,
+  useFieldInvalid,
+  useFormReadOnly,
+  type BaseFieldProps
+} from '@/lib/form-context';
 
 export function SelectField({
   label,
@@ -23,6 +28,7 @@ export function SelectField({
 }) {
   const field = useFieldContext<string>();
   const isInvalid = useFieldInvalid();
+  const readOnly = useFormReadOnly();
 
   return (
     <Field data-invalid={isInvalid}>
@@ -32,6 +38,7 @@ export function SelectField({
       </FieldLabel>
       <Select
         name={field.name}
+        disabled={readOnly}
         items={options}
         value={field.state.value}
         onValueChange={(value) => field.handleChange(value ?? '')}

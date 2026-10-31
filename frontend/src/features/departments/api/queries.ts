@@ -3,8 +3,11 @@ import { listDepartments } from './service';
 
 export const departmentKeys = {
   all: ['departments'] as const,
-  list: () => [...departmentKeys.all, 'list'] as const
+  list: (finalistic = false) => [...departmentKeys.all, 'list', { finalistic }] as const
 };
 
-export const departmentsQueryOptions = () =>
-  queryOptions({ queryKey: departmentKeys.list(), queryFn: listDepartments });
+export const departmentsQueryOptions = (finalistic = false) =>
+  queryOptions({
+    queryKey: departmentKeys.list(finalistic),
+    queryFn: () => listDepartments({ finalistic })
+  });

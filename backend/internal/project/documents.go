@@ -720,6 +720,7 @@ func (s *Service) DeleteFile(ctx context.Context, id, fileID uuid.UUID, upd auth
 	if _, err := s.q.DeleteProjectFile(ctx, fileID); err != nil {
 		return err
 	}
+	s.deleteObjects(ctx, []string{previewKey(fileID)}) // o PDF gerado para exibição, se houver
 	_, err = s.q.DeleteProjectDocumentItemIfEmpty(ctx, f.ItemID)
 	return err
 }

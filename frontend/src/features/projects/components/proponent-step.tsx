@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useStore } from '@tanstack/react-form';
 import { FieldGroup } from '@/components/ui/field';
+import { ReadOnlyScope } from '@/components/forms/read-only-scope';
 import { useAppForm } from '@/lib/form';
 import { projectKeys } from '../api/queries';
 import { saveProponent } from '../api/service';
@@ -78,7 +79,8 @@ export function ProponentStep({
 
   const form = useAppForm({
     defaultValues: defaults(),
-    onSubmit: ({ value }) => save.mutateAsync(value).catch(() => undefined)
+    // Somente leitura (a equipe, ou projeto que o proponente não pode mais alterar): nada é enviado ao servidor.
+    onSubmit: ({ value }) => (readOnly ? undefined : save.mutateAsync(value).catch(() => undefined))
   });
   const dirty = useStore(form.store, (s) => s.isDirty);
   useEffect(() => onDirty(dirty), [dirty, onDirty]);
@@ -91,81 +93,83 @@ export function ProponentStep({
         void form.handleSubmit();
       }}
     >
-      <FieldGroup>
-        <div className='bg-muted/40 rounded-lg border p-3 text-sm'>
-          <p className='font-medium'>{p.name}</p>
-          <p className='text-muted-foreground'>
-            CPF {formatCpf(p.cpf)} · dados do seu login no MT Login
-          </p>
-        </div>
-        <form.Field
-          name='contact'
-          children={(f) => <ContactEditor value={f.state.value} onChange={f.handleChange} />}
-        />
-        <form.AppField
-          name='representative'
-          children={(f) => (
-            <f.RadioGroupField
-              label='Você é o representante legal da instituição?'
-              required
-              options={representativeOptions}
-            />
-          )}
-        />
-        {representative === 'no' && (
-          <>
-            <form.AppField
-              name='legalRepName'
-              children={(f) => (
-                <f.TextField label='Nome do representante legal' required maxLength={150} />
-              )}
-            />
-            <form.AppField
-              name='legalRepCpf'
-              children={(f) => (
-                <f.TextField
-                  label='CPF do representante legal'
-                  required
-                  inputMode='numeric'
-                  placeholder='000.000.000-00'
-                />
-              )}
-            />
-            <form.AppField
-              name='legalRepJobTitle'
-              children={(f) => (
-                <f.TextField label='Cargo do representante legal' required maxLength={100} />
-              )}
-            />
-            <fieldset className='space-y-3'>
-              <legend className='text-sm leading-snug font-medium'>
-                Dados pessoais do representante legal
-              </legend>
-              <p className='text-muted-foreground text-sm'>
-                É ele quem assina as declarações; nacionalidade, estado civil e endereço entram no
-                texto delas.
-              </p>
-              <form.Field
-                name='legalRepPersonal'
+      <ReadOnlyScope readOnly={readOnly}>
+        <FieldGroup>
+          <div className='bg-muted/40 rounded-lg border p-3 text-sm'>
+            <p className='font-medium'>{p.name}</p>
+            <p className='text-muted-foreground'>
+              CPF {formatCpf(p.cpf)} · dados do seu login no MT Login
+            </p>
+          </div>
+          <form.Field
+            name='contact'
+            children={(f) => <ContactEditor value={f.state.value} onChange={f.handleChange} />}
+          />
+          <form.AppField
+            name='representative'
+            children={(f) => (
+              <f.RadioGroupField
+                label='Você é o representante legal da instituição?'
+                required
+                options={representativeOptions}
+              />
+            )}
+          />
+          {representative === 'no' && (
+            <>
+              <form.AppField
+                name='legalRepName'
                 children={(f) => (
-                  <PersonalDataEditor
-                    id='legal-rep-personal'
-                    value={f.state.value}
-                    onChange={f.handleChange}
+                  <f.TextField label='Nome do representante legal' required maxLength={150} />
+                )}
+              />
+              <form.AppField
+                name='legalRepCpf'
+                children={(f) => (
+                  <f.TextField
+                    label='CPF do representante legal'
+                    required
+                    inputMode='numeric'
+                    placeholder='000.000.000-00'
                   />
                 )}
               />
-            </fieldset>
-          </>
-        )}
-        <ServerErrors error={save.error} />
-        <StepActions
-          saving={save.isPending}
-          disabled={readOnly}
-          onSave={() => (advance.current = false)}
-          onSaveAndContinue={() => (advance.current = true)}
-        />
-      </FieldGroup>
+              <form.AppField
+                name='legalRepJobTitle'
+                children={(f) => (
+                  <f.TextField label='Cargo do representante legal' required maxLength={100} />
+                )}
+              />
+              <fieldset className='space-y-3'>
+                <legend className='text-sm leading-snug font-medium'>
+                  Dados pessoais do representante legal
+                </legend>
+                <p className='text-muted-foreground text-sm'>
+                  É ele quem assina as declarações; nacionalidade, estado civil e endereço entram no
+                  texto delas.
+                </p>
+                <form.Field
+                  name='legalRepPersonal'
+                  children={(f) => (
+                    <PersonalDataEditor
+                      id='legal-rep-personal'
+                      value={f.state.value}
+                      onChange={f.handleChange}
+                    />
+                  )}
+                />
+              </fieldset>
+            </>
+          )}
+          <ServerErrors error={save.error} />
+          <StepActions
+            saving={save.isPending}
+            disabled={readOnly}
+            onSave={() => (advance.current = false)}
+            onSaveAndContinue={() => (advance.current = true)}
+          />
+        </FieldGroup>
+      </ReadOnlyScope>
     </form>
   );
 }

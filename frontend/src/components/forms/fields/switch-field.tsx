@@ -8,11 +8,17 @@ import {
   FieldLabel
 } from '@/components/ui/field';
 import { Switch } from '@/components/ui/switch';
-import { useFieldContext, useFieldInvalid, type BaseFieldProps } from '@/lib/form-context';
+import {
+  useFieldContext,
+  useFieldInvalid,
+  useFormReadOnly,
+  type BaseFieldProps
+} from '@/lib/form-context';
 
 export function SwitchField({ label, description, required }: BaseFieldProps) {
   const field = useFieldContext<boolean>();
   const isInvalid = useFieldInvalid();
+  const readOnly = useFormReadOnly();
 
   return (
     <Field orientation='horizontal' data-invalid={isInvalid}>
@@ -27,6 +33,7 @@ export function SwitchField({ label, description, required }: BaseFieldProps) {
       <Switch
         id={field.name}
         name={field.name}
+        disabled={readOnly}
         checked={field.state.value}
         onCheckedChange={field.handleChange}
         aria-invalid={isInvalid}

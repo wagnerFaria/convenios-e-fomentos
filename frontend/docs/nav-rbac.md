@@ -42,6 +42,15 @@ Cada item de `src/config/nav-config.ts` pode exigir uma ação:
 }
 ```
 
+Quando uma ação só não distingue os perfis, o item pode também declarar `access.when`, um critério sobre a sessão inteira:
+
+| `when` | Quem passa | Por quê |
+|---|---|---|
+| `project-proponent` | quem cadastra projetos (`admin::projects.create`) | "Meus projetos" é do Proponente; a equipe também tem `projects.read` |
+| `project-staff` | quem lê projetos além dos que cadastrou | O Proponente e a equipe têm a mesma ação `projects.read`; o que os separa são as **condições** da permissão (o Proponente só tem "é o criador" e "é membro"; a equipe tem as de projeto enviado). Ver `isProjectStaff` em `src/features/projects/access.ts` |
+
+O Super Admin passa nos dois. Como `useCan`, é só para esconder menu: a autorização real é do backend. Os critérios dependem dos **nomes** das condições do backend (`members.go` e `visibility.go`); se mudarem lá, mudam em `access.ts`.
+
 `useFilteredNavGroups` / `useFilteredNavItems` (`src/hooks/use-nav.ts`) escondem os itens sem permissão e os grupos que ficam vazios.
 Os tipos estão em `src/types/index.ts` (`NavItem.access`).
 

@@ -7,6 +7,7 @@ import { Icons } from '@/components/icons';
 import { AlertModal } from '@/components/modal/alert-modal';
 import { QueryError } from '@/components/query-error';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -52,7 +53,10 @@ export function DepartmentsList() {
         <TableHeader>
           <TableRow>
             <TableHead>Departamento</TableHead>
+            <TableHead>Área finalística</TableHead>
             <TableHead>Administradores</TableHead>
+            <TableHead>Revisores ativos</TableHead>
+            <TableHead>Projetos</TableHead>
             <TableHead>Documentos</TableHead>
             <TableHead className='w-px' />
           </TableRow>
@@ -60,7 +64,7 @@ export function DepartmentsList() {
         <TableBody>
           {departments.data?.length === 0 && (
             <TableRow>
-              <TableCell colSpan={4} className='text-muted-foreground text-center'>
+              <TableCell colSpan={7} className='text-muted-foreground text-center'>
                 Nenhum departamento cadastrado.
               </TableCell>
             </TableRow>
@@ -68,23 +72,39 @@ export function DepartmentsList() {
           {departments.data?.map((d) => (
             <TableRow key={d.id}>
               <TableCell className='font-medium'>{d.name}</TableCell>
+              <TableCell>
+                {d.isFinalistic ? (
+                  <Badge>Finalística</Badge>
+                ) : (
+                  <span className='text-muted-foreground'>Não</span>
+                )}
+              </TableCell>
               <TableCell className='tabular-nums'>{d.userCount}</TableCell>
+              <TableCell className='tabular-nums'>
+                {d.reviewerCount}
+                {d.isFinalistic && d.reviewerCount === 0 && (
+                  <Badge variant='destructive' className='ml-2'>
+                    Sem revisor
+                  </Badge>
+                )}
+              </TableCell>
+              <TableCell className='tabular-nums'>{d.projectCount}</TableCell>
               <TableCell className='tabular-nums'>{d.documentCount}</TableCell>
               <TableCell>
                 <div className='flex justify-end gap-1'>
                   {can(departmentActions.update) && (
                     <Button size='sm' variant='ghost' onClick={() => setEditing(d)}>
-                      <Icons.edit aria-hidden /> Renomear
+                      <Icons.edit aria-hidden /> Editar
                     </Button>
                   )}
                   {can(departmentActions.delete) && (
                     <Button
                       size='sm'
                       variant='ghost'
-                      disabled={d.userCount + d.documentCount > 0}
+                      disabled={d.userCount + d.documentCount + d.projectCount > 0}
                       title={
-                        d.userCount + d.documentCount > 0
-                          ? 'Há administradores ou documentos vinculados.'
+                        d.userCount + d.documentCount + d.projectCount > 0
+                          ? 'Há administradores, documentos ou projetos vinculados.'
                           : undefined
                       }
                       onClick={() => setToDelete(d)}

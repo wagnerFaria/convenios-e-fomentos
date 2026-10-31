@@ -98,8 +98,9 @@ type AuditLog struct {
 }
 
 type Department struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	IsFinalistic bool      `json:"is_finalistic"`
 }
 
 type Document struct {
@@ -235,6 +236,23 @@ type OneTimeToken struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
+type OutboundEmail struct {
+	ID            uuid.UUID  `json:"id"`
+	Kind          string     `json:"kind"`
+	ProjectID     *uuid.UUID `json:"project_id"`
+	ToEmail       string     `json:"to_email"`
+	Subject       string     `json:"subject"`
+	Body          string     `json:"body"`
+	DedupKey      string     `json:"dedup_key"`
+	Status        string     `json:"status"`
+	Attempts      int32      `json:"attempts"`
+	NextAttemptAt time.Time  `json:"next_attempt_at"`
+	LockedUntil   *time.Time `json:"locked_until"`
+	LastError     string     `json:"last_error"`
+	CreatedAt     time.Time  `json:"created_at"`
+	SentAt        *time.Time `json:"sent_at"`
+}
+
 type Parliamentarian struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
@@ -327,6 +345,8 @@ type Project struct {
 	OriginProjectID             *uuid.UUID  `json:"origin_project_id"`
 	ProponentPersonal           []byte      `json:"proponent_personal"`
 	LegalRepPersonal            []byte      `json:"legal_rep_personal"`
+	AnalystID                   *uuid.UUID  `json:"analyst_id"`
+	FramingStatus               *string     `json:"framing_status"`
 }
 
 type ProjectAmendment struct {
@@ -419,6 +439,37 @@ type ProjectFile struct {
 	Locked       bool       `json:"locked"`
 	SupersededAt *time.Time `json:"superseded_at"`
 	Sha256       *string    `json:"sha256"`
+}
+
+type ProjectFileView struct {
+	FileID   uuid.UUID  `json:"file_id"`
+	AdminID  uuid.UUID  `json:"admin_id"`
+	OpenedAt time.Time  `json:"opened_at"`
+	ReadAt   *time.Time `json:"read_at"`
+}
+
+type ProjectFraming struct {
+	ID             uuid.UUID  `json:"id"`
+	ProjectID      uuid.UUID  `json:"project_id"`
+	Round          int32      `json:"round"`
+	DepartmentID   *uuid.UUID `json:"department_id"`
+	DepartmentName string     `json:"department_name"`
+	IndicatedByID  *uuid.UUID `json:"indicated_by_id"`
+	IndicatedAt    time.Time  `json:"indicated_at"`
+	Decision       string     `json:"decision"`
+	DecidedByID    *uuid.UUID `json:"decided_by_id"`
+	DecidedAt      *time.Time `json:"decided_at"`
+	Justification  string     `json:"justification"`
+}
+
+type ProjectItemReview struct {
+	ProjectID    uuid.UUID  `json:"project_id"`
+	Kind         string     `json:"kind"`
+	Target       string     `json:"target"`
+	Status       string     `json:"status"`
+	ReviewedByID *uuid.UUID `json:"reviewed_by_id"`
+	ReviewedAt   *time.Time `json:"reviewed_at"`
+	Note         *string    `json:"note"`
 }
 
 type ProjectMember struct {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,7 +15,6 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
-	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/storage"
 )
 
@@ -132,8 +130,11 @@ func (s *Service) RequestComplement(ctx context.Context, actor Actor, id uuid.UU
 		if cur.Status != StatusSubmitted {
 			return httpapi.ErrConflict("project_not_submitted", "Só projetos enviados e ativos recebem pedido de complementação.")
 		}
+		if framingPending(cur) {
+			return errFramingPending()
+		}
 		if st := str(cur.Stage); st != StageAwaitingChecklist && st != StageInAnalysis {
-			return httpapi.ErrConflict("project_stage_invalid", "O projeto já está aguardando o proponente.")
+			return errStage(st)
 		}
 		_, cl, err := s.viewWithChecklist(ctx, q, cur, actor)
 		if err != nil {
@@ -186,6 +187,10 @@ func (s *Service) RequestComplement(ctx context.Context, actor Actor, id uuid.UU
 			if err := q.AddComplementItem(ctx, db.AddComplementItemParams{RequestID: req.ID, Kind: it.Kind, Target: it.Target, Note: multiline(it.Note)}); err != nil {
 				return err
 			}
+			// O que volta ao proponente deixa de estar aprovado; o resto da conferência fica como está.
+			if err := q.ResetItemReview(ctx, db.ResetItemReviewParams{ProjectID: id, Kind: it.Kind, Target: it.Target}); err != nil {
+				return err
+			}
 		}
 		row, err := q.SetProjectStage(ctx, db.SetProjectStageParams{ID: id, Stage: ptr(StageAwaitingProponent), UpdatedByID: &actor.ID})
 		if err != nil {
@@ -194,12 +199,14 @@ func (s *Service) RequestComplement(ctx context.Context, actor Actor, id uuid.UU
 		if out, err = s.view(ctx, q, row, actor); err != nil {
 			return err
 		}
-		return s.audit.Record(ctx, q, actor.entry("project.complement-request", id, map[string]any{"number": n, "items": len(in.Items), "dueAt": req.DueAt}))
+		if err := s.audit.Record(ctx, q, actor.entry("project.complement-request", id, map[string]any{"number": n, "items": len(in.Items), "dueAt": req.DueAt})); err != nil {
+			return err
+		}
+		return s.notifyComplementRequested(ctx, q, out)
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.notifyComplementRequested(ctx, out)
 	return out, nil
 }
 
@@ -298,6 +305,9 @@ func (s *Service) Resubmit(ctx context.Context, actor Actor, id uuid.UUID, in Su
 		if err := s.audit.Record(ctx, q, actor.entry("project.resubmit", id, map[string]any{"version": number})); err != nil {
 			return err
 		}
+		if err := s.notifyResubmitted(ctx, q, final, int(number)); err != nil {
+			return err
+		}
 		out = final
 		return nil
 	})
@@ -305,7 +315,6 @@ func (s *Service) Resubmit(ctx context.Context, actor Actor, id uuid.UUID, in Su
 		return nil, err
 	}
 	s.deleteObjects(ctx, pending)
-	s.notifyResubmitted(ctx, out, int(number))
 	return out, nil
 }
 
@@ -326,7 +335,8 @@ func cleanNote(note string) (string, error) {
 }
 
 // archive é o arquivamento feito por uma pessoa: confere o alcance da permissão e a situação do projeto.
-func (s *Service) archive(ctx context.Context, actor Actor, id uuid.UUID, reason, note string, dec authz.Decision) (*Project, error) {
+// blockOnFraming impede o arquivamento pelo Analista com enquadramento pendente; a desistência e a negação não são bloqueadas.
+func (s *Service) archive(ctx context.Context, actor Actor, id uuid.UUID, reason, note string, dec authz.Decision, blockOnFraming bool) (*Project, error) {
 	note, err := cleanNote(note)
 	if err != nil {
 		return nil, err
@@ -348,6 +358,9 @@ func (s *Service) archive(ctx context.Context, actor Actor, id uuid.UUID, reason
 		case StatusArchived:
 			return httpapi.ErrConflict("project_archived", "Este projeto já está arquivado.")
 		}
+		if blockOnFraming && framingPending(cur) {
+			return errFramingPending()
+		}
 		row, err := s.archiveRow(ctx, q, cur, &actor.ID, reason, note)
 		if err != nil {
 			return err
@@ -355,13 +368,13 @@ func (s *Service) archive(ctx context.Context, actor Actor, id uuid.UUID, reason
 		if out, err = s.view(ctx, q, row, actor); err != nil {
 			return err
 		}
-		return s.audit.Record(ctx, q, actor.entry("project.archive", id, map[string]any{"reason": reason}))
+		if err := s.audit.Record(ctx, q, actor.entry("project.archive", id, map[string]any{"reason": reason})); err != nil {
+			return err
+		}
+		return s.notifyArchived(ctx, q, out, row.DepartmentID, row.AnalystID)
 	})
 	if err != nil {
 		return nil, err
-	}
-	if reason != ArchiveWithdrawn {
-		s.notifyArchived(ctx, out)
 	}
 	return out, nil
 }
@@ -381,12 +394,12 @@ func (s *Service) archiveRow(ctx context.Context, q *db.Queries, cur db.Project,
 
 // Withdraw é a desistência do proponente: o projeto é arquivado, com o motivo informado.
 func (s *Service) Withdraw(ctx context.Context, actor Actor, id uuid.UUID, note string, dec authz.Decision) (*Project, error) {
-	return s.archive(ctx, actor, id, ArchiveWithdrawn, note, dec)
+	return s.archive(ctx, actor, id, ArchiveWithdrawn, note, dec, false)
 }
 
 // Deny é a negativa do Secretário: o projeto é arquivado sem passar por parecer.
 func (s *Service) Deny(ctx context.Context, actor Actor, id uuid.UUID, note string, dec authz.Decision) (*Project, error) {
-	return s.archive(ctx, actor, id, ArchiveDenied, note, dec)
+	return s.archive(ctx, actor, id, ArchiveDenied, note, dec, false)
 }
 
 // Archive é o arquivamento pela equipe por falta de documentos obrigatórios ou outro motivo.
@@ -394,13 +407,13 @@ func (s *Service) Archive(ctx context.Context, actor Actor, id uuid.UUID, in Arc
 	if in.Reason != ArchiveMissingDocuments && in.Reason != ArchiveOther {
 		return nil, fieldIssue("reason", "Use missing_documents ou other.")
 	}
-	return s.archive(ctx, actor, id, in.Reason, in.Note, dec)
+	return s.archive(ctx, actor, id, in.Reason, in.Note, dec, true)
 }
 
 // ExpireComplements arquiva os projetos cujo prazo de complementação venceu. Pode rodar em várias instâncias ao mesmo tempo
 // (cada pedido é travado por quem o processa). Devolve quantos projetos arquivou.
 func (s *Service) ExpireComplements(ctx context.Context) (int, error) {
-	var archived []db.Project
+	archived := 0
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		due, err := q.LockDueComplementRequests(ctx)
@@ -427,19 +440,21 @@ func (s *Service) ExpireComplements(ctx context.Context) (int, error) {
 			if err := s.audit.Record(ctx, q, auditSystem("project.archive", row.ID, map[string]any{"reason": ArchiveComplementDeadline})); err != nil {
 				return err
 			}
-			archived = append(archived, row)
+			p, err := s.view(ctx, q, row, Actor{})
+			if err != nil {
+				return err
+			}
+			if err := s.notifyArchived(ctx, q, p, row.DepartmentID, row.AnalystID); err != nil {
+				return err
+			}
+			archived++
 		}
 		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
-	for _, r := range archived {
-		if p, err := s.view(ctx, s.q, r, Actor{}); err == nil {
-			s.notifyArchived(ctx, p)
-		}
-	}
-	return len(archived), nil
+	return archived, nil
 }
 
 func (s *Service) complementDueText(ctx context.Context, q *db.Queries, id uuid.UUID) string {
@@ -563,79 +578,6 @@ func (s *Service) copyDocuments(ctx context.Context, q *db.Queries, actor Actor,
 		}
 	}
 	return copied, nil
-}
-
-// ---- E-mails ----
-
-func primaryEmail(p *Project) string {
-	to := ""
-	for _, e := range p.Proponent.Emails {
-		if to == "" || e.Primary {
-			to = e.Address
-		}
-	}
-	return to
-}
-
-func (s *Service) send(ctx context.Context, p *Project, subject, body string) {
-	if s.mail == nil {
-		return
-	}
-	to := primaryEmail(p)
-	if to == "" {
-		return
-	}
-	greeting := fmt.Sprintf("Olá, %s.\n\n", p.Proponent.Name)
-	footer := fmt.Sprintf("\n\nAcompanhe o projeto em:\n%s/dashboard/projetos/%s\n", s.publicURL, p.ID)
-	if err := s.mail.Send(ctx, mailer.Message{To: to, Subject: subject, Body: greeting + body + footer}); err != nil && s.log != nil {
-		s.log.ErrorContext(ctx, "enviando e-mail do projeto", "project", p.ID, "subject", subject, "error", err)
-	}
-}
-
-func (s *Service) notifyComplementRequested(ctx context.Context, p *Project) {
-	if p.Complement == nil {
-		return
-	}
-	c := p.Complement
-	var b strings.Builder
-	fmt.Fprintf(&b, "A equipe da SEDEC analisou o projeto %s e pediu correções.\n\n", p.Code)
-	fmt.Fprintf(&b, "Prazo para enviar as correções: %s (horário de Cuiabá). Se o prazo vencer sem o reenvio, o projeto será arquivado e será preciso começar um novo.\n\n", c.DueAt.In(cuiaba()).Format("02/01/2006 15:04"))
-	if c.Message != "" {
-		fmt.Fprintf(&b, "Mensagem da equipe:\n%s\n\n", c.Message)
-	}
-	b.WriteString("Itens devolvidos:\n")
-	for _, it := range c.Items {
-		fmt.Fprintf(&b, "• %s", it.Label)
-		if it.Note != "" {
-			fmt.Fprintf(&b, ": %s", it.Note)
-		}
-		b.WriteString("\n")
-	}
-	s.send(ctx, p, fmt.Sprintf("Projeto %s: correções solicitadas (prazo %s)", p.Code, c.DueAt.In(cuiaba()).Format("02/01/2006")), b.String())
-}
-
-func (s *Service) notifyResubmitted(ctx context.Context, p *Project, version int) {
-	s.send(ctx, p, fmt.Sprintf("Projeto %s: correções recebidas", p.Code),
-		fmt.Sprintf("Recebemos as correções do projeto %s (versão %d). Ele voltou para a análise da equipe da SEDEC.", p.Code, version))
-}
-
-var archiveReasonText = map[string]string{
-	ArchiveComplementDeadline: "o prazo para enviar as correções venceu",
-	ArchiveDenied:             "a Secretaria decidiu não dar continuidade ao projeto",
-	ArchiveMissingDocuments:   "faltaram documentos obrigatórios",
-	ArchiveOther:              "decisão da equipe da SEDEC",
-}
-
-func (s *Service) notifyArchived(ctx context.Context, p *Project) {
-	if p.Archive == nil {
-		return
-	}
-	body := fmt.Sprintf("O projeto %s foi arquivado: %s.\n", p.Code, archiveReasonText[p.Archive.Reason])
-	if p.Archive.Note != "" {
-		body += "\nMotivo registrado:\n" + p.Archive.Note + "\n"
-	}
-	body += "\nProjeto arquivado não volta a andar. Se ainda quiser a parceria, abra o projeto e use \"Duplicar projeto\" para começar um novo com os mesmos dados."
-	s.send(ctx, p, fmt.Sprintf("Projeto %s arquivado", p.Code), body)
 }
 
 // CleanupAbandonedDrafts apaga os rascunhos sem nenhuma alteração há mais de days dias, com os arquivos e todo o resto (retenção

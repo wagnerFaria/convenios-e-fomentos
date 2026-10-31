@@ -24,7 +24,13 @@ const (
 	ActionWithdraw          = "admin::projects.withdraw"
 	ActionRequestComplement = "admin::projects.request-complement"
 	ActionArchive           = "admin::projects.archive"
-	ActionDeny              = "admin::projects.deny"
+	// Conferência da análise (Analista): assumir a análise e aprovar/desfazer itens.
+	ActionStartAnalysis = "admin::projects.start-analysis"
+	ActionReviewItem    = "admin::projects.review-item"
+	// Enquadramento: o Analista indica o departamento; o Revisor do Departamento confirma ou recusa.
+	ActionAssignDepartment = "admin::projects.assign-department"
+	ActionReviewFraming    = "admin::projects.review-framing"
+	ActionDeny             = "admin::projects.deny"
 
 	ActionProfileRead   = "admin::proponent-profile.read"
 	ActionProfileUpdate = "admin::proponent-profile.update"
@@ -44,6 +50,13 @@ const (
 	StageInAnalysis        = "in_analysis"
 	// StageAwaitingProponent: a equipe devolveu itens e o proponente tem prazo para corrigi-los.
 	StageAwaitingProponent = "awaiting_proponent"
+	// StageAwaitingOpinion: o Revisor do Departamento confirmou o enquadramento; falta o parecer técnico (fora deste fluxo).
+	StageAwaitingOpinion = "awaiting_opinion"
+
+	// Situação do enquadramento em andamento (nulo = nenhum) e decisão de cada rodada.
+	FramingPending   = "pending"
+	FramingConfirmed = "confirmed"
+	FramingRefused   = "refused"
 
 	// Motivos de arquivamento.
 	ArchiveComplementDeadline = "complement_deadline"
@@ -103,6 +116,10 @@ func Register(reg *authz.Registry) {
 		proj(ActionWithdraw, "Desistir de projetos enviados", true),
 		proj(ActionRequestComplement, "Pedir complementação de projetos", true),
 		proj(ActionArchive, "Arquivar projetos (falta de documentos ou outro motivo)", true),
+		proj(ActionStartAnalysis, "Assumir a análise de projetos enviados", true),
+		proj(ActionReviewItem, "Aprovar ou desfazer a aprovação de itens na conferência da análise", true),
+		proj(ActionAssignDepartment, "Indicar o departamento de enquadramento de um projeto", true),
+		proj(ActionReviewFraming, "Confirmar ou recusar o enquadramento de um projeto no departamento", true),
 		proj(ActionDeny, "Negar projetos (decisão do Secretário)", true),
 		proj(ActionShare, "Gerir o acesso aos projetos (convidar por CPF e revogar)", true),
 		profile(ActionProfileRead, "Ler o próprio perfil de proponente"),
@@ -273,12 +290,18 @@ type Project struct {
 	SubmittedAt    *time.Time `json:"submittedAt"`
 	LateSubmission bool       `json:"lateSubmission"`
 	// Complement é o pedido de complementação aberto ou, não havendo, o mais recente. Archive só existe em projeto arquivado.
-	Complement      *Complement  `json:"complement"`
-	Archive         *ArchiveInfo `json:"archive"`
-	OriginProjectID string       `json:"originProjectId"`
-	OriginCode      string       `json:"originCode"`
-	CreatedAt       time.Time    `json:"createdAt"`
-	UpdatedAt       time.Time    `json:"updatedAt"`
+	Complement *Complement  `json:"complement"`
+	Archive    *ArchiveInfo `json:"archive"`
+	// Analyst e Review só vão para a equipe (a conferência é interna). Analyst some enquanto ninguém assumiu a análise.
+	Analyst *AnalystInfo `json:"analyst,omitempty"`
+	Review  *Review      `json:"review,omitempty"`
+	// Framing é a rodada de enquadramento em curso (pendente ou confirmada); Framings é o histórico, da mais antiga à mais nova.
+	Framing         *Framing  `json:"framing,omitempty"`
+	Framings        []Framing `json:"framings,omitempty"`
+	OriginProjectID string    `json:"originProjectId"`
+	OriginCode      string    `json:"originCode"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 
 	Proponent   ProponentSection   `json:"proponent"`
 	Institution InstitutionSection `json:"institution"`
@@ -334,9 +357,13 @@ type Summary struct {
 	ArchiveReason   string     `json:"archiveReason"`
 	ComplementDueAt *time.Time `json:"complementDueAt"`
 	SubmittedAt     *time.Time `json:"submittedAt"`
-	TotalCents      int64      `json:"totalCents"`
-	IsOwner         bool       `json:"isOwner"`
-	Access          string     `json:"access"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	// Department, FramingStatus e Analyst só vão para a equipe (são internos); o titular e os membros não os recebem.
+	Department    *DepartmentRef `json:"department,omitempty"`
+	FramingStatus string         `json:"framingStatus,omitempty"`
+	Analyst       *AnalystInfo   `json:"analyst,omitempty"`
+	TotalCents    int64          `json:"totalCents"`
+	IsOwner       bool           `json:"isOwner"`
+	Access        string         `json:"access"`
+	CreatedAt     time.Time      `json:"createdAt"`
+	UpdatedAt     time.Time      `json:"updatedAt"`
 }

@@ -96,12 +96,19 @@ Comandos do `Makefile`: `run`, `dev`, `build`, `test`, `test-unit`, `cover-authz
 
 Idempotente e **não destrutivo**: rodar de novo não duplica nada nem desfaz o que os administradores mudaram.
 
-- Roles de admin **Super Admin**, **Editor**, **Author**, **Proponente** (`proponent`) e **Revisor do Departamento**
-  (`department-reviewer`). As permissões padrão só são aplicadas quando a role é criada.
+- Roles de admin **Super Admin**, **Editor**, **Author**, **Proponente** (`proponent`), **Revisor do Departamento**
+  (`department-reviewer`), **Analista** (`analyst`), **Supervisor Administrador** (`administrative-supervisor`) e **Secretário de
+  Estado** (`state-secretary`). As permissões padrão só são aplicadas quando a role é criada; os perfis de equipe vêm das migrações
+  `00022` a `00024` (o seed declara os mesmos valores, e um teste confere que batem).
   - Editor: cria, lê, atualiza, exclui e publica qualquer documento.
   - Author: cria e lê; atualiza e exclui só o que criou (`admin::is-creator`); não publica.
-  - Revisor: lê tudo; só altera `status` e `observacao_interna` dos documentos do próprio departamento
-    (`admin::same-department`) e publica nesse departamento.
+  - Revisor: lê só os projetos enviados do próprio departamento (`admin::project-submitted-same-department`) e **confirma ou recusa o
+    enquadramento** (`review-framing`; vale a primeira decisão de qualquer Revisor do departamento); sem departamento no cadastro, não lê
+    nenhum (403). Não tem mais permissões sobre o módulo genérico de documentos.
+  - Analista: lê projetos enviados, assume a análise (`start-analysis`), confere os itens (`review-item`), **indica o departamento** de enquadramento (`assign-department`, só com tudo aprovado), pede complementação e arquiva; lê, edita e exclui departamentos (não cria). Aprovar um documento com arquivo exige que ele mesmo o tenha aberto (`project_file_views`); aprovações são por item e a devolução zera só os itens devolvidos.
+  - Supervisor Administrador: lê projetos enviados, somente leitura.
+  - Secretário de Estado: lê projetos enviados e nega (arquiva na hora).
+  - A equipe nunca lê rascunho: todas as ações de projeto da equipe levam `admin::project-submitted` (ou a variante com departamento).
   - Proponente: lê os catálogos (tipos de entidade, municípios, parlamentares) e os parâmetros de regras, edita o próprio perfil e
     cria/edita/exclui só os projetos que criou (`admin::is-creator`). Como o conjunto cresce a cada fase, o seed **acrescenta** à role
     existente as permissões padrão que faltam (sem alterar nem remover as que já tem). **Quem entra pelo MT
@@ -109,11 +116,11 @@ Idempotente e **não destrutivo**: rodar de novo não duplica nada nem desfaz o 
     dá a quem já tinha entrado e está sem nenhuma role.
 - Roles de usuário final **Public** (`find`, `findOne`) e **Authenticated** (também `create`, `update`, `delete`), aplicadas uma
   única vez (marcador `seed.enduser-permissions`). Configurações avançadas e templates de e-mail padrão em português.
-- Departamentos de exemplo: Financeiro e Jurídico.
+- Departamentos de exemplo: Financeiro e Jurídico. Em desenvolvimento nascem como **área finalística** (`is_finalistic`); fora dele nascem sem a marca, e quem administra marca os que podem receber projetos para enquadramento. O seed nunca altera a marca de um departamento que já existe.
 - **Cadastros de referência** — tipos de entidade, os 5.571 municípios do IBGE e os parâmetros de regras com os valores das normas —
   são carregados pelo próprio servidor ao subir (`App.Start`), só no que ainda não existe; não precisam do seed.
 - Os Super Admins listados em `SEED_SUPER_ADMIN_CPF` (qualquer ambiente).
-- **Somente com `APP_ENV=development`**: um administrador de exemplo por role (`super@`, `editor@`, `author@`, `revisor@dev.local`)
+- **Somente com `APP_ENV=development`**: um administrador de exemplo por role (`super@`, `editor@`, `author@`, `revisor@` (Financeiro), `revisor.juridico@`, `analista@`, `supervisor@`, `secretario@dev.local`)
   com **CPFs fictícios** (não entram pelo MT Login; `seed.DevUsers`) e o usuário final `usuario@dev.local`, com senha aleatória
   **exibida no log só na primeira execução**.
 - Avisa as instâncias em execução (LISTEN/NOTIFY) para recarregarem as permissões.
@@ -343,7 +350,7 @@ desenvolvimento, nem com Argon2 abaixo do mínimo da OWASP. A API também não s
 | `MAX_BODY_BYTES` | `1048576` | Tamanho máximo do corpo (413 acima disso). |
 | `TRUSTED_PROXIES` | *(vazio)* | CIDRs de proxies reversos confiáveis; só neles o `X-Forwarded-For` é considerado. |
 | `INITIAL_REGISTRATION_ENABLED` | *(vazio)* | Registro inicial por HTTP. Vazio: ligado fora de produção, desligado em produção. |
-| `SMTP_HOST` / `SMTP_PORT` | *(vazio)* / `587` | Servidor SMTP (STARTTLS; TLS implícito na 465). Sem host: log em dev, descarte em produção. |
+| `SMTP_HOST` / `SMTP_PORT` | *(vazio)* / `587` | Servidor SMTP (STARTTLS; TLS implícito na 465). Sem host: log em dev, descarte em produção. Os e-mails de projeto saem pela caixa de saída (`outbound_emails`): a requisição só grava, um processo em segundo plano envia (tentativas em 1 min, 5 min, 30 min, 2 h, 12 h; até 8) e `cleanup` apaga os já resolvidos. |
 | `SMTP_USER` / `SMTP_PASSWORD` | *(vazio)* | Credenciais SMTP (opcionais). |
 | `SMTP_FROM` | `no-reply@localhost` | Remetente padrão e dos templates criados no seed. |
 | `STORAGE_ENDPOINT` | *(vazio)* | Endpoint interno do MinIO/S3 (`host:porta`). Vazio desliga os arquivos dos documentos (rotas respondem 503). |
@@ -399,6 +406,7 @@ internal/apitoken  tokens de API
 internal/policy    policies reutilizáveis (is-owner, All, Any)
 internal/audit     registro e consulta da auditoria
 internal/mailer    interface Mailer + SMTP, log (dev) e descarte
+internal/outbox    caixa de saída de e-mails: gravação na transação + envio assíncrono com tentativas
 internal/catalog   cadastros de referência: tipos de entidade, municípios (IBGE, embutidos) e parlamentares
 internal/rules     parâmetros das regras de negócio (limites, prazos, datas), versionados por vigência
 internal/project   cadastro de projetos pelo proponente (rascunho em seções: Proponente, Instituição, Proposta) e perfil do proponente

@@ -152,7 +152,7 @@ func TestEdicaoDeAdministrador(t *testing.T) {
 	e.mkRole("redator")
 	_, bia := e.newAdmin(boss, "bia@exemplo.com", "redator")
 	_, caio := e.newAdmin(boss, "caio@exemplo.com", "redator")
-	dept, err := db.New(e.pool).UpsertDepartment(context.Background(), "Financeiro")
+	dept, err := db.New(e.pool).UpsertDepartment(context.Background(), db.UpsertDepartmentParams{Name: "Financeiro"})
 	require.NoError(t, err)
 
 	r := e.do("PUT", "/api/admin/users/"+bia, map[string]any{"departmentId": dept.ID.String()}, boss)
@@ -544,7 +544,7 @@ func TestCatalogo(t *testing.T) {
 	for _, c := range conds {
 		ids = append(ids, c.(map[string]any)["id"].(string))
 	}
-	assert.Equal(t, []string{"admin::is-creator", "admin::has-same-role-as-creator", "admin::same-department", "admin::project-member", "admin::project-editor"}, ids)
+	assert.Equal(t, []string{"admin::is-creator", "admin::has-same-role-as-creator", "admin::same-department", "admin::project-member", "admin::project-editor", "admin::project-submitted", "admin::project-submitted-same-department"}, ids)
 }
 
 func TestAuditoriaFiltrosEPaginacao(t *testing.T) {

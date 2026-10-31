@@ -6,6 +6,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { UFS } from '@/features/municipalities/api/queries';
+import { useFormReadOnly } from '@/lib/form-context';
 import { formatPhone } from '../format';
 import type { Contact, Email, Phone } from '../api/types';
 import { MunicipalitySelect } from './municipality-select';
@@ -14,6 +15,7 @@ import { PersonalDataEditor } from './personal-data-editor';
 const MAX = 5;
 
 function PhonesEditor({ value, onChange }: { value: Phone[]; onChange: (next: Phone[]) => void }) {
+  const readOnly = useFormReadOnly();
   const set = (i: number, patch: Partial<Phone>) =>
     onChange(value.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
   return (
@@ -39,18 +41,20 @@ function PhonesEditor({ value, onChange }: { value: Phone[]; onChange: (next: Ph
             onChange={(e) => set(i, { number: e.target.value })}
             onBlur={(e) => set(i, { number: formatPhone(e.target.value) })}
           />
-          <Button
-            type='button'
-            size='icon'
-            variant='ghost'
-            aria-label={`Remover telefone ${i + 1}`}
-            onClick={() => onChange(value.filter((_, idx) => idx !== i))}
-          >
-            <Icons.trash aria-hidden />
-          </Button>
+          {!readOnly && (
+            <Button
+              type='button'
+              size='icon'
+              variant='ghost'
+              aria-label={`Remover telefone ${i + 1}`}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >
+              <Icons.trash aria-hidden />
+            </Button>
+          )}
         </div>
       ))}
-      {value.length < MAX && (
+      {!readOnly && value.length < MAX && (
         <Button
           type='button'
           size='sm'
@@ -65,6 +69,7 @@ function PhonesEditor({ value, onChange }: { value: Phone[]; onChange: (next: Ph
 }
 
 function EmailsEditor({ value, onChange }: { value: Email[]; onChange: (next: Email[]) => void }) {
+  const readOnly = useFormReadOnly();
   const set = (i: number, address: string) =>
     onChange(value.map((e, idx) => (idx === i ? { ...e, address } : e)));
   const makePrimary = (i: number) =>
@@ -94,18 +99,20 @@ function EmailsEditor({ value, onChange }: { value: Email[]; onChange: (next: Em
             />
             Principal
           </label>
-          <Button
-            type='button'
-            size='icon'
-            variant='ghost'
-            aria-label={`Remover e-mail ${i + 1}`}
-            onClick={() => onChange(value.filter((_, idx) => idx !== i))}
-          >
-            <Icons.trash aria-hidden />
-          </Button>
+          {!readOnly && (
+            <Button
+              type='button'
+              size='icon'
+              variant='ghost'
+              aria-label={`Remover e-mail ${i + 1}`}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >
+              <Icons.trash aria-hidden />
+            </Button>
+          )}
         </div>
       ))}
-      {value.length < MAX && (
+      {!readOnly && value.length < MAX && (
         <Button
           type='button'
           size='sm'

@@ -128,6 +128,16 @@ export function LifecycleBanner({
     );
   }
 
+  if (project.status === 'submitted' && project.stage === 'awaiting_opinion') {
+    return (
+      <Alert>
+        <Icons.circleCheck aria-hidden />
+        <AlertTitle>Projeto enquadrado</AlertTitle>
+        <AlertDescription>O projeto foi enquadrado e aguarda o parecer da equipe.</AlertDescription>
+      </Alert>
+    );
+  }
+
   if (
     project.status === 'submitted' &&
     project.stage === 'in_analysis' &&

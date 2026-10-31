@@ -15,9 +15,14 @@ import type {
   InstitutionSection,
   Profile,
   Project,
+  ProjectStage,
+  ProjectStatus,
   ProjectSummary,
   ProponentSection,
-  ProposalInput
+  ProposalInput,
+  FilePreview,
+  ReviewDecision,
+  ReviewKind
 } from './types';
 
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
@@ -39,11 +44,31 @@ export interface ListProjectsParams {
   q?: string;
   page?: number;
   pageSize?: number;
+  status?: ProjectStatus;
+  /** Filtros das filas da equipe. */
+  stage?: ProjectStage[];
+  framing?: 'pending' | 'confirmed' | 'none';
+  department?: string;
+  analyst?: string;
 }
 
-export async function listProjects({ q, page = 1, pageSize = 25 }: ListProjectsParams = {}) {
+export async function listProjects({
+  q,
+  page = 1,
+  pageSize = 25,
+  status,
+  stage,
+  framing,
+  department,
+  analyst
+}: ListProjectsParams = {}) {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (q) params.set('q', q);
+  if (status) params.set('status', status);
+  if (stage?.length) params.set('stage', stage.join(','));
+  if (framing) params.set('framing', framing);
+  if (department) params.set('department', department);
+  if (analyst) params.set('analyst', analyst);
   return await apiClient<ApiResponse<ProjectSummary[]>>(`/admin/projects?${params}`);
 }
 
@@ -123,6 +148,21 @@ export async function getFileDownload(id: string, fileId: string) {
       `${docs(id)}/files/${fileId}/download`
     )
   ).data;
+}
+
+/** URL para exibir o arquivo no navegador (o Word vem convertido em PDF). Não conta como ter visto: use `markFileViewed`. */
+export async function getFilePreview(id: string, fileId: string) {
+  return (await apiClient<ApiResponse<FilePreview>>(`${docs(id)}/files/${fileId}/preview`)).data;
+}
+
+/** Registra que o arquivo foi exibido para quem consulta: é a prova exigida para aprovar ou reprovar o documento. */
+export async function markFileViewed(id: string, fileId: string) {
+  await apiClient<void>(`${docs(id)}/files/${fileId}/viewed`, { method: 'POST' });
+}
+
+/** Registra que quem consulta rolou até o fim do arquivo: é a prova exigida para aprovar o documento. */
+export async function markFileRead(id: string, fileId: string) {
+  await apiClient<void>(`${docs(id)}/files/${fileId}/read`, { method: 'POST' });
 }
 
 export async function deleteProjectFile(id: string, fileId: string) {
@@ -281,3 +321,65 @@ export async function acceptDeclaration(id: string, code: string, paramsSha256: 
 export async function cancelDeclaration(id: string, code: string) {
   await apiClient<void>(declaration(id, code), { method: 'DELETE' });
 }
+
+// ---- Equipe: conferência, enquadramento e decisões ----
+
+const post = async (id: string, path: string, body?: unknown) =>
+  (
+    await apiClient<ApiResponse<Project>>(`/admin/projects/${id}/${path}`, {
+      method: 'POST',
+      ...(body === undefined ? {} : json(body))
+    })
+  ).data;
+
+/** O Analista assume a análise ("Aguardando análise de checklist" passa a "Em análise"). */
+export const startAnalysis = (id: string) => post(id, 'start-analysis');
+
+/**
+ * Aprova, reprova (com justificativa) ou desfaz a decisão sobre um item. Decidir sobre documento com arquivo exige ter visto cada
+ * arquivo no visualizador.
+ */
+export async function reviewItem(
+  id: string,
+  input: { kind: ReviewKind; target: string; decision: ReviewDecision; note?: string }
+) {
+  return (
+    await apiClient<ApiResponse<Project>>(`/admin/projects/${id}/review/items`, {
+      method: 'PUT',
+      ...json(input)
+    })
+  ).data;
+}
+
+/** Devolve itens (seções e documentos do checklist) ao proponente, com prazo. */
+export const requestComplement = (
+  id: string,
+  input: {
+    message: string;
+    items: { kind: 'section' | 'document'; target: string; note: string }[];
+  }
+) => post(id, 'complement-requests', input);
+
+/** Arquivamento pelo Analista por falta de documentos obrigatórios. */
+export const archiveProject = (id: string, note: string) =>
+  post(id, 'archive', { reason: 'missing_documents', note });
+
+/** Negação pelo Secretário de Estado: arquiva na hora. */
+export const denyProject = (id: string, note: string) => post(id, 'deny', { note });
+
+/** Indica o departamento de enquadramento (exige tudo aprovado). */
+export async function assignDepartment(id: string, departmentId: string) {
+  return (
+    await apiClient<ApiResponse<Project>>(`/admin/projects/${id}/department`, {
+      method: 'PUT',
+      ...json({ departmentId })
+    })
+  ).data;
+}
+
+/** O Revisor do Departamento confirma o enquadramento; `round` é a rodada que ele viu. */
+export const confirmFraming = (id: string, round: number) => post(id, 'framing/confirm', { round });
+
+/** O Revisor recusa o enquadramento, com justificativa; o projeto volta ao Analista. */
+export const refuseFraming = (id: string, round: number, justification: string) =>
+  post(id, 'framing/refuse', { round, justification });

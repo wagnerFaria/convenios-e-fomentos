@@ -9,7 +9,12 @@ import {
   FieldSet
 } from '@/components/ui/field';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { useFieldContext, useFieldInvalid, type BaseFieldProps } from '@/lib/form-context';
+import {
+  useFieldContext,
+  useFieldInvalid,
+  useFormReadOnly,
+  type BaseFieldProps
+} from '@/lib/form-context';
 
 export function RadioGroupField({
   label,
@@ -21,6 +26,7 @@ export function RadioGroupField({
 }) {
   const field = useFieldContext<string>();
   const isInvalid = useFieldInvalid();
+  const readOnly = useFormReadOnly();
 
   return (
     <FieldSet>
@@ -31,6 +37,7 @@ export function RadioGroupField({
       {description && <FieldDescription>{description}</FieldDescription>}
       <RadioGroup
         name={field.name}
+        disabled={readOnly}
         value={field.state.value}
         onValueChange={field.handleChange}
         onBlur={field.handleBlur}

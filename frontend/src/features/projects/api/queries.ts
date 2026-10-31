@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import {
   getChecklist,
+  getFilePreview,
   getDeclaration,
   getProfile,
   getProject,
@@ -14,6 +15,7 @@ export const projectKeys = {
   lists: () => [...projectKeys.all, 'list'] as const,
   list: (params: ListProjectsParams) => [...projectKeys.lists(), params] as const,
   detail: (id: string) => [...projectKeys.all, 'detail', id] as const,
+  preview: (id: string, fileId: string) => [...projectKeys.all, 'preview', id, fileId] as const,
   checklist: (id: string) => [...projectKeys.all, 'checklist', id] as const,
   declaration: (id: string, code: string) => [...projectKeys.all, 'declaration', id, code] as const,
   members: (id: string) => [...projectKeys.all, 'members', id] as const,
@@ -25,6 +27,16 @@ export const projectsQueryOptions = (params: ListProjectsParams = {}) =>
 
 export const projectQueryOptions = (id: string) =>
   queryOptions({ queryKey: projectKeys.detail(id), queryFn: () => getProject(id) });
+
+/** URL de exibição do arquivo: vale por alguns minutos (STORAGE_PREVIEW_TTL), então não é guardada por mais tempo que isso. */
+export const filePreviewQueryOptions = (id: string, fileId: string) =>
+  queryOptions({
+    queryKey: projectKeys.preview(id, fileId),
+    queryFn: () => getFilePreview(id, fileId),
+    staleTime: 5 * 60_000,
+    gcTime: 5 * 60_000,
+    retry: false
+  });
 
 export const profileQueryOptions = () =>
   queryOptions({ queryKey: projectKeys.profile(), queryFn: getProfile });

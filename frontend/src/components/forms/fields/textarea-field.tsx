@@ -3,7 +3,12 @@
 import * as React from 'react';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
-import { useFieldContext, useFieldInvalid, type BaseFieldProps } from '@/lib/form-context';
+import {
+  useFieldContext,
+  useFieldInvalid,
+  useFormReadOnly,
+  type BaseFieldProps
+} from '@/lib/form-context';
 
 export function TextareaField({
   label,
@@ -17,6 +22,7 @@ export function TextareaField({
 } & Omit<React.ComponentProps<typeof Textarea>, 'value' | 'onChange' | 'onBlur'>) {
   const field = useFieldContext<string>();
   const isInvalid = useFieldInvalid();
+  const readOnly = useFormReadOnly();
 
   return (
     <Field data-invalid={isInvalid}>
@@ -33,6 +39,7 @@ export function TextareaField({
         aria-invalid={isInvalid}
         aria-describedby={isInvalid ? `${field.name}-error` : undefined}
         {...textareaProps}
+        disabled={readOnly || textareaProps.disabled}
       />
       {showCount && textareaProps.maxLength && (
         <div className='text-muted-foreground text-right text-sm'>

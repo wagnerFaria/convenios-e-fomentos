@@ -18,7 +18,6 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
-	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
 )
 
@@ -51,9 +50,10 @@ type SubmitInput struct {
 	Declaration bool  `json:"declaration"`
 }
 
-// SetNotifier liga o envio de e-mails (confirmação de recebimento). Sem ele, nenhum e-mail é enviado.
-func (s *Service) SetNotifier(m mailer.Mailer, publicURL string, log *slog.Logger) {
-	s.mail, s.publicURL, s.log = m, strings.TrimRight(publicURL, "/"), log
+// SetNotifier informa o endereço público do painel, usado nos links dos e-mails. Os e-mails em si são gravados na caixa de saída
+// (notify.go) e enviados por outro processo.
+func (s *Service) SetNotifier(publicURL string, log *slog.Logger) {
+	s.publicURL, s.log = strings.TrimRight(publicURL, "/"), log
 }
 
 func brDate(iso string) string {
@@ -173,6 +173,9 @@ func (s *Service) Submit(ctx context.Context, actor Actor, id uuid.UUID, in Subm
 		if err := s.audit.Record(ctx, q, actor.entry("project.submit", id, map[string]any{"code": code, "late": late, "version": 1})); err != nil {
 			return err
 		}
+		if err := s.notifySubmitted(ctx, q, final); err != nil {
+			return err
+		}
 		out = final
 		return nil
 	})
@@ -180,35 +183,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, id uuid.UUID, in Subm
 		return nil, err
 	}
 	s.deleteObjects(ctx, pending)
-	s.notifySubmitted(ctx, out)
 	return out, nil
-}
-
-// notifySubmitted confirma o recebimento ao proponente. É melhor esforço: falha no e-mail vira log e não desfaz o envio.
-func (s *Service) notifySubmitted(ctx context.Context, p *Project) {
-	if s.mail == nil {
-		return
-	}
-	to := primaryEmail(p)
-	if to == "" {
-		return
-	}
-	at := ""
-	if p.SubmittedAt != nil {
-		at = p.SubmittedAt.In(cuiaba()).Format("02/01/2006 15:04")
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Olá, %s.\n\nRecebemos o seu projeto na Secretaria de Estado de Desenvolvimento Econômico (SEDEC).\n\n", p.Proponent.Name)
-	fmt.Fprintf(&b, "Código do projeto: %s\nTítulo: %s\nInstituição: %s\nEnviado em: %s (horário de Cuiabá)\n\n", p.Code, p.Proposal.Title, p.Institution.Name, at)
-	fmt.Fprintf(&b, "Acompanhe o projeto e baixe o comprovante de recebimento em:\n%s/dashboard/projetos/%s\n\n", s.publicURL, p.ID)
-	b.WriteString("Este e-mail confirma o recebimento. O número de protocolo oficial (SIGADOC) será informado depois da conferência dos documentos pela equipe da SEDEC.\n")
-	if p.LateSubmission {
-		b.WriteString("\nAtenção: o projeto foi enviado depois da data-limite de protocolo antes da vedação eleitoral. Ele seguirá apenas com atos preparatórios e preliminares; o repasse de recursos fica para depois do período de restrição.\n")
-	}
-	err := s.mail.Send(ctx, mailer.Message{To: to, Subject: fmt.Sprintf("Projeto %s recebido pela SEDEC", p.Code), Body: b.String()})
-	if err != nil && s.log != nil {
-		s.log.ErrorContext(ctx, "enviando confirmação de recebimento do projeto", "project", p.ID, "error", err)
-	}
 }
 
 func cuiaba() *time.Location {

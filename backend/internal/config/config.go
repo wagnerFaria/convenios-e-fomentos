@@ -85,6 +85,11 @@ type Config struct {
 	// Validade das URLs pré-assinadas de envio e de download.
 	StorageUploadTTL   time.Duration `env:"STORAGE_UPLOAD_TTL" envDefault:"15m"`
 	StorageDownloadTTL time.Duration `env:"STORAGE_DOWNLOAD_TTL" envDefault:"2m"`
+	// Validade da URL de exibição dos documentos (o leitor de PDF lê aos poucos, então é mais longa que a de download).
+	StoragePreviewTTL time.Duration `env:"STORAGE_PREVIEW_TTL" envDefault:"15m"`
+
+	// Conversão de documentos do Word em PDF para exibição (Gotenberg). Vazio: só PDF e imagem são exibidos.
+	PreviewConverterURL string `env:"PREVIEW_CONVERTER_URL"`
 
 	// Parâmetros do Argon2id (padrão recomendado pela OWASP: m=19 MiB, t=2, p=1).
 	Argon2MemoryKiB  uint32 `env:"ARGON2_MEMORY_KIB" envDefault:"19456"`

@@ -100,6 +100,17 @@ func (s *S3) PresignDownload(ctx context.Context, key, filename, contentType str
 	return s.withPrefix(u), time.Now().UTC().Add(ttl), nil
 }
 
+func (s *S3) PresignView(ctx context.Context, key, contentType string, ttl time.Duration) (string, time.Time, error) {
+	q := url.Values{}
+	q.Set("response-content-disposition", "inline")
+	q.Set("response-content-type", contentType)
+	u, err := s.public.PresignedGetObject(ctx, s.bucket, key, ttl, q)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("storage: assinando exibição: %w", err)
+	}
+	return s.withPrefix(u), time.Now().UTC().Add(ttl), nil
+}
+
 // safeName reduz ao nome base e troca controles e aspas por "_". Nomes com acento saem como
 // filename* (RFC 2231), que o mime.FormatMediaType gera sozinho.
 func safeName(name string) string {

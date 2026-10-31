@@ -169,7 +169,7 @@ func buildDeclaration(spec declSpec, p Project, e declEnv) GeneratedDeclaration 
 	}
 	h := sha256.New()
 	for _, part := range append([]string{spec.code, spec.version, d.Place, d.SignerName, d.SignerRole, d.Institution, signerCPF, e.HomePlace}, d.Paragraphs...) {
-		fmt.Fprintf(h, "%d:%s\n", len(part), part)
+		_, _ = fmt.Fprintf(h, "%d:%s\n", len(part), part) // hash.Hash.Write nunca devolve erro
 	}
 	d.ParamsSHA256 = hex.EncodeToString(h.Sum(nil))
 	return d

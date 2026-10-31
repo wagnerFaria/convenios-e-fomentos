@@ -144,10 +144,23 @@ Tudo isso é feito no painel, em **Administração → Usuários** (`/dashboard/
 - **Perfis e permissões:** **Administração → Perfis e permissões** monta as roles marcando ações, com restrição por campos e por
   condições (é o criador, mesma role do criador, mesmo departamento). Quem não é Super Admin só concede permissões que possui, não altera
   as roles que tem nem a própria conta, e não age sobre quem tem mais poder (veja [`backend/SEGURANCA.md`](backend/SEGURANCA.md)).
+- **Perfis criados por migração:** as migrações `00022`, `00023` e `00024` criam e ajustam os perfis abaixo (idempotentes: se o seed já criou a role,
+  só entram as permissões que faltam). Os demais perfis (Super Admin, Editor, Author) vêm do seed. **A equipe só enxerga projeto enviado ou
+  arquivado, nunca rascunho** (condições `admin::project-submitted` e `admin::project-submitted-same-department`); um perfil personalizado
+  que dê leitura de projeto precisa incluir uma delas, senão reabre o acesso a rascunhos.
+
+  | Código | Nome | Sistema | Descrição | Principais permissões |
+  |---|---|:---:|---|---|
+  | `proponent` | Proponente | sim | Quem entra pelo MT Login e cadastra projetos de convênio ou fomento. Recebe esta role automaticamente no primeiro acesso. | Cria projetos; lê, edita, envia, retira, compartilha e exclui os seus (criador ou membro/editor do projeto); edita o próprio perfil de proponente; lê catálogos e parâmetros de regra. |
+  | `department-reviewer` | Revisor do Departamento | não | Vê os projetos enviados do próprio departamento. | Lê os projetos enviados do próprio departamento (sem departamento no cadastro do usuário, não vê nenhum); lê catálogos e parâmetros de regra. |
+  | `administrative-supervisor` | Supervisor Administrador | sim | Acompanha todos os projetos enviados, somente leitura. Recebe e-mails sobre documentação regular, enquadramento recusado e arquivamento. | Lê os projetos enviados; lê catálogos e parâmetros de regra. Não decide nada. |
+  | `analyst` | Analista | sim | Assume a análise dos projetos enviados, confere documentos e informações, devolve para complementação, arquiva por falta de documentos obrigatórios e administra os departamentos. | Lê os projetos enviados; pede complementação e arquiva (não nega); lê, edita e exclui departamentos (não cria); lê catálogos e parâmetros de regra. |
+  | `state-secretary` | Secretário de Estado | sim | Vê todos os projetos enviados e pode negá-los a qualquer momento, arquivando-os na hora. | Lê os projetos enviados e nega; lê catálogos e parâmetros de regra. |
+
 - Também no painel: **Departamentos**, **Auditoria** (com o antes/depois de cada alteração), **Tokens de API** e o grupo **Portal público**
   (usuários finais, perfis públicos, configurações e templates de e-mail).
 - O seed ainda cria, **só em desenvolvimento**, um administrador de exemplo por role (`super@`, `editor@`, `author@`,
-  `revisor@dev.local`) com **CPFs fictícios**: servem para ver as listagens, mas não conseguem entrar (não existem no MT Login).
+  `revisor@` (Financeiro), `revisor.juridico@`, `analista@`, `supervisor@`, `secretario@dev.local`) com **CPFs fictícios**: servem para ver as listagens, mas não conseguem entrar (não existem no MT Login).
   O usuário final `usuario@dev.local` continua tendo senha, que aparece no log do seed apenas na primeira execução.
 
 ## 5. Como o ambiente de desenvolvimento funciona

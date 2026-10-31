@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useStore } from '@tanstack/react-form';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { ReadOnlyScope } from '@/components/forms/read-only-scope';
 import { useAppForm } from '@/lib/form';
 import { projectKeys } from '../api/queries';
 import { saveProposal } from '../api/service';
@@ -66,7 +67,8 @@ export function ProposalStep({
 
   const form = useAppForm({
     defaultValues: defaults(),
-    onSubmit: ({ value }) => save.mutateAsync(value).catch(() => undefined)
+    // Somente leitura (a equipe, ou projeto que o proponente não pode mais alterar): nada é enviado ao servidor.
+    onSubmit: ({ value }) => (readOnly ? undefined : save.mutateAsync(value).catch(() => undefined))
   });
   const dirty = useStore(form.store, (s) => s.isDirty);
   useEffect(() => onDirty(dirty), [dirty, onDirty]);
@@ -78,124 +80,132 @@ export function ProposalStep({
         void form.handleSubmit();
       }}
     >
-      <FieldGroup>
-        <div className='grid gap-4 sm:grid-cols-2'>
+      <ReadOnlyScope readOnly={readOnly}>
+        <FieldGroup>
+          <div className='grid gap-4 sm:grid-cols-2'>
+            <form.AppField
+              name='sigconNumber'
+              children={(f) => (
+                <f.TextField
+                  label='Nº da proposta no SIGCon'
+                  required
+                  placeholder='3216/2026'
+                  description='Número da proposta/termo, no formato NNNN/AAAA.'
+                />
+              )}
+            />
+            <form.AppField
+              name='sigconRegisteredOn'
+              children={(f) => (
+                <f.TextField label='Data do cadastro no SIGCon' type='date' required />
+              )}
+            />
+          </div>
           <form.AppField
-            name='sigconNumber'
+            name='title'
+            children={(f) => <f.TextField label='Título do projeto' required maxLength={200} />}
+          />
+          <form.AppField
+            name='object'
+            children={(f) => (
+              <f.TextareaField
+                label='Objeto'
+                required
+                rows={4}
+                maxLength={5000}
+                showCount
+                description='O que será feito, em linguagem clara.'
+              />
+            )}
+          />
+          <form.AppField
+            name='justification'
+            children={(f) => (
+              <f.TextareaField
+                label='Justificativa'
+                required
+                rows={4}
+                maxLength={10000}
+                showCount
+              />
+            )}
+          />
+          <div className='grid gap-4 sm:grid-cols-2'>
+            <form.AppField
+              name='startDate'
+              children={(f) => <f.TextField label='Início previsto' type='date' required />}
+            />
+            <form.AppField
+              name='endDate'
+              children={(f) => <f.TextField label='Término previsto' type='date' required />}
+            />
+          </div>
+          <form.AppField
+            name='objectNature'
+            children={(f) => (
+              <f.SelectField
+                label='Natureza do objeto'
+                required
+                placeholder='Escolha'
+                options={natureOptions}
+                description='Define quais documentos de engenharia, licenças e regras específicas se aplicam.'
+              />
+            )}
+          />
+          <form.Field
+            name='municipalityCodes'
+            children={(f) => (
+              <Field>
+                <FieldLabel htmlFor='proposal-municipalities'>Municípios de execução *</FieldLabel>
+                <MunicipalitiesMultiSelect
+                  id='proposal-municipalities'
+                  value={f.state.value}
+                  onChange={f.handleChange}
+                />
+                <FieldDescription>
+                  Onde o projeto será executado. Apenas municípios de Mato Grosso.
+                </FieldDescription>
+              </Field>
+            )}
+          />
+          <form.AppField
+            name='executionPlaceDetail'
             children={(f) => (
               <f.TextField
-                label='Nº da proposta no SIGCon'
-                required
-                placeholder='3216/2026'
-                description='Número da proposta/termo, no formato NNNN/AAAA.'
+                label='Detalhe do local'
+                maxLength={500}
+                description='Endereço, trecho ou coordenadas, se ajudar.'
               />
             )}
           />
           <form.AppField
-            name='sigconRegisteredOn'
+            name='hasArtisticHiring'
             children={(f) => (
-              <f.TextField label='Data do cadastro no SIGCon' type='date' required />
+              <f.SwitchField
+                label='Haverá contratação de artistas (shows e eventos musicais)?'
+                description='Aplica os limites da Lei Estadual 12.082/2023.'
+              />
             )}
           />
-        </div>
-        <form.AppField
-          name='title'
-          children={(f) => <f.TextField label='Título do projeto' required maxLength={200} />}
-        />
-        <form.AppField
-          name='object'
-          children={(f) => (
-            <f.TextareaField
-              label='Objeto'
-              required
-              rows={4}
-              maxLength={5000}
-              showCount
-              description='O que será feito, em linguagem clara.'
-            />
-          )}
-        />
-        <form.AppField
-          name='justification'
-          children={(f) => (
-            <f.TextareaField label='Justificativa' required rows={4} maxLength={10000} showCount />
-          )}
-        />
-        <div className='grid gap-4 sm:grid-cols-2'>
           <form.AppField
-            name='startDate'
-            children={(f) => <f.TextField label='Início previsto' type='date' required />}
-          />
-          <form.AppField
-            name='endDate'
-            children={(f) => <f.TextField label='Término previsto' type='date' required />}
-          />
-        </div>
-        <form.AppField
-          name='objectNature'
-          children={(f) => (
-            <f.SelectField
-              label='Natureza do objeto'
-              required
-              placeholder='Escolha'
-              options={natureOptions}
-              description='Define quais documentos de engenharia, licenças e regras específicas se aplicam.'
-            />
-          )}
-        />
-        <form.Field
-          name='municipalityCodes'
-          children={(f) => (
-            <Field>
-              <FieldLabel htmlFor='proposal-municipalities'>Municípios de execução *</FieldLabel>
-              <MunicipalitiesMultiSelect
-                id='proposal-municipalities'
-                value={f.state.value}
-                onChange={f.handleChange}
+            name='calamity'
+            children={(f) => (
+              <f.SwitchField
+                label='Calamidade pública ou situação de emergência?'
+                description='Dispensa a contrapartida, mediante o ato oficial.'
               />
-              <FieldDescription>
-                Onde o projeto será executado. Apenas municípios de Mato Grosso.
-              </FieldDescription>
-            </Field>
-          )}
-        />
-        <form.AppField
-          name='executionPlaceDetail'
-          children={(f) => (
-            <f.TextField
-              label='Detalhe do local'
-              maxLength={500}
-              description='Endereço, trecho ou coordenadas, se ajudar.'
-            />
-          )}
-        />
-        <form.AppField
-          name='hasArtisticHiring'
-          children={(f) => (
-            <f.SwitchField
-              label='Haverá contratação de artistas (shows e eventos musicais)?'
-              description='Aplica os limites da Lei Estadual 12.082/2023.'
-            />
-          )}
-        />
-        <form.AppField
-          name='calamity'
-          children={(f) => (
-            <f.SwitchField
-              label='Calamidade pública ou situação de emergência?'
-              description='Dispensa a contrapartida, mediante o ato oficial.'
-            />
-          )}
-        />
-        <ServerErrors error={save.error} />
-        <StepActions
-          saving={save.isPending}
-          disabled={readOnly}
-          onSave={() => (advance.current = false)}
-          onSaveAndContinue={() => (advance.current = true)}
-          last
-        />
-      </FieldGroup>
+            )}
+          />
+          <ServerErrors error={save.error} />
+          <StepActions
+            saving={save.isPending}
+            disabled={readOnly}
+            onSave={() => (advance.current = false)}
+            onSaveAndContinue={() => (advance.current = true)}
+            last
+          />
+        </FieldGroup>
+      </ReadOnlyScope>
     </form>
   );
 }

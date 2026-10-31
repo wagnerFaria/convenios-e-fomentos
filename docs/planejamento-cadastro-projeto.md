@@ -3,6 +3,7 @@
 > Status: **planejamento (sem código)** · Atualizado em 23/10/2026
 > Escopo: do login do proponente até o **envio** do projeto e o ciclo de **complementação/arquivamento** que dependa dele.
 > Fora deste documento: telas e fluxo da equipe interna (kanban, notas, pareceres, SIGADOC), PGE, assinatura, Diário Oficial, conta bancária e prestação de contas.
+> **Fluxo da equipe (análise, enquadramento, arquivamento):** o diagrama [bpmn/convenios-e-fomento.bpmn](bpmn/convenios-e-fomento.bpmn) é a fonte da verdade, e o plano de execução está em [planejamento-fluxo-analise-enquadramento.md](planejamento-fluxo-analise-enquadramento.md). Onde este documento divergir deles quanto a esse fluxo, valem o diagrama e aquele plano.
 
 ---
 
@@ -52,17 +53,17 @@ Isso traz cinco consequências:
 1. **Role padrão no auto-cadastro:** ao criar a conta, o sistema atribui Proponente. A tela "Aguardando liberação" some para esse papel.
 2. **Separar proponente de equipe** na lista de administradores (campo `tipo` ou filtro), senão a lista enche de proponentes.
 3. **O que a role Proponente pode:** apenas as ações de projeto, restritas aos projetos onde ele é titular ou membro. Nenhuma ação de configuração.
-4. **Área = departamento** existente. A finalística usa a condição `same-department` que já existe.
-5. **Visibilidade por projeto:** projeto sem área ainda não aparece para a finalística.
+4. **Área = departamento** existente. O Revisor do Departamento usa a condição `same-department` que já existe.
+5. **Visibilidade por projeto:** projeto sem área ainda não aparece para o Revisor do Departamento.
 
 ### 3.2 Papéis
 | Papel | No cadastro de projeto |
 |---|---|
 | **Proponente** | Cria, edita (rascunho/devolvido) e envia projetos próprios. Gerencia acesso de terceiros se for titular. |
-| **Analista** | Vê todos. Confere. Define a área. Devolve para complementação. |
-| **Supervisor Gabinete** | Vê todos, somente leitura. |
-| **Finalística** | Vê só os da sua área. |
-| **Secretário de Estado** | Vê todos. Pode negar (arquiva) a qualquer momento. |
+| **Analista** | Vê todos os projetos enviados. Assume a análise, confere documento a documento, devolve para complementação, arquiva por falta de documentos obrigatórios e indica o departamento (a área). |
+| **Supervisor Administrador** | Vê todos os projetos enviados, somente leitura. Recebe e-mails (documentação regular, enquadramento recusado, arquivamento). Não decide nada no fluxo. |
+| **Revisor do Departamento** | Vê só os da sua área. Confirma ou recusa o enquadramento do projeto no departamento. |
+| **Secretário de Estado** | Vê todos os projetos enviados. Pode negar (arquiva) a qualquer momento. |
 
 ### 3.3 Compartilhamento
 - **Titular** é quem criou o projeto. Só ele concede, altera e revoga acesso. Convidado não repassa.
@@ -128,7 +129,7 @@ Os dados da instituição são **copiados para dentro do projeto** (não existe 
 
 Duas dimensões separadas, mais o parecer:
 
-1. **Etapa** (coluna do kanban da equipe): Rascunho → Aguardando análise de checklist → Em análise → Aguardando proponente → Aguardando parecer → Parado → Concluído.
+1. **Etapa** (coluna do kanban da equipe): Rascunho → Aguardando análise de checklist → Em análise → Aguardando proponente → Aguardando parecer → Parado → Concluído. O projeto passa para "Aguardando parecer" quando o Revisor do Departamento confirma o enquadramento.
 2. **Situação:** Ativo ou **Arquivado** (com motivo, quem e quando).
 3. **Parecer técnico** (entidade própria, do analista): Deferido ou Indeferido.
 
@@ -141,6 +142,10 @@ Duas dimensões separadas, mais o parecer:
 | Qualquer etapa → Arquivado | Secretário | A qualquer momento, com motivo, sem passar por parecer. |
 | Qualquer etapa → Arquivado | Titular (desistência) | Com confirmação e motivo. |
 | Em análise → Arquivado | Analista | Falta de documentos obrigatórios (Portaria 71, art. 1º §2º). Com motivo. |
+| Aguardando análise de checklist → Em análise | Analista | O Analista assume a análise e passa a ser o responsável pelo projeto. |
+| Em análise → enquadramento pendente | Analista | Só com todos os documentos e grupos de informações aprovados. Seleciona o departamento (área finalística); o projeto aparece para os Revisores daquele departamento. |
+| Enquadramento pendente → Aguardando parecer | Revisor do Departamento | Confirma o enquadramento. Vale a primeira decisão de qualquer Revisor do departamento. |
+| Enquadramento pendente → Em análise | Revisor do Departamento | Recusa o enquadramento, com justificativa. O departamento é limpo e o projeto volta ao Analista. Sem limite de recusas. |
 
 **Regras gerais:**
 - Depois do envio o projeto é somente leitura, exceto nos itens devolvidos.
@@ -278,10 +283,10 @@ Recurso `projetos`, com ações como: listar, ler, criar, editar, enviar, arquiv
 | Papel | Escopo |
 |---|---|
 | Proponente | Condição `projeto-membro` (titular ou membro ativo). Edição só nos estados permitidos, validada pela regra de estado do serviço. Gerir acesso só como titular. |
-| Analista | Todos. Edita só os campos internos (área, conferência). |
-| Supervisor Gabinete | Todos, somente leitura. |
-| Finalística | `same-department`, ou seja, só a sua área. |
-| Secretário | Todos. Pode arquivar. |
+| Analista | Todos os projetos enviados. Edita só os campos internos (área, conferência). |
+| Supervisor Administrador | Todos os projetos enviados, somente leitura. |
+| Revisor do Departamento | Só os projetos enviados da sua área (`same-department` combinado com o status, numa condição própria). |
+| Secretário de Estado | Todos os projetos enviados. Pode negar (arquivar) a qualquer momento. |
 
 Detalhe técnico: a condição `projeto-membro` precisa do conjunto de IDs dos projetos do usuário. Como um proponente tem poucos projetos, o serviço levanta essa lista e usa o filtro `In` que o motor já suporta, sem mexer no motor.
 
@@ -309,6 +314,7 @@ Detalhe técnico: a condição `projeto-membro` precisa do conjunto de IDs dos p
 | 5 | Envio: versão imutável, código, comprovante PDF, e-mails | Projeto aparece para a equipe em "Aguardando análise" |
 | 6 | Complementação, arquivamento, desistência, duplicar | Prazo vencido arquiva sozinho |
 | 7 | Endurecimento: testes, carga de upload, revisão LGPD | Matriz de acesso por rota, concorrência e limites testados; hash + antivírus opcional nos arquivos; CPF mascarado para a equipe; downloads auditados; retenção de rascunhos (ver `backend/SEGURANCA.md`) |
+| 8 | Fluxo de análise, enquadramento e arquivamento da equipe (perfis, conferência, departamento, e-mails, telas) | Ver [planejamento-fluxo-analise-enquadramento.md](planejamento-fluxo-analise-enquadramento.md) e [planejamento-fases-0-e-1.md](planejamento-fases-0-e-1.md) |
 
 **Testes que não podem faltar:** combinação instrumento × natureza; cada regra RN com valor no limite e acima; convite antes do primeiro login; revogação com sessão aberta; dois editores ao mesmo tempo; reenvio só dos itens devolvidos; arquivamento por prazo; duplicar a partir de arquivado; proponente tentando ler projeto alheio por ID.
 
@@ -328,4 +334,4 @@ Detalhe técnico: a condição `projeto-membro` precisa do conjunto de IDs dos p
 - O sistema grava o código do projeto no envio. O nº SIGADOC é preenchido pelo analista depois.
 
 ## 13. Itens que ficam para os próximos documentos
-Kanban e papéis internos em detalhe (notas, atividades, SIGADOC, pareceres), a ordem exata das autorizações da finalística e do Secretário, textos de e-mail, catálogo final dos modelos de documentos, política de retenção.
+Kanban e papéis internos em detalhe (notas, atividades, SIGADOC, pareceres), a ordem exata das autorizações do Revisor do Departamento e do Secretário, textos de e-mail, catálogo final dos modelos de documentos, política de retenção.

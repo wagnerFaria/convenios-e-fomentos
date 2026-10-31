@@ -2,6 +2,7 @@ package project
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -77,6 +78,11 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(g(ActionWithdraw)).Post("/admin/projects/{id}/withdraw", h.withdraw)
 	r.With(g(ActionRequestComplement)).Post("/admin/projects/{id}/complement-requests", h.requestComplement)
 	r.With(g(ActionArchive)).Post("/admin/projects/{id}/archive", h.archive)
+	r.With(g(ActionStartAnalysis)).Post("/admin/projects/{id}/start-analysis", h.startAnalysis)
+	r.With(g(ActionReviewItem)).Put("/admin/projects/{id}/review/items", h.reviewItem)
+	r.With(g(ActionAssignDepartment)).Put("/admin/projects/{id}/department", h.assignDepartment)
+	r.With(g(ActionReviewFraming)).Post("/admin/projects/{id}/framing/confirm", h.confirmFraming)
+	r.With(g(ActionReviewFraming)).Post("/admin/projects/{id}/framing/refuse", h.refuseFraming)
 	r.With(g(ActionDeny)).Post("/admin/projects/{id}/deny", h.deny)
 	r.With(g(ActionCreate), heavy).Post("/admin/projects/{id}/duplicate", h.duplicate)
 	r.With(g(ActionRead), heavy).Get("/admin/projects/{id}/receipt", h.receipt)
@@ -98,6 +104,9 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/extra/{itemId}/files", h.requestExtraUpload)
 	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/files/{fileId}/confirm", h.confirmUpload)
 	r.With(g(ActionRead)).Get("/admin/projects/{id}/documents/files/{fileId}/download", h.download)
+	r.With(g(ActionRead)).Get("/admin/projects/{id}/documents/files/{fileId}/preview", h.preview)
+	r.With(g(ActionRead)).Post("/admin/projects/{id}/documents/files/{fileId}/viewed", h.viewed)
+	r.With(g(ActionRead)).Post("/admin/projects/{id}/documents/files/{fileId}/read", h.readToEnd)
 	r.With(g(ActionUpdate)).Delete("/admin/projects/{id}/documents/files/{fileId}", h.deleteFile)
 }
 
@@ -137,6 +146,44 @@ func (h *Handler) putProfile(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, http.StatusOK, v, nil)
 }
 
+// parseStaffFilters lê os filtros das filas da equipe e recusa valor inválido com o nome do campo.
+func parseStaffFilters(q url.Values, p *ListParams) error {
+	var bad []httpapi.FieldError
+	if v := q.Get("stage"); v != "" {
+		for _, st := range strings.Split(v, ",") {
+			switch st = strings.TrimSpace(st); st {
+			case StageAwaitingChecklist, StageInAnalysis, StageAwaitingProponent, StageAwaitingOpinion:
+				p.Stages = append(p.Stages, st)
+			default:
+				bad = append(bad, httpapi.FieldError{Field: "stage", Message: "Valores aceitos: awaiting_checklist, in_analysis, awaiting_proponent, awaiting_opinion."})
+			}
+		}
+	}
+	switch v := q.Get("framing"); v {
+	case "", FramingPending, FramingConfirmed, "none":
+		p.Framing = v
+	default:
+		bad = append(bad, httpapi.FieldError{Field: "framing", Message: "Valores aceitos: pending, confirmed, none."})
+	}
+	for _, f := range []struct {
+		name string
+		dst  **uuid.UUID
+	}{{"department", &p.Department}, {"analyst", &p.Analyst}} {
+		if v := q.Get(f.name); v != "" {
+			id, err := uuid.Parse(v)
+			if err != nil {
+				bad = append(bad, httpapi.FieldError{Field: f.name, Message: "Informe um identificador válido."})
+				continue
+			}
+			*f.dst = &id
+		}
+	}
+	if len(bad) > 0 {
+		return httpapi.ErrValidation(map[string]any{"fields": bad})
+	}
+	return nil
+}
+
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	read, _ := admin.DecisionFrom(r.Context())
 	page, err := httpapi.ParsePage(r, 25, 100)
@@ -153,6 +200,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	p := ListParams{Perm: read.Filter, Actor: actorOf(r), Q: q.Get("q"), Status: q.Get("status"), Sort: sort, Page: page}
 	if p.Status != "" && p.Status != StatusDraft && p.Status != StatusSubmitted && p.Status != StatusArchived {
 		httpapi.Error(w, r, httpapi.ErrValidation(map[string]any{"fields": []httpapi.FieldError{{Field: "status", Message: "Valores aceitos: draft, submitted, archived."}}}))
+		return
+	}
+	if err := parseStaffFilters(q, &p); err != nil {
+		httpapi.Error(w, r, err)
 		return
 	}
 	list, total, err := h.svc.List(r.Context(), p)
@@ -513,6 +564,44 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, http.StatusOK, v, nil)
 }
 
+// preview devolve a URL para exibir o arquivo no navegador (o Word vem convertido em PDF).
+func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	fileID, err2 := fileIDParam(r)
+	if err != nil || err2 != nil {
+		httpapi.Error(w, r, httpapi.ErrNotFound())
+		return
+	}
+	read, _ := admin.DecisionFrom(r.Context())
+	v, err := h.svc.Preview(r.Context(), actorOf(r), id, fileID, read)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+// viewed registra que o arquivo foi exibido para a pessoa da equipe (prova para reprovar o documento).
+func (h *Handler) viewed(w http.ResponseWriter, r *http.Request) { h.markViewed(w, r, false) }
+
+// readToEnd registra que a pessoa da equipe chegou ao fim do arquivo (prova para aprovar o documento).
+func (h *Handler) readToEnd(w http.ResponseWriter, r *http.Request) { h.markViewed(w, r, true) }
+
+func (h *Handler) markViewed(w http.ResponseWriter, r *http.Request, toEnd bool) {
+	id, err := idParam(r)
+	fileID, err2 := fileIDParam(r)
+	if err != nil || err2 != nil {
+		httpapi.Error(w, r, httpapi.ErrNotFound())
+		return
+	}
+	read, _ := admin.DecisionFrom(r.Context())
+	if err := h.svc.MarkViewed(r.Context(), actorOf(r), id, fileID, read, toEnd); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r)
 	fileID, err2 := fileIDParam(r)
@@ -682,6 +771,53 @@ func (h *Handler) requestComplement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := h.svc.RequestComplement(r.Context(), actorOf(r), id, in, dec)
+	respond(w, r, v, err)
+}
+
+func (h *Handler) startAnalysis(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	dec, _ := admin.DecisionFrom(r.Context())
+	v, err := h.svc.StartAnalysis(r.Context(), actorOf(r), id, dec)
+	respond(w, r, v, err)
+}
+
+func (h *Handler) reviewItem(w http.ResponseWriter, r *http.Request) {
+	in, id, dec, ok := decode[ReviewInput](w, r)
+	if !ok {
+		return
+	}
+	v, err := h.svc.ReviewItem(r.Context(), actorOf(r), id, in, dec)
+	respond(w, r, v, err)
+}
+
+func (h *Handler) assignDepartment(w http.ResponseWriter, r *http.Request) {
+	in, id, dec, ok := decode[DepartmentInput](w, r)
+	if !ok {
+		return
+	}
+	v, err := h.svc.AssignDepartment(r.Context(), actorOf(r), id, in, dec)
+	respond(w, r, v, err)
+}
+
+func (h *Handler) confirmFraming(w http.ResponseWriter, r *http.Request) {
+	in, id, dec, ok := decode[FramingDecisionInput](w, r)
+	if !ok {
+		return
+	}
+	v, err := h.svc.ConfirmFraming(r.Context(), actorOf(r), id, in, dec)
+	respond(w, r, v, err)
+}
+
+func (h *Handler) refuseFraming(w http.ResponseWriter, r *http.Request) {
+	in, id, dec, ok := decode[FramingDecisionInput](w, r)
+	if !ok {
+		return
+	}
+	v, err := h.svc.RefuseFraming(r.Context(), actorOf(r), id, in, dec)
 	respond(w, r, v, err)
 }
 

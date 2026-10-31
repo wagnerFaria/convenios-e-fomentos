@@ -181,6 +181,7 @@ func TestArquivosApiPublicaSoDeDocumentoPublicado(t *testing.T) {
 
 func TestArquivosPermissoesPorRegistro(t *testing.T) {
 	e, boss, login := seeded(t)
+	grantLegacyReviewerDocs(e)
 	author := login("author@dev.local")
 	reviewer := login("revisor@dev.local")
 

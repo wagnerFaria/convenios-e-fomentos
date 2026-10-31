@@ -3,7 +3,6 @@ package project
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
-	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
 )
 
 // ActionShare é a gestão do acesso ao projeto (convidar, alterar o nível, revogar). O proponente só a tem sobre os projetos que criou.
@@ -45,7 +43,7 @@ type MemberLookup interface {
 	ListMembershipsOfAdmin(ctx context.Context, id uuid.UUID) ([]db.ListMembershipsOfAdminRow, error)
 }
 
-// RegisterConditions registra as condições do compartilhamento. A lista de projetos da pessoa é resolvida a cada requisição, antes
+// RegisterConditions registra as condições do compartilhamento e as de visibilidade da equipe (visibility.go). A lista de projetos da pessoa é resolvida a cada requisição, antes
 // da consulta (um proponente tem poucos projetos), o que mantém o filtro simples e faz a revogação valer na hora.
 func RegisterConditions(reg *authz.ConditionRegistry, members MemberLookup) {
 	handler := func(editOnly bool) authz.Handler {
@@ -67,6 +65,7 @@ func RegisterConditions(reg *authz.ConditionRegistry, members MemberLookup) {
 		authz.Condition{ID: ConditionMember, Name: "É membro do projeto (leitura ou edição)", Category: "default", Handler: handler(false)},
 		authz.Condition{ID: ConditionEditor, Name: "É membro do projeto com edição", Category: "default", Handler: handler(true)},
 	)
+	registerVisibilityConditions(reg)
 }
 
 // Member é uma pessoa com acesso a um projeto. O CPF sai mascarado, e a API não informa se a pessoa tem conta (nem o nome dela).
@@ -229,43 +228,16 @@ func (s *Service) Invite(ctx context.Context, actor Actor, id uuid.UUID, in Memb
 		if err != nil {
 			return err
 		}
-		return s.audit.Record(ctx, q, actor.entry("project.member-invited", id, map[string]any{"member": out.ID, "cpf": maskCPF(digits), "level": in.Level}))
+		if err := s.audit.Record(ctx, q, actor.entry("project.member-invited", id, map[string]any{"member": out.ID, "cpf": maskCPF(digits), "level": in.Level})); err != nil {
+			return err
+		}
+		return s.notifyInvited(ctx, q, actor, id, title, out)
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.notifyInvited(ctx, actor, id, title, out)
 	v := memberView(out)
 	return &v, nil
-}
-
-// notifyInvited avisa o convidado por e-mail (melhor esforço: falha vira log e não desfaz o convite). O e-mail da conta que tem o CPF
-// tem prioridade e nunca é revelado ao titular; sem conta, vale o e-mail que o titular informou; sem nenhum dos dois, não há aviso.
-func (s *Service) notifyInvited(ctx context.Context, actor Actor, projectID uuid.UUID, title string, m db.ProjectMember) {
-	if s.mail == nil {
-		return
-	}
-	to := str(m.Email)
-	if acct, err := s.q.GetNotifiableAdminEmail(ctx, &m.Cpf); err == nil && acct != "" {
-		to = acct
-	}
-	if to == "" {
-		return
-	}
-	if title == "" {
-		title = "(projeto sem título)"
-	}
-	what := "para consultar (somente leitura)"
-	if m.Level == LevelEdit {
-		what = "para consultar e editar"
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Olá.\n\n%s deu a você acesso %s ao projeto \"%s\" no sistema de convênios e termos de fomento da SEDEC-MT.\n\n", actor.Name, what, title)
-	fmt.Fprintf(&b, "Para acessar, entre no sistema pelo MT Login com o CPF %s:\n%s/dashboard/projetos/%s\n\n", maskCPF(m.Cpf), s.publicURL, projectID)
-	b.WriteString("Se você não esperava este convite, ignore esta mensagem: o titular do projeto pode revogar o acesso a qualquer momento.\n")
-	if err := s.mail.Send(ctx, mailer.Message{To: to, Subject: "Você recebeu acesso a um projeto na SEDEC-MT", Body: b.String()}); err != nil && s.log != nil {
-		s.log.ErrorContext(ctx, "enviando o aviso de convite do projeto", "project", projectID, "error", err)
-	}
 }
 
 // UpdateMember altera o nível ou a identificação de quem já tem acesso.

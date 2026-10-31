@@ -19,32 +19,36 @@ import { useCan } from '@/features/auth/session-provider';
 import { errorMessage } from '@/lib/errors';
 import { useAppForm } from '@/lib/form';
 import { departmentKeys } from '../api/queries';
-import { createDepartment, updateDepartment } from '../api/service';
+import { createDepartment, updateDepartment, type DepartmentInput } from '../api/service';
 import { departmentActions, type Department } from '../api/types';
 
 const schema = z.object({
-  name: z.string().trim().min(1, 'Informe o nome.').max(100, 'Máximo de 100 caracteres.')
+  name: z.string().trim().min(1, 'Informe o nome.').max(100, 'Máximo de 100 caracteres.'),
+  isFinalistic: z.boolean()
 });
 
 function DepartmentForm({ department, onDone }: { department?: Department; onDone: () => void }) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: (name: string) =>
-      department ? updateDepartment(department.id, { name }) : createDepartment({ name }),
+    mutationFn: (input: DepartmentInput) =>
+      department ? updateDepartment(department.id, input) : createDepartment(input),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: departmentKeys.all });
-      toast.success(department ? 'Departamento renomeado.' : 'Departamento criado.');
+      toast.success(department ? 'Departamento atualizado.' : 'Departamento criado.');
       onDone();
     },
     onError: (err) => setError(errorMessage(err))
   });
   const form = useAppForm({
-    defaultValues: { name: department?.name ?? '' },
+    defaultValues: {
+      name: department?.name ?? '',
+      isFinalistic: department?.isFinalistic ?? false
+    },
     validators: { onSubmit: schema },
     onSubmit: ({ value }) => {
       setError(null);
-      return save.mutateAsync(value.name.trim());
+      return save.mutateAsync({ name: value.name.trim(), isFinalistic: value.isFinalistic });
     }
   });
 
@@ -57,6 +61,15 @@ function DepartmentForm({ department, onDone }: { department?: Department; onDon
     >
       <FieldGroup>
         <form.AppField name='name' children={(f) => <f.TextField label='Nome' required />} />
+        <form.AppField
+          name='isFinalistic'
+          children={(f) => (
+            <f.SwitchField
+              label='Área finalística'
+              description='Só departamentos marcados como área finalística podem ser indicados para enquadrar um projeto.'
+            />
+          )}
+        />
         {error && (
           <p role='alert' className='text-destructive text-sm'>
             {error}
@@ -70,7 +83,7 @@ function DepartmentForm({ department, onDone }: { department?: Department; onDon
   );
 }
 
-/** Sem `department`, é o botão "Novo departamento"; com ele, o diálogo (controlado) de renomear. */
+/** Sem `department`, é o botão "Novo departamento"; com ele, o diálogo (controlado) de edição. */
 export function DepartmentDialog(
   props:
     | { department: Department; open: boolean; onOpenChange: (open: boolean) => void }
@@ -88,9 +101,10 @@ export function DepartmentDialog(
       <Dialog open={props.open} onOpenChange={props.onOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Renomear departamento</DialogTitle>
+            <DialogTitle>Editar departamento</DialogTitle>
             <DialogDescription>
-              Administradores e documentos vinculados continuam nele.
+              Administradores e documentos vinculados continuam nele. Desmarcar a área finalística
+              só afeta indicações novas.
             </DialogDescription>
           </DialogHeader>
           <DepartmentForm department={props.department} onDone={() => props.onOpenChange(false)} />

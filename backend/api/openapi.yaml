@@ -486,8 +486,10 @@ paths:
     get:
       tags: [Departamentos]
       summary: Lista departamentos com a contagem de administradores e documentos
-      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read` (alimenta o seletor de departamento dos administradores). Resposta: `[{id, name, userCount, documentCount}]`."
+      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read` (alimenta o seletor de departamento dos administradores). Resposta: `[{id, name, isFinalistic, userCount, documentCount, reviewerCount (Revisores ativos), projectCount (projetos que o referenciam)}]`. Com `finalistic=true`, só as áreas finalísticas."
       security: [{adminBearer: []}]
+      parameters:
+        - {name: finalistic, in: query, required: false, schema: {type: boolean}, description: "true devolve só os departamentos marcados como área finalística (os que podem ser indicados para enquadrar um projeto)."}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
@@ -495,7 +497,7 @@ paths:
     post:
       tags: [Departamentos]
       summary: Cria um departamento
-      description: "Nome único (409 `department_name_taken`). Permissão: `admin::settings.departments.create`."
+      description: "Nome único (409 `department_name_taken`). `isFinalistic` omitido vale falso. Permissão: `admin::settings.departments.create`."
       security: [{adminBearer: []}]
       requestBody:
         required: true
@@ -506,6 +508,7 @@ paths:
               required: [name]
               properties:
                 name: {type: string, maxLength: 100}
+                isFinalistic: {type: boolean, description: "Área finalística: só departamento marcado pode ser indicado para enquadrar um projeto."}
       responses:
         "201": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
@@ -527,8 +530,8 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
     put:
       tags: [Departamentos]
-      summary: Renomeia um departamento
-      description: "Permissão: `admin::settings.departments.update`."
+      summary: Renomeia um departamento e/ou muda o marcador de área finalística
+      description: "`isFinalistic` omitido mantém o valor atual. Desmarcar só afeta indicações novas. Permissão: `admin::settings.departments.update`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -541,6 +544,7 @@ paths:
               required: [name]
               properties:
                 name: {type: string, maxLength: 100}
+                isFinalistic: {type: boolean, description: "Omitido = inalterado."}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}
@@ -551,7 +555,7 @@ paths:
     delete:
       tags: [Departamentos]
       summary: Exclui um departamento
-      description: "Recusado com 409 `department_in_use` (`details.userCount`, `details.documentCount`) se houver administradores ou documentos vinculados. Permissão: `admin::settings.departments.delete`."
+      description: "Recusado com 409 `department_in_use` (`details.userCount`, `details.documentCount`, `details.projectCount`) se houver administradores, documentos ou projetos vinculados. Permissão: `admin::settings.departments.delete`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -935,11 +939,15 @@ paths:
     get:
       tags: [Projetos]
       summary: Lista projetos
-      description: "Cada pessoa vê os projetos permitidos pela condição de sua permissão de leitura (o proponente, os que criou e os em que foi convidado por CPF). `q` busca em título, nome da instituição, número do SIGCon e CNPJ (com ou sem pontuação). Permissão: `admin::projects.read`. Resposta: `[{id, status, version, instrument, title, institutionName, institutionCnpj, sigconNumber, totalCents, code, submittedAt, stage, archiveReason, complementDueAt, isOwner, access (owner|edit|read; vazio para a equipe), createdAt, updatedAt}]`."
+      description: "Cada pessoa vê os projetos permitidos pela condição de sua permissão de leitura (o proponente, os que criou e os em que foi convidado por CPF). `q` busca em título, nome da instituição, número do SIGCon e CNPJ (com ou sem pontuação). Permissão: `admin::projects.read`. Resposta: `[{id, status, version, instrument, title, institutionName, institutionCnpj, sigconNumber, totalCents, code, submittedAt, stage, archiveReason, complementDueAt, isOwner, access (owner|edit|read; vazio para a equipe), createdAt, updatedAt}]`. A equipe recebe também `department {id, name}`, `framingStatus` (`pending`|`confirmed`) e `analyst {id, name}` (ausentes quando não se aplicam); o titular e os membros não. Filtros das filas da equipe: `stage`, `framing`, `department`, `analyst` (combinam-se com a permissão de leitura: o Revisor só enxerga o que é do departamento dele, mesmo sem filtro)."
       security: [{adminBearer: []}]
       parameters:
         - {name: q, in: query, schema: {type: string}}
         - {name: status, in: query, schema: {type: string, enum: [draft, submitted, archived]}}
+        - {name: stage, in: query, schema: {type: string}, description: "Uma ou mais etapas separadas por vírgula: `awaiting_checklist`, `in_analysis`, `awaiting_proponent`, `awaiting_opinion`."}
+        - {name: framing, in: query, schema: {type: string, enum: [pending, confirmed, none]}, description: "Situação do enquadramento. `none` = sem enquadramento em andamento."}
+        - {name: department, in: query, schema: {type: string, format: uuid}, description: "Projetos cujo departamento atual é este."}
+        - {name: analyst, in: query, schema: {type: string, format: uuid}, description: "Projetos cujo analista responsável é este."}
         - {name: sort, in: query, schema: {type: string, enum: [updated_at, created_at, title, institution_name]}, description: "Prefixo `-` para decrescente. Padrão: `-updated_at`."}
         - {name: page, in: query, schema: {type: integer, minimum: 1}}
         - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
@@ -1590,13 +1598,61 @@ paths:
     get:
       tags: [Projetos]
       summary: URL temporária para baixar um arquivo confirmado
-      description: "Resposta: `{url, expiresAt}`. Arquivo pendente: 404. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
+      description: "Resposta: `{url, expiresAt}`. A URL baixa o **arquivo original** (como anexo), inclusive do Word. Arquivo pendente: 404. Baixar não conta como ter visto o documento: a prova exigida para aprovar ou reprovar vem de `POST .../viewed`. Todo acesso entra na auditoria. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
         "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}/preview:
+    get:
+      tags: [Projetos]
+      summary: URL temporária para exibir um arquivo confirmado no navegador
+      description: |
+        Resposta: `{url, expiresAt, kind, contentType, converted}`. `kind` é `pdf` ou `image`: PDF e imagem são exibidos como estão; o arquivo do Word é **convertido para PDF**
+        uma vez (guardado ao lado do original) e vem com `converted: true`. A URL é inline e vale `STORAGE_PREVIEW_TTL`. Arquivo pendente: 404.
+        422 `preview_unavailable`: tipo sem exibição, Word grande demais (mais de 50 MB), conversão não configurada (`PREVIEW_CONVERTER_URL`) ou que falhou; nesses casos o cliente oferece o download.
+        Todo acesso entra na auditoria. Pedir a URL **não** registra que o arquivo foi visto (ver `POST .../viewed`). Permissão: `admin::projects.read`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}/viewed:
+    post:
+      tags: [Projetos]
+      summary: Registra que o arquivo foi exibido para quem consulta
+      description: "O cliente chama depois de mostrar o conteúdo no visualizador (a primeira página apareceu). Quando quem consulta é da equipe (nem titular nem membro), o registro é **por pessoa** e é a prova exigida para **reprovar** o documento na conferência (`PUT .../review/items`); do titular e dos membros não gera registro. Idempotente. Para aprovar é preciso também `POST .../read`. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}/read:
+    post:
+      tags: [Projetos]
+      summary: Registra que quem consulta chegou ao fim do arquivo
+      description: "O cliente chama quando a pessoa rolou até o fim do documento no visualizador (também conta como ter visto). Para a equipe, o registro é **por pessoa** e é a prova exigida para **aprovar** o documento: sem ele, 422 `file_not_read` com `details.files`. Do titular e dos membros não gera registro. Idempotente. Permissão: `admin::projects.read`."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
@@ -1800,7 +1856,7 @@ paths:
       tags: [Projetos]
       summary: Arquiva o projeto (equipe)
       description: |
-        Arquiva o projeto enviado por `missing_documents` (falta de documentos obrigatórios) ou `other`, com o motivo em `note`. O proponente recebe um e-mail.
+        Arquiva o projeto enviado por `missing_documents` (falta de documentos obrigatórios) ou `other`, com o motivo em `note`. O proponente, os Revisores do departamento (se já havia um), o Analista responsável (ou, sem responsável, os Analistas) e os Supervisores recebem um e-mail.
         Permissão: `admin::projects.archive`. Responde o projeto completo.
       security: [{adminBearer: []}]
       parameters:
@@ -1815,6 +1871,148 @@ paths:
               properties:
                 reason: {type: string, enum: [missing_documents, other]}
                 note: {type: string, minLength: 3, maxLength: 1000}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/start-analysis:
+    post:
+      tags: [Projetos]
+      summary: Assume a análise do projeto (Analista)
+      description: |
+        "Aguardando análise de checklist" passa a "Em análise" e quem assumiu vira o **analista responsável** (informativo: qualquer Analista pode agir no projeto).
+        Idempotente: repetir não muda nada, e outro Analista que chame depois não troca o responsável. Se o projeto já está em análise mas sem responsável (voltou de uma
+        complementação pedida antes de alguém assumir), o primeiro a assumir vira o responsável. Erros: 409 `project_not_submitted` (rascunho ou arquivado) e 409
+        `project_stage_invalid` (aguardando o proponente). Permissão: `admin::projects.start-analysis`. Responde o projeto completo, na visão da equipe.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/review/items:
+    put:
+      tags: [Projetos]
+      summary: Aprova, reprova (com justificativa) ou desfaz a decisão sobre um item da conferência (Analista)
+      description: |
+        Exige o projeto em análise (409 `analysis_not_started` antes de assumir; 409 `project_stage_invalid` aguardando o proponente). `kind` e `target`:
+        `section` (`proponent`, `institution`, `proposal`, `funding`, `document-options`), `document` (`codigo` ou `codigo@id-da-emenda` do checklist) e `extra`
+        (id do documento adicional). Item inexistente, ou documento obrigatório sem arquivo nem justificativa: 422 `item_not_reviewable`.
+        `decision`: `approved`, `rejected` (exige `note`, a justificativa, de 1 a 500 caracteres; documento adicional só pode ser aprovado) ou `pending` (desfaz). O campo antigo
+        `approved` (true aprova, false desfaz) continua aceito quando `decision` vem vazio. Reprovar não devolve o item: ele só vai ao proponente num pedido de complementação,
+        que o volta a pendente. Item reprovado impede indicar o departamento (409 `review_incomplete`, com `details.rejected`).
+        **Reprovar documento com arquivo exige que o próprio Analista tenha visto cada arquivo atual** (422 `file_not_opened`, com `details.files` (até 20) e
+        `details.total`), e **aprovar exige que tenha chegado ao fim de cada um** (422 `file_not_read`). "Ver" é a exibição no visualizador (`POST .../documents/files/{fileId}/viewed`) e
+        "ler até o fim" é rolar até o final (`POST .../read`); ambos são registrados por pessoa, e baixar o arquivo não conta.
+        Aprovar, reprovar e desfazer são idempotentes. A justificativa **não** vai para a auditoria (texto livre). Responde o projeto completo com `review` (itens, `summary` com `rejected`, `allApproved`)
+        e `analyst`, que **só a equipe** recebe. Cada item traz `status` (`pending`, `approved` ou `rejected`) e, se reprovado, `note`. Cada arquivo em `review.items[].files`
+        traz `opened` (o administrador que consulta já o viu) e `read` (já chegou ao fim). Permissão: `admin::projects.review-item`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, target]
+              properties:
+                kind: {type: string, enum: [section, document, extra]}
+                target: {type: string}
+                decision: {type: string, enum: [approved, rejected, pending]}
+                note: {type: string, maxLength: 500, description: Justificativa; obrigatória com `rejected`.}
+                approved: {type: boolean, deprecated: true, description: Formato anterior; use `decision`.}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/department:
+    put:
+      tags: [Projetos]
+      summary: Indica o departamento de enquadramento (Analista)
+      description: |
+        Abre uma **rodada** de enquadramento: o projeto passa a aparecer só para os Revisores do departamento indicado, e os Supervisores recebem um e-mail.
+        Exige `submitted`, etapa `in_analysis` (409 `analysis_not_started` antes de assumir; 409 `project_stage_invalid` aguardando o proponente ou o parecer),
+        **tudo aprovado** na conferência (409 `review_incomplete`, com `details.pending` e `details.blockers`) e nenhum enquadramento pendente (409 `framing_pending`).
+        O departamento precisa existir (422), ser área finalística (422 `department_not_finalistic`) e ter ao menos um Revisor ativo (422 `department_without_reviewer`).
+        A etapa continua `in_analysis`. Responde o projeto completo com `framing` (a rodada em curso) e `framings` (o histórico). Permissão: `admin::projects.assign-department`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [departmentId]
+              properties:
+                departmentId: {type: string, format: uuid}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/framing/confirm:
+    post:
+      tags: [Projetos]
+      summary: Confirma o enquadramento (Revisor do Departamento)
+      description: |
+        O projeto se enquadra no departamento: a rodada fica `confirmed`, o departamento é mantido e a etapa passa a `awaiting_opinion` ("Aguardando parecer"). Não envia e-mail.
+        `round` é a rodada que o Revisor viu (409 `framing_round_stale` se mudou). **Vale a primeira decisão de qualquer Revisor do departamento**: a segunda recebe 409
+        `framing_already_decided`, inclusive quando a primeira foi uma recusa. Permissão: `admin::projects.review-framing`, só sobre os projetos enviados do próprio departamento.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [round]
+              properties:
+                round: {type: integer, minimum: 1}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/framing/refuse:
+    post:
+      tags: [Projetos]
+      summary: Recusa o enquadramento (Revisor do Departamento)
+      description: |
+        O projeto não se enquadra: a rodada fica `refused` com a justificativa (3 a 1.000 caracteres, obrigatória), o departamento do projeto é **limpo** (ele sai da fila do
+        departamento), a etapa continua `in_analysis` e a conferência não é tocada, então o Analista pode indicar outro departamento direto. **Não há limite de recusas.**
+        Os Supervisores recebem um e-mail com o departamento recusado e a justificativa (até 500 caracteres); o Analista não. Mesmos erros de `confirm`.
+        Permissão: `admin::projects.review-framing`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [round, justification]
+              properties:
+                round: {type: integer, minimum: 1}
+                justification: {type: string, minLength: 3, maxLength: 1000}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}

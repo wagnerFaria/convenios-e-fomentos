@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { parliamentariansQueryOptions } from '@/features/parliamentarians/api/queries';
+import { useFormReadOnly } from '@/lib/form-context';
 import type { Amendment } from '../api/types';
 import { MoneyInput } from './money-input';
 
@@ -26,13 +27,12 @@ export const fromRow = ({ other: _other, ...a }: AmendmentRow): Amendment => a;
 /** Emendas parlamentares do projeto: parlamentar (do cadastro ou por extenso), número, ano e valor. */
 export function AmendmentsEditor({
   value,
-  onChange,
-  disabled
+  onChange
 }: {
   value: AmendmentRow[];
   onChange: (next: AmendmentRow[]) => void;
-  disabled?: boolean;
 }) {
+  const readOnly = useFormReadOnly();
   const list = useQuery(parliamentariansQueryOptions());
   const usedIds = new Set(value.map((a) => a.parliamentarianId));
   // Parlamentar desativado só aparece onde já foi escolhido.
@@ -42,7 +42,7 @@ export function AmendmentsEditor({
   const [year] = useState(() => new Date().getFullYear());
 
   return (
-    <fieldset className='space-y-3' disabled={disabled}>
+    <fieldset className='space-y-3'>
       <legend className='text-sm leading-snug font-medium'>Emendas parlamentares *</legend>
       <p className='text-muted-foreground text-sm'>
         Informe cada emenda com o deputado, o número, o ano e o valor. Os ofícios do deputado e da
@@ -121,18 +121,20 @@ export function AmendmentsEditor({
               onChange={(amountCents) => set(i, { amountCents })}
             />
           </div>
-          <Button
-            type='button'
-            size='icon'
-            variant='ghost'
-            aria-label={`Remover emenda ${i + 1}`}
-            onClick={() => onChange(value.filter((_, idx) => idx !== i))}
-          >
-            <Icons.trash aria-hidden />
-          </Button>
+          {!readOnly && (
+            <Button
+              type='button'
+              size='icon'
+              variant='ghost'
+              aria-label={`Remover emenda ${i + 1}`}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >
+              <Icons.trash aria-hidden />
+            </Button>
+          )}
         </div>
       ))}
-      {value.length < MAX && (
+      {!readOnly && value.length < MAX && (
         <Button
           type='button'
           size='sm'

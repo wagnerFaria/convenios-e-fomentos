@@ -39,6 +39,7 @@ import {
   useDepartmentOptions,
   useRoleOptions
 } from './use-options';
+import { REVIEWER_ROLE_CODE, ReviewerDepartmentWarning } from './reviewer-warning';
 
 type Confirm = 'deactivate' | 'block' | 'delete' | null;
 
@@ -332,6 +333,9 @@ export function AdminDetail({ id }: { id: string }) {
         </CardContent>
       </Card>
 
+      <ReviewerDepartmentWarning
+        show={a.roles.some((r) => r.code === REVIEWER_ROLE_CODE) && !a.departmentId}
+      />
       <RolesCard key={`r-${a.updatedAt}-${a.roles.length}`} admin={a} editable={editable} />
       <DepartmentCard key={`d-${a.updatedAt}`} admin={a} editable={editable} />
 

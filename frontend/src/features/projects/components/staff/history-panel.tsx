@@ -1,0 +1,51 @@
+'use client';
+
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import type { Project } from '../../api/types';
+import { formatDateTimeCuiaba } from '../../format';
+
+/** Histórico do projeto para a equipe: o pedido de complementação mais recente. */
+export function HistoryPanel({ project }: { project: Project }) {
+  const c = project.complement;
+  return (
+    <div className='max-w-3xl space-y-4'>
+      <Card>
+        <CardHeader>
+          <CardTitle className='text-base'>Pedido de complementação</CardTitle>
+        </CardHeader>
+        <CardContent className='space-y-2 text-sm'>
+          {!c ? (
+            <p className='text-muted-foreground'>Nenhuma complementação foi pedida.</p>
+          ) : (
+            <>
+              <p>
+                Pedido nº {c.number} em {formatDateTimeCuiaba(c.requestedAt)}, com prazo até{' '}
+                {formatDateTimeCuiaba(c.dueAt)}.{' '}
+                <Badge variant='outline'>
+                  {
+                    {
+                      open: 'Aberto',
+                      answered: 'Respondido',
+                      expired: 'Vencido',
+                      cancelled: 'Cancelado'
+                    }[c.status]
+                  }
+                </Badge>
+              </p>
+              {c.message && <p className='whitespace-pre-line'>{c.message}</p>}
+              <ul className='list-disc space-y-1 pl-5'>
+                {c.items.map((it) => (
+                  <li key={`${it.kind}-${it.target}`}>
+                    <span className='font-medium'>{it.label}</span>
+                    {it.note && <span className='text-muted-foreground'>: {it.note}</span>}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

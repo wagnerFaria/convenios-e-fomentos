@@ -5,7 +5,12 @@ import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui
 import { DateInput } from '@/components/ui/date-input';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import { useFieldContext, useFieldInvalid, type BaseFieldProps } from '@/lib/form-context';
+import {
+  useFieldContext,
+  useFieldInvalid,
+  useFormReadOnly,
+  type BaseFieldProps
+} from '@/lib/form-context';
 
 /**
  * Text-style input (text, email, password, tel, url, time, number).
@@ -22,6 +27,7 @@ export function TextField({
 }: BaseFieldProps & Omit<React.ComponentProps<typeof Input>, 'value' | 'onChange' | 'onBlur'>) {
   const field = useFieldContext<string | number | undefined>();
   const isInvalid = useFieldInvalid();
+  const readOnly = useFormReadOnly();
   const isValidating = field.state.meta.isValidating;
 
   return (
@@ -41,27 +47,29 @@ export function TextField({
             aria-invalid={isInvalid}
             aria-describedby={isInvalid ? `${field.name}-error` : undefined}
             {...inputProps}
+            disabled={readOnly || inputProps.disabled}
           />
         ) : (
-        <Input
-          id={field.name}
-          name={field.name}
-          value={field.state.value ?? ''}
-          onBlur={field.handleBlur}
-          onChange={(e) =>
-            field.handleChange(
-              type === 'number'
-                ? e.target.value === ''
-                  ? undefined
-                  : Number(e.target.value)
-                : e.target.value
-            )
-          }
-          type={type}
-          aria-invalid={isInvalid}
-          aria-describedby={isInvalid ? `${field.name}-error` : undefined}
-          {...inputProps}
-        />
+          <Input
+            id={field.name}
+            name={field.name}
+            value={field.state.value ?? ''}
+            onBlur={field.handleBlur}
+            onChange={(e) =>
+              field.handleChange(
+                type === 'number'
+                  ? e.target.value === ''
+                    ? undefined
+                    : Number(e.target.value)
+                  : e.target.value
+              )
+            }
+            type={type}
+            aria-invalid={isInvalid}
+            aria-describedby={isInvalid ? `${field.name}-error` : undefined}
+            {...inputProps}
+            disabled={readOnly || inputProps.disabled}
+          />
         )}
         {isValidating && <Spinner className='absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2' />}
       </div>
