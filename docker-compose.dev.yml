@@ -51,6 +51,8 @@ x-api: &api
     STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
     STORAGE_BUCKET: ${STORAGE_BUCKET:-${MINIO_BUCKET:-documentos}}
     STORAGE_PUBLIC_URL: ${STORAGE_PUBLIC_URL:-${APP_URL:-http://localhost}/storage}
+    # Exibição dos documentos do Word: a API pede a conversão para PDF ao Gotenberg (LibreOffice), na rede do Docker.
+    PREVIEW_CONVERTER_URL: ${PREVIEW_CONVERTER_URL:-http://gotenberg:3000}
     # MT-ID simulado: o cliente real depende do X-Via (rede do governo). Com isto, o pedido de assinatura das declarações é
     # aprovado sozinho depois de MTID_SIMULATE_DELAY, sem validade alguma. Use MTID_SIMULATE=false para ver o erro 503.
     MTID_SIMULATE: ${MTID_SIMULATE:-true}
@@ -106,6 +108,19 @@ services:
         condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
+
+  # Converte documentos do Word em PDF (LibreOffice) para o visualizador da análise. Sem porta publicada: só a API o alcança.
+  # Em produção a imagem da API é distroless e não carrega o LibreOffice, por isso a conversão roda neste serviço à parte.
+  gotenberg:
+    image: ${GOTENBERG_IMAGE:-gotenberg/gotenberg:8}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    command:
+      - gotenberg
+      - --api-timeout=90s
+      - --chromium-disable-javascript=true
+      - --api-disable-health-check-logging=true
 
   web:
     build:

@@ -2,7 +2,9 @@ package project
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,11 +24,27 @@ type AnalystInfo struct {
 	Name string    `json:"name"`
 }
 
-// ReviewInput é o corpo de PUT /review/items: aprova (Approved) ou desfaz a aprovação de um item.
+// ReviewInput é o corpo de PUT /review/items: aprova, reprova (com justificativa) ou desfaz a decisão sobre um item.
 type ReviewInput struct {
-	Kind     string `json:"kind"`   // section | document | extra
-	Target   string `json:"target"` // seção, chave do documento ou id do documento adicional
-	Approved bool   `json:"approved"`
+	Kind   string `json:"kind"`   // section | document | extra
+	Target string `json:"target"` // seção, chave do documento ou id do documento adicional
+	// Decision é approved, rejected ou pending (desfaz). Vazio vale o campo antigo Approved.
+	Decision string `json:"decision"`
+	// Note é a justificativa da reprovação: obrigatória com rejected, ignorada nos demais.
+	Note string `json:"note"`
+	// Approved é o formato anterior: true aprova, false desfaz. Prefira Decision.
+	Approved bool `json:"approved"`
+}
+
+// decision resolve a decisão pedida, aceitando o formato anterior.
+func (in ReviewInput) decision() string {
+	if in.Decision != "" {
+		return in.Decision
+	}
+	if in.Approved {
+		return ReviewApproved
+	}
+	return ReviewPending
 }
 
 func errStageForReview(stage string) error {
@@ -101,6 +119,24 @@ func (s *Service) ReviewItem(ctx context.Context, actor Actor, id uuid.UUID, in 
 	default:
 		return nil, fieldIssue("kind", "Use section, document ou extra.")
 	}
+	decision := in.decision()
+	note := multiline(in.Note)
+	switch decision {
+	case ReviewApproved, ReviewPending:
+	case ReviewRejected:
+		// Documento adicional não é devolvido ao proponente (o pedido de complementação não o aceita): só se aprova.
+		if in.Kind == ReviewExtra {
+			return nil, fieldIssue("kind", "Documento adicional só pode ser aprovado.")
+		}
+		if note == "" {
+			return nil, fieldIssue("note", "Informe a justificativa da reprovação.")
+		}
+		if utf8.RuneCountInString(note) > maxReviewNote {
+			return nil, fieldIssue("note", fmt.Sprintf("A justificativa pode ter até %d caracteres.", maxReviewNote))
+		}
+	default:
+		return nil, fieldIssue("decision", "Use approved, rejected ou pending.")
+	}
 	var out *Project
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
@@ -123,22 +159,30 @@ func (s *Service) ReviewItem(ctx context.Context, actor Actor, id uuid.UUID, in 
 			return &httpapi.APIError{Status: 422, Code: "item_not_reviewable", Message: "Este item não pode ser conferido agora.",
 				Details: map[string]any{"fields": []httpapi.FieldError{{Field: "target", Message: "Item inexistente ou sem o que conferir (documento obrigatório sem arquivo nem justificativa)."}}}}
 		}
-		if in.Approved {
+		if decision != ReviewPending {
+			// Aprovar ou reprovar exige ter visto cada arquivo do item: não se julga o que não se viu.
 			opened, err := s.openedBy(ctx, q, id, actor.ID)
 			if err != nil {
 				return err
 			}
 			if missing := unopened(t, opened); len(missing) > 0 {
-				return errFileNotOpened(missing)
+				return errFileNotOpened(missing, decision)
 			}
+		}
+		switch decision {
+		case ReviewApproved:
 			err = q.ApproveItemReview(ctx, db.ApproveItemReviewParams{ProjectID: id, Kind: in.Kind, Target: in.Target, ReviewedByID: &actor.ID})
-			if err != nil {
-				return err
-			}
-		} else if err := q.ResetItemReview(ctx, db.ResetItemReviewParams{ProjectID: id, Kind: in.Kind, Target: in.Target}); err != nil {
+		case ReviewRejected:
+			err = q.RejectItemReview(ctx, db.RejectItemReviewParams{ProjectID: id, Kind: in.Kind, Target: in.Target, Note: &note, ReviewedByID: &actor.ID})
+		default:
+			err = q.ResetItemReview(ctx, db.ResetItemReviewParams{ProjectID: id, Kind: in.Kind, Target: in.Target})
+		}
+		if err != nil {
 			return err
 		}
-		if err := s.audit.Record(ctx, q, actor.entry("project.review-item", id, map[string]any{"kind": in.Kind, "target": in.Target, "approved": in.Approved})); err != nil {
+		// A justificativa fica no item; a auditoria não guarda texto livre (pode trazer dado pessoal), só a decisão.
+		detail := map[string]any{"kind": in.Kind, "target": in.Target, "decision": decision, "approved": decision == ReviewApproved}
+		if err := s.audit.Record(ctx, q, actor.entry("project.review-item", id, detail)); err != nil {
 			return err
 		}
 		out, err = s.view(ctx, q, cur, actor)
@@ -147,7 +191,7 @@ func (s *Service) ReviewItem(ctx context.Context, actor Actor, id uuid.UUID, in 
 	return out, err
 }
 
-func errFileNotOpened(missing []DocFile) error {
+func errFileNotOpened(missing []DocFile, decision string) error {
 	type file struct {
 		ID       uuid.UUID `json:"id"`
 		Filename string    `json:"filename"`
@@ -156,7 +200,11 @@ func errFileNotOpened(missing []DocFile) error {
 	for _, f := range missing[:min(len(missing), maxUnopenedListed)] {
 		listed = append(listed, file{f.ID, f.Filename})
 	}
-	return &httpapi.APIError{Status: 422, Code: "file_not_opened", Message: "Abra todos os arquivos do documento antes de aprová-lo.",
+	msg := "Visualize todos os arquivos do documento antes de aprová-lo."
+	if decision == ReviewRejected {
+		msg = "Visualize todos os arquivos do documento antes de reprová-lo."
+	}
+	return &httpapi.APIError{Status: 422, Code: "file_not_opened", Message: msg,
 		Details: map[string]any{"files": listed, "total": len(missing)}}
 }
 
@@ -198,7 +246,7 @@ func (s *Service) reviewState(ctx context.Context, q *db.Queries, projectID uuid
 	}
 	saved := make(map[string]reviewRow, len(rows))
 	for _, x := range rows {
-		saved[x.Kind+":"+x.Target] = reviewRow{Status: x.Status, By: x.ReviewedByName, At: x.ReviewedAt}
+		saved[x.Kind+":"+x.Target] = reviewRow{Status: x.Status, Note: str(x.Note), By: x.ReviewedByName, At: x.ReviewedAt}
 	}
 	return buildReview(reviewTargets(cl), saved, opened), nil
 }

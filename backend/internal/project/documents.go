@@ -677,9 +677,6 @@ func (s *Service) Download(ctx context.Context, actor Actor, id, fileID uuid.UUI
 	if f.Status != FileConfirmed {
 		return DownloadLink{}, httpapi.ErrNotFound()
 	}
-	if err := s.recordStaffOpening(ctx, id, fileID, actor); err != nil {
-		return DownloadLink{}, err
-	}
 	u, exp, err := s.store.PresignDownload(ctx, f.ObjectKey, f.Filename, f.ContentType, s.downloadTTL)
 	if err != nil {
 		return DownloadLink{}, err
@@ -723,6 +720,7 @@ func (s *Service) DeleteFile(ctx context.Context, id, fileID uuid.UUID, upd auth
 	if _, err := s.q.DeleteProjectFile(ctx, fileID); err != nil {
 		return err
 	}
+	s.deleteObjects(ctx, []string{previewKey(fileID)}) // o PDF gerado para exibição, se houver
 	_, err = s.q.DeleteProjectDocumentItemIfEmpty(ctx, f.ItemID)
 	return err
 }

@@ -34,6 +34,8 @@ type Store interface {
 	PresignUpload(ctx context.Context, key, contentType string, maxSize int64, ttl time.Duration) (Upload, error)
 	// PresignDownload devolve uma URL de download temporária, que baixa como anexo com o nome filename.
 	PresignDownload(ctx context.Context, key, filename, contentType string, ttl time.Duration) (string, time.Time, error)
+	// PresignView devolve uma URL temporária para exibir o objeto no navegador (inline, sem forçar o download), com o tipo dado.
+	PresignView(ctx context.Context, key, contentType string, ttl time.Duration) (string, time.Time, error)
 	// Stat devolve tamanho e tipo do objeto, ou ErrNotFound.
 	Stat(ctx context.Context, key string) (ObjectInfo, error)
 	// Head lê até n bytes iniciais do objeto (para conferir a assinatura do formato).

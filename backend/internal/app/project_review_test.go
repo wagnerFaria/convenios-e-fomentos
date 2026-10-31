@@ -18,9 +18,14 @@ func (p *projEnv) review(tok, id, kind, target string, approved bool) resp {
 	return p.do("PUT", "/api/admin/projects/"+id+"/review/items", map[string]any{"kind": kind, "target": target, "approved": approved}, tok)
 }
 
-// openFile pede o link do arquivo como a equipe faz na tela ("abrir o documento").
+// openFile registra que o arquivo foi exibido no visualizador, como a tela faz depois de mostrar o conteúdo.
 func (p *projEnv) openFile(tok, id, fileID string) int {
-	return p.status(tok, docsPath(id, "/files/", fileID, "/download"))
+	return p.do("POST", docsPath(id, "/files/", fileID, "/viewed"), nil, tok).Status
+}
+
+// reject reprova um item com a justificativa.
+func (p *projEnv) reject(tok, id, kind, target, note string) resp {
+	return p.do("PUT", "/api/admin/projects/"+id+"/review/items", map[string]any{"kind": kind, "target": target, "decision": "rejected", "note": note}, tok)
 }
 
 // reviewItems indexa os itens da conferência por "tipo:alvo".
@@ -48,7 +53,7 @@ func (p *projEnv) approveAll(tok, id string) resp {
 			continue
 		}
 		for _, f := range it["files"].([]any) {
-			require.Equal(p.t, 200, p.openFile(tok, id, f.(map[string]any)["id"].(string)), key)
+			require.Equal(p.t, 204, p.openFile(tok, id, f.(map[string]any)["id"].(string)), key)
 		}
 		last = p.review(tok, id, it["kind"].(string), it["target"].(string), true)
 		require.Equal(p.t, 200, last.Status, "%s: %v", key, last.Body)
@@ -178,7 +183,7 @@ func TestAprovarDocumentoExigeAbrirOArquivo(t *testing.T) {
 	assert.Equal(t, file, details["files"].([]any)[0].(map[string]any)["id"])
 
 	// Abriu: aprova.
-	require.Equal(t, 200, p.openFile(staff.analyst, fp.id, file))
+	require.Equal(t, 204, p.openFile(staff.analyst, fp.id, file))
 	r = p.review(staff.analyst, fp.id, "document", "requerimento_apoio", true)
 	require.Equal(t, 200, r.Status, r.Body)
 	got := reviewItems(r)["document:requerimento_apoio"]
@@ -290,7 +295,7 @@ func TestDocumentoAdicionalNaConferencia(t *testing.T) {
 	assert.Equal(t, "Foto da obra", it["label"])
 
 	assert.Equal(t, "file_not_opened", p.review(staff.analyst, fp.id, "extra", extra, true).errCode())
-	require.Equal(t, 200, p.openFile(staff.analyst, fp.id, fileIDOf(it)))
+	require.Equal(t, 204, p.openFile(staff.analyst, fp.id, fileIDOf(it)))
 	assert.Equal(t, 200, p.review(staff.analyst, fp.id, "extra", extra, true).Status)
 
 	r := p.approveAll(staff.analyst, fp.id)
@@ -361,15 +366,15 @@ func TestAberturaDeArquivosFicaRegistrada(t *testing.T) {
 		return n
 	}
 
-	assert.Equal(t, 200, p.openFile(p.maria, fp.id, file), "o titular baixa o próprio arquivo")
+	assert.Equal(t, 204, p.openFile(p.maria, fp.id, file), "o titular vê o próprio arquivo")
 	assert.Equal(t, 0, views(), "o titular não gera registro de abertura")
 
-	assert.Equal(t, 200, p.openFile(staff.analyst, fp.id, file))
+	assert.Equal(t, 204, p.openFile(staff.analyst, fp.id, file))
 	assert.Equal(t, 1, views())
-	assert.Equal(t, 200, p.openFile(staff.analyst, fp.id, file))
+	assert.Equal(t, 204, p.openFile(staff.analyst, fp.id, file))
 	assert.Equal(t, 1, views(), "abrir de novo não duplica")
 
-	assert.Equal(t, 200, p.openFile(staff.supervisor, fp.id, file), "qualquer pessoa da equipe com leitura abre")
+	assert.Equal(t, 204, p.openFile(staff.supervisor, fp.id, file), "qualquer pessoa da equipe com leitura abre")
 	assert.Equal(t, 2, views())
 }
 
@@ -443,5 +448,12 @@ func TestConferenciaFicaNaAuditoriaSemTextoLivre(t *testing.T) {
 	var payload string
 	require.NoError(t, p.pool.QueryRow(context.Background(),
 		"SELECT payload::text FROM audit_logs WHERE action = 'project.review-item' AND entity_id = $1", fp.id).Scan(&payload))
-	assert.JSONEq(t, `{"kind":"section","target":"proponent","approved":true}`, payload)
+	assert.JSONEq(t, `{"kind":"section","target":"proponent","decision":"approved","approved":true}`, payload)
+
+	// A justificativa de uma reprovação também não vai para a auditoria: fica só no item.
+	require.Equal(t, 200, p.reject(staff.analyst, fp.id, "section", "proposal", "Texto livre da justificativa.").Status)
+	var n int
+	require.NoError(t, p.pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM audit_logs WHERE entity_id = $1 AND payload::text LIKE '%Texto livre%'", fp.id).Scan(&n))
+	assert.Equal(t, 0, n)
 }

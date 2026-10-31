@@ -16,7 +16,7 @@ const approveItemReview = `-- name: ApproveItemReview :exec
 INSERT INTO project_item_reviews (project_id, kind, target, status, reviewed_by_id, reviewed_at)
 VALUES ($1, $2, $3, 'approved', $4, now())
 ON CONFLICT (project_id, kind, target)
-DO UPDATE SET status = 'approved', reviewed_by_id = EXCLUDED.reviewed_by_id, reviewed_at = now()
+DO UPDATE SET status = 'approved', note = NULL, reviewed_by_id = EXCLUDED.reviewed_by_id, reviewed_at = now()
 `
 
 type ApproveItemReviewParams struct {
@@ -293,7 +293,7 @@ func (q *Queries) ListFileViewsOfAdmin(ctx context.Context, arg ListFileViewsOfA
 }
 
 const listItemReviews = `-- name: ListItemReviews :many
-SELECT r.kind, r.target, r.status, r.reviewed_at, COALESCE(NULLIF(trim(a.first_name || ' ' || a.last_name), ''), a.email::text, '')::text AS reviewed_by_name
+SELECT r.kind, r.target, r.status, r.note, r.reviewed_at, COALESCE(NULLIF(trim(a.first_name || ' ' || a.last_name), ''), a.email::text, '')::text AS reviewed_by_name
 FROM project_item_reviews r
 LEFT JOIN admins a ON a.id = r.reviewed_by_id
 WHERE r.project_id = $1
@@ -303,6 +303,7 @@ type ListItemReviewsRow struct {
 	Kind           string     `json:"kind"`
 	Target         string     `json:"target"`
 	Status         string     `json:"status"`
+	Note           *string    `json:"note"`
 	ReviewedAt     *time.Time `json:"reviewed_at"`
 	ReviewedByName string     `json:"reviewed_by_name"`
 }
@@ -320,6 +321,7 @@ func (q *Queries) ListItemReviews(ctx context.Context, projectID uuid.UUID) ([]L
 			&i.Kind,
 			&i.Target,
 			&i.Status,
+			&i.Note,
 			&i.ReviewedAt,
 			&i.ReviewedByName,
 		); err != nil {
@@ -347,11 +349,38 @@ func (q *Queries) RecordFileView(ctx context.Context, arg RecordFileViewParams) 
 	return err
 }
 
+const rejectItemReview = `-- name: RejectItemReview :exec
+INSERT INTO project_item_reviews (project_id, kind, target, status, note, reviewed_by_id, reviewed_at)
+VALUES ($1, $2, $3, 'rejected', $4, $5, now())
+ON CONFLICT (project_id, kind, target)
+DO UPDATE SET status = 'rejected', note = EXCLUDED.note, reviewed_by_id = EXCLUDED.reviewed_by_id, reviewed_at = now()
+`
+
+type RejectItemReviewParams struct {
+	ProjectID    uuid.UUID  `json:"project_id"`
+	Kind         string     `json:"kind"`
+	Target       string     `json:"target"`
+	Note         *string    `json:"note"`
+	ReviewedByID *uuid.UUID `json:"reviewed_by_id"`
+}
+
+// Reprova o item, com a justificativa (obrigatória: a tabela confere).
+func (q *Queries) RejectItemReview(ctx context.Context, arg RejectItemReviewParams) error {
+	_, err := q.db.Exec(ctx, rejectItemReview,
+		arg.ProjectID,
+		arg.Kind,
+		arg.Target,
+		arg.Note,
+		arg.ReviewedByID,
+	)
+	return err
+}
+
 const resetItemReview = `-- name: ResetItemReview :exec
 INSERT INTO project_item_reviews (project_id, kind, target, status)
 VALUES ($1, $2, $3, 'pending')
 ON CONFLICT (project_id, kind, target)
-DO UPDATE SET status = 'pending', reviewed_by_id = NULL, reviewed_at = NULL
+DO UPDATE SET status = 'pending', note = NULL, reviewed_by_id = NULL, reviewed_at = NULL
 `
 
 type ResetItemReviewParams struct {
@@ -360,7 +389,7 @@ type ResetItemReviewParams struct {
 	Target    string    `json:"target"`
 }
 
-// Volta o item a pendente (desfazer a aprovação, ou devolver ao proponente).
+// Volta o item a pendente (desfazer a decisão, ou devolver ao proponente).
 func (q *Queries) ResetItemReview(ctx context.Context, arg ResetItemReviewParams) error {
 	_, err := q.db.Exec(ctx, resetItemReview, arg.ProjectID, arg.Kind, arg.Target)
 	return err

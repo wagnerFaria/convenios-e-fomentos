@@ -26,6 +26,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mtid"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/outbox"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/preview"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/project"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/scan"
@@ -74,6 +75,7 @@ type Option func(*options)
 type options struct {
 	store          storage.Store
 	mtid           mtid.Client
+	converter      preview.Converter
 	noOutboxWorker bool
 }
 
@@ -83,6 +85,9 @@ func WithStore(s storage.Store) Option { return func(o *options) { o.store = s }
 // WithMTID liga o MT-ID (assinatura das declarações). Sem ele, emitir declaração responde 503: o cliente HTTP real ainda não existe
 // (docs/debito-tecnico-mt-id.md).
 func WithMTID(c mtid.Client) Option { return func(o *options) { o.mtid = c } }
+
+// WithPreviewConverter usa o conversor de Word para PDF dado em vez do Gotenberg da configuração.
+func WithPreviewConverter(c preview.Converter) Option { return func(o *options) { o.converter = c } }
 
 // WithoutOutboxWorker não inicia o envio de e-mails em segundo plano. Os testes usam para controlar quando a caixa de saída é
 // esvaziada (App.DrainOutbox) e assim ler os e-mails de forma determinística.
@@ -173,6 +178,11 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 	}
 	if o.store != nil {
 		projectSvc.SetStorage(o.store, cfg.StorageUploadTTL, cfg.StorageDownloadTTL, log)
+		conv := o.converter
+		if conv == nil && cfg.PreviewConverterURL != "" {
+			conv = preview.NewGotenberg(cfg.PreviewConverterURL, 90*time.Second)
+		}
+		projectSvc.SetPreview(conv, cfg.StoragePreviewTTL, log)
 	}
 	documentAdmin := document.NewAdminHandler(documentSvc, engine, adminHandler.Guard)
 	documentPublic := document.NewPublicHandler(documentSvc, identifier)

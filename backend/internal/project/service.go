@@ -23,6 +23,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mtid"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/preview"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/scan"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/storage"
@@ -53,6 +54,10 @@ type Service struct {
 	uploadTTL   time.Duration
 	downloadTTL time.Duration
 	log         *slog.Logger
+
+	// Exibição dos documentos no navegador (opcional; ver SetPreview).
+	converter  preview.Converter
+	previewTTL time.Duration
 
 	// Verificação de vírus dos arquivos (opcional; ver SetScanner).
 	scanner scan.Scanner

@@ -104,6 +104,8 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/extra/{itemId}/files", h.requestExtraUpload)
 	r.With(g(ActionUpdate), upload).Post("/admin/projects/{id}/documents/files/{fileId}/confirm", h.confirmUpload)
 	r.With(g(ActionRead)).Get("/admin/projects/{id}/documents/files/{fileId}/download", h.download)
+	r.With(g(ActionRead)).Get("/admin/projects/{id}/documents/files/{fileId}/preview", h.preview)
+	r.With(g(ActionRead)).Post("/admin/projects/{id}/documents/files/{fileId}/viewed", h.viewed)
 	r.With(g(ActionUpdate)).Delete("/admin/projects/{id}/documents/files/{fileId}", h.deleteFile)
 }
 
@@ -559,6 +561,39 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+// preview devolve a URL para exibir o arquivo no navegador (o Word vem convertido em PDF).
+func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	fileID, err2 := fileIDParam(r)
+	if err != nil || err2 != nil {
+		httpapi.Error(w, r, httpapi.ErrNotFound())
+		return
+	}
+	read, _ := admin.DecisionFrom(r.Context())
+	v, err := h.svc.Preview(r.Context(), actorOf(r), id, fileID, read)
+	if err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, v, nil)
+}
+
+// viewed registra que o arquivo foi exibido para a pessoa da equipe (prova para aprovar ou reprovar o documento).
+func (h *Handler) viewed(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	fileID, err2 := fileIDParam(r)
+	if err != nil || err2 != nil {
+		httpapi.Error(w, r, httpapi.ErrNotFound())
+		return
+	}
+	read, _ := admin.DecisionFrom(r.Context())
+	if err := h.svc.MarkViewed(r.Context(), actorOf(r), id, fileID, read); err != nil {
+		httpapi.Error(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) deleteFile(w http.ResponseWriter, r *http.Request) {

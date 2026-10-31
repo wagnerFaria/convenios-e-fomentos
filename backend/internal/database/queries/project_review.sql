@@ -6,7 +6,7 @@ WHERE id = sqlc.arg(id) AND status = 'submitted' AND stage = 'awaiting_checklist
 RETURNING *;
 
 -- name: ListItemReviews :many
-SELECT r.kind, r.target, r.status, r.reviewed_at, COALESCE(NULLIF(trim(a.first_name || ' ' || a.last_name), ''), a.email::text, '')::text AS reviewed_by_name
+SELECT r.kind, r.target, r.status, r.note, r.reviewed_at, COALESCE(NULLIF(trim(a.first_name || ' ' || a.last_name), ''), a.email::text, '')::text AS reviewed_by_name
 FROM project_item_reviews r
 LEFT JOIN admins a ON a.id = r.reviewed_by_id
 WHERE r.project_id = $1;
@@ -15,14 +15,21 @@ WHERE r.project_id = $1;
 INSERT INTO project_item_reviews (project_id, kind, target, status, reviewed_by_id, reviewed_at)
 VALUES (sqlc.arg(project_id), sqlc.arg(kind), sqlc.arg(target), 'approved', sqlc.arg(reviewed_by_id), now())
 ON CONFLICT (project_id, kind, target)
-DO UPDATE SET status = 'approved', reviewed_by_id = EXCLUDED.reviewed_by_id, reviewed_at = now();
+DO UPDATE SET status = 'approved', note = NULL, reviewed_by_id = EXCLUDED.reviewed_by_id, reviewed_at = now();
 
--- Volta o item a pendente (desfazer a aprovação, ou devolver ao proponente).
+-- Reprova o item, com a justificativa (obrigatória: a tabela confere).
+-- name: RejectItemReview :exec
+INSERT INTO project_item_reviews (project_id, kind, target, status, note, reviewed_by_id, reviewed_at)
+VALUES (sqlc.arg(project_id), sqlc.arg(kind), sqlc.arg(target), 'rejected', sqlc.arg(note), sqlc.arg(reviewed_by_id), now())
+ON CONFLICT (project_id, kind, target)
+DO UPDATE SET status = 'rejected', note = EXCLUDED.note, reviewed_by_id = EXCLUDED.reviewed_by_id, reviewed_at = now();
+
+-- Volta o item a pendente (desfazer a decisão, ou devolver ao proponente).
 -- name: ResetItemReview :exec
 INSERT INTO project_item_reviews (project_id, kind, target, status)
 VALUES ($1, $2, $3, 'pending')
 ON CONFLICT (project_id, kind, target)
-DO UPDATE SET status = 'pending', reviewed_by_id = NULL, reviewed_at = NULL;
+DO UPDATE SET status = 'pending', note = NULL, reviewed_by_id = NULL, reviewed_at = NULL;
 
 -- name: RecordFileView :exec
 INSERT INTO project_file_views (file_id, admin_id) VALUES ($1, $2) ON CONFLICT (file_id, admin_id) DO NOTHING;

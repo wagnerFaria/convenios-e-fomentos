@@ -67,6 +67,10 @@ func (m *Memory) PresignDownload(_ context.Context, key, filename, _ string, ttl
 	return "http://storage.test/bucket/" + key + "?filename=" + filename, time.Now().Add(ttl), nil
 }
 
+func (m *Memory) PresignView(_ context.Context, key, _ string, ttl time.Duration) (string, time.Time, error) {
+	return "http://storage.test/bucket/" + key + "?inline=1", time.Now().Add(ttl), nil
+}
+
 func (m *Memory) Stat(_ context.Context, key string) (ObjectInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

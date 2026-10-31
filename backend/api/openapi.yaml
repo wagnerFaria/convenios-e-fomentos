@@ -1598,13 +1598,47 @@ paths:
     get:
       tags: [Projetos]
       summary: URL temporária para baixar um arquivo confirmado
-      description: "Resposta: `{url, expiresAt}`. Arquivo pendente: 404. Quando quem baixa é da equipe (nem titular nem membro), o pedido é **registrado por pessoa**: é a prova de que abriu o documento, exigida para aprová-lo na conferência (`PUT .../review/items`). Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
+      description: "Resposta: `{url, expiresAt}`. A URL baixa o **arquivo original** (como anexo), inclusive do Word. Arquivo pendente: 404. Baixar não conta como ter visto o documento: a prova exigida para aprovar ou reprovar vem de `POST .../viewed`. Todo acesso entra na auditoria. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
         "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}/preview:
+    get:
+      tags: [Projetos]
+      summary: URL temporária para exibir um arquivo confirmado no navegador
+      description: |
+        Resposta: `{url, expiresAt, kind, contentType, converted}`. `kind` é `pdf` ou `image`: PDF e imagem são exibidos como estão; o arquivo do Word é **convertido para PDF**
+        uma vez (guardado ao lado do original) e vem com `converted: true`. A URL é inline e vale `STORAGE_PREVIEW_TTL`. Arquivo pendente: 404.
+        422 `preview_unavailable`: tipo sem exibição, Word grande demais (mais de 50 MB), conversão não configurada (`PREVIEW_CONVERTER_URL`) ou que falhou; nesses casos o cliente oferece o download.
+        Todo acesso entra na auditoria. Pedir a URL **não** registra que o arquivo foi visto (ver `POST .../viewed`). Permissão: `admin::projects.read`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/documents/files/{fileId}/viewed:
+    post:
+      tags: [Projetos]
+      summary: Registra que o arquivo foi exibido para quem consulta
+      description: "O cliente chama depois de mostrar o conteúdo no visualizador. Quando quem consulta é da equipe (nem titular nem membro), o registro é **por pessoa** e é a prova exigida para aprovar ou reprovar o documento na conferência (`PUT .../review/items`); do titular e dos membros não gera registro. Idempotente. Permissão: `admin::projects.read` (404 em projeto fora do alcance)."
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: Sem conteúdo}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
@@ -1851,15 +1885,19 @@ paths:
   /api/admin/projects/{id}/review/items:
     put:
       tags: [Projetos]
-      summary: Aprova ou desfaz a aprovação de um item da conferência (Analista)
+      summary: Aprova, reprova (com justificativa) ou desfaz a decisão sobre um item da conferência (Analista)
       description: |
         Exige o projeto em análise (409 `analysis_not_started` antes de assumir; 409 `project_stage_invalid` aguardando o proponente). `kind` e `target`:
         `section` (`proponent`, `institution`, `proposal`, `funding`, `document-options`), `document` (`codigo` ou `codigo@id-da-emenda` do checklist) e `extra`
         (id do documento adicional). Item inexistente, ou documento obrigatório sem arquivo nem justificativa: 422 `item_not_reviewable`.
-        **Aprovar documento com arquivo exige que o próprio Analista tenha aberto cada arquivo atual**: senão 422 `file_not_opened` com `details.files`
-        (até 20) e `details.total`. "Abrir" é pedir o link de download do arquivo (`GET .../documents/files/{fileId}/download`), que a equipe tem registrado por pessoa.
-        Aprovar e desfazer são idempotentes. Responde o projeto completo com `review` (itens, `summary`, `allApproved`) e `analyst`, que **só a equipe** recebe.
-        Cada arquivo em `review.items[].files` traz `opened`: se o administrador que consulta já o abriu. Permissão: `admin::projects.review-item`.
+        `decision`: `approved`, `rejected` (exige `note`, a justificativa, de 1 a 500 caracteres; documento adicional só pode ser aprovado) ou `pending` (desfaz). O campo antigo
+        `approved` (true aprova, false desfaz) continua aceito quando `decision` vem vazio. Reprovar não devolve o item: ele só vai ao proponente num pedido de complementação,
+        que o volta a pendente. Item reprovado impede indicar o departamento (409 `review_incomplete`, com `details.rejected`).
+        **Aprovar ou reprovar documento com arquivo exige que o próprio Analista tenha visto cada arquivo atual**: senão 422 `file_not_opened` com `details.files`
+        (até 20) e `details.total`. "Ver" é a exibição no visualizador, registrada por pessoa em `POST .../documents/files/{fileId}/viewed`; baixar o arquivo não conta.
+        Aprovar, reprovar e desfazer são idempotentes. A justificativa **não** vai para a auditoria (texto livre). Responde o projeto completo com `review` (itens, `summary` com `rejected`, `allApproved`)
+        e `analyst`, que **só a equipe** recebe. Cada item traz `status` (`pending`, `approved` ou `rejected`) e, se reprovado, `note`. Cada arquivo em `review.items[].files`
+        traz `opened`: se o administrador que consulta já o viu. Permissão: `admin::projects.review-item`.
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1869,11 +1907,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [kind, target, approved]
+              required: [kind, target]
               properties:
                 kind: {type: string, enum: [section, document, extra]}
                 target: {type: string}
-                approved: {type: boolean}
+                decision: {type: string, enum: [approved, rejected, pending]}
+                note: {type: string, maxLength: 500, description: Justificativa; obrigatória com `rejected`.}
+                approved: {type: boolean, deprecated: true, description: Formato anterior; use `decision`.}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}

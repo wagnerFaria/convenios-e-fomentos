@@ -43,6 +43,7 @@ type env struct {
 	oidc  *testutil.FakeOIDC
 	store *storage.Memory
 	mtid  *mtid.Memory
+	conv  *fakeConverter
 	// keepOutbox desliga o esvaziamento automático da caixa de saída depois de cada requisição (ver do).
 	keepOutbox bool
 }
@@ -85,10 +86,11 @@ func newEnv(t *testing.T, mutate ...func(*config.Config)) *env {
 	t.Cleanup(cancel)
 	store := storage.NewMemory()
 	signer := mtid.NewMemory()
-	a, err := app.New(ctx, cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), pool, mail, app.WithStore(store), app.WithMTID(signer), app.WithoutOutboxWorker())
+	conv := &fakeConverter{}
+	a, err := app.New(ctx, cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), pool, mail, app.WithStore(store), app.WithMTID(signer), app.WithPreviewConverter(conv), app.WithoutOutboxWorker())
 	require.NoError(t, err)
 	require.NoError(t, a.Start(ctx))
-	return &env{store: store, mtid: signer, t: t, h: a.Handler, pool: pool, mail: mail, cfg: cfg, authz: a.Authz, app: a, oidc: oidc}
+	return &env{store: store, mtid: signer, conv: conv, t: t, h: a.Handler, pool: pool, mail: mail, cfg: cfg, authz: a.Authz, app: a, oidc: oidc}
 }
 
 func (e *env) do(method, path string, body any, token string) resp {

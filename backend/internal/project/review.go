@@ -17,7 +17,11 @@ const (
 
 	ReviewPending  = "pending"
 	ReviewApproved = "approved"
+	ReviewRejected = "rejected"
 )
+
+// maxReviewNote é o tamanho máximo da justificativa de uma reprovação (o mesmo da observação de cada item devolvido).
+const maxReviewNote = 500
 
 // reviewSections é a ordem em que as seções aparecem na conferência.
 var reviewSections = []string{"proponent", "institution", "proposal", "funding", "document-options"}
@@ -107,6 +111,7 @@ func unopened(t reviewTarget, opened map[uuid.UUID]bool) []DocFile {
 // reviewRow é a situação gravada de um item.
 type reviewRow struct {
 	Status string
+	Note   string
 	By     string
 	At     *time.Time
 }
@@ -123,9 +128,10 @@ type ReviewItem struct {
 	Kind       string       `json:"kind"`
 	Target     string       `json:"target"`
 	Label      string       `json:"label"`
-	Status     string       `json:"status"`
+	Status     string       `json:"status"` // pending | approved | rejected
 	Blocking   bool         `json:"blocking"`
 	Reason     string       `json:"reason,omitempty"`
+	Note       string       `json:"note,omitempty"` // justificativa da reprovação
 	ReviewedBy string       `json:"reviewedBy,omitempty"`
 	ReviewedAt *time.Time   `json:"reviewedAt,omitempty"`
 	Files      []ReviewFile `json:"files"`
@@ -135,6 +141,7 @@ type ReviewItem struct {
 type ReviewSummary struct {
 	Total    int `json:"total"`
 	Approved int `json:"approved"`
+	Rejected int `json:"rejected"`
 	Pending  int `json:"pending"`
 	Blockers int `json:"blockers"`
 }
@@ -143,7 +150,7 @@ type ReviewSummary struct {
 type Review struct {
 	Items   []ReviewItem  `json:"items"`
 	Summary ReviewSummary `json:"summary"`
-	// AllApproved: há itens, todos aprovados e nenhum impedimento. É a condição para indicar o departamento.
+	// AllApproved: há itens, todos aprovados e nenhum reprovado nem impedimento. É a condição para indicar o departamento.
 	AllApproved bool `json:"allApproved"`
 }
 
@@ -157,7 +164,11 @@ func buildReview(targets []reviewTarget, saved map[string]reviewRow, opened map[
 		}
 		if row, ok := saved[t.key()]; ok && !t.Blocking {
 			it.Status, it.ReviewedBy, it.ReviewedAt = row.Status, row.By, row.At
-			if row.Status != ReviewApproved {
+			switch row.Status {
+			case ReviewRejected:
+				it.Note = row.Note
+			case ReviewApproved:
+			default:
 				it.ReviewedBy, it.ReviewedAt = "", nil
 			}
 		}
@@ -166,13 +177,16 @@ func buildReview(targets []reviewTarget, saved map[string]reviewRow, opened map[
 			r.Summary.Blockers++
 		default:
 			r.Summary.Total++
-			if it.Status == ReviewApproved {
+			switch it.Status {
+			case ReviewApproved:
 				r.Summary.Approved++
+			case ReviewRejected:
+				r.Summary.Rejected++
 			}
 		}
 		r.Items = append(r.Items, it)
 	}
-	r.Summary.Pending = r.Summary.Total - r.Summary.Approved
-	r.AllApproved = r.Summary.Total > 0 && r.Summary.Pending == 0 && r.Summary.Blockers == 0
+	r.Summary.Pending = r.Summary.Total - r.Summary.Approved - r.Summary.Rejected
+	r.AllApproved = r.Summary.Total > 0 && r.Summary.Pending == 0 && r.Summary.Rejected == 0 && r.Summary.Blockers == 0
 	return r
 }

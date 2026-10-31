@@ -468,6 +468,7 @@ type ProjectItemReview struct {
 	Status       string     `json:"status"`
 	ReviewedByID *uuid.UUID `json:"reviewed_by_id"`
 	ReviewedAt   *time.Time `json:"reviewed_at"`
+	Note         *string    `json:"note"`
 }
 
 type ProjectMember struct {

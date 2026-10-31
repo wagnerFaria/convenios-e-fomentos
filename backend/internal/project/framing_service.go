@@ -107,7 +107,7 @@ func (s *Service) AssignDepartment(ctx context.Context, actor Actor, id uuid.UUI
 		}
 		if !rv.AllApproved {
 			e := httpapi.ErrConflict("review_incomplete", "Aprove todos os itens da conferência antes de indicar o departamento.")
-			e.Details = map[string]any{"pending": rv.Summary.Pending, "blockers": rv.Summary.Blockers}
+			e.Details = map[string]any{"pending": rv.Summary.Pending, "rejected": rv.Summary.Rejected, "blockers": rv.Summary.Blockers}
 			return e
 		}
 		d, err := q.GetDepartmentForShare(ctx, in.DepartmentID)
