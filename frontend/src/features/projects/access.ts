@@ -1,3 +1,4 @@
+import { projectActions } from './api/types';
 import type { ChecklistItem, Complement, Project, SectionKey } from './api/types';
 
 /**
@@ -64,4 +65,40 @@ export function accessOf(project: Project, base: boolean, now: number): Access {
       (!!open && (returned.has(`document:${documentKey(item)}`) || item.status === 'missing')),
     extra: (locked) => draft || (!!open && !locked)
   };
+}
+
+// ---- Quem é o quê, para o menu e as páginas ----
+
+/** O que os critérios abaixo precisam da sessão (`AdminMe` serve). */
+interface SessionLike {
+  isSuperAdmin: boolean;
+  permissions: { action: string; conditions: string[] }[];
+}
+
+/**
+ * Condições da leitura de projetos que só alcançam "os meus": o criador e os membros convidados. Quem lê projetos com qualquer outra
+ * condição (ou sem nenhuma) é da equipe. Os nomes são os do backend (`backend/internal/project/members.go` e `visibility.go`): se mudarem
+ * lá, mudam aqui. Serve só para esconder menu; a autorização real é do servidor.
+ */
+const ownProjectConditions = new Set([
+  'admin::is-creator',
+  'admin::project-member',
+  'admin::project-editor'
+]);
+
+/** Equipe de projetos (Analista, Revisor, Secretário, Supervisor): lê projetos além dos que cadastrou. O Super Admin também. */
+export function isProjectStaff(session: SessionLike): boolean {
+  if (session.isSuperAdmin) return true;
+  return session.permissions.some(
+    (p) =>
+      p.action === projectActions.read &&
+      (p.conditions.length === 0 || p.conditions.some((c) => !ownProjectConditions.has(c)))
+  );
+}
+
+/** Quem pode cadastrar projetos (Proponente). O Super Admin também. */
+export function isProjectProponent(session: SessionLike): boolean {
+  return (
+    session.isSuperAdmin || session.permissions.some((p) => p.action === projectActions.create)
+  );
 }

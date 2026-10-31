@@ -3,6 +3,11 @@ import { Icons } from '@/components/icons';
 export interface PermissionCheck {
   /** Ação do backend exigida (ex.: `admin::settings.users.read`). Super Admin sempre passa. */
   permission?: string;
+  /**
+   * Critério sobre a sessão inteira, quando uma ação só não distingue os perfis: `project-staff` (lê projetos além dos que cadastrou) e
+   * `project-proponent` (cadastra projetos). Ver `features/projects/access.ts`.
+   */
+  when?: 'project-staff' | 'project-proponent';
 }
 
 export interface NavItem {
