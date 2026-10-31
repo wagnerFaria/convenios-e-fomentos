@@ -24,6 +24,7 @@ import { adminKeys } from '../api/queries';
 import { registerAdmin } from '../api/service';
 import { adminActions } from '../api/types';
 import { toDepartmentId, useDepartmentOptions, useRoleOptions, NO_DEPARTMENT } from './use-options';
+import { REVIEWER_ROLE_CODE, ReviewerDepartmentWarning } from './reviewer-warning';
 
 const schema = z.object({
   cpf: z.string().refine(isValidCpf, 'CPF inválido.'),
@@ -37,7 +38,10 @@ export function NewAdminDialog() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
-  const { options: roleOptions, isLoading: loadingRoles } = useRoleOptions();
+  const { options: roleOptions, roles, isLoading: loadingRoles } = useRoleOptions();
+  const reviewerRoleIds = new Set(
+    roles.filter((r) => r.code === REVIEWER_ROLE_CODE).map((r) => r.id)
+  );
   const { options: deptOptions } = useDepartmentOptions();
 
   const register = useMutation({
@@ -143,6 +147,16 @@ export function NewAdminDialog() {
                 />
               )}
             />
+            <form.Subscribe selector={(s) => s.values}>
+              {(values) => (
+                <ReviewerDepartmentWarning
+                  show={
+                    values.roleIds.some((id) => reviewerRoleIds.has(id)) &&
+                    values.departmentId === NO_DEPARTMENT
+                  }
+                />
+              )}
+            </form.Subscribe>
             {error && (
               <p role='alert' className='text-destructive text-sm'>
                 {error}

@@ -55,6 +55,8 @@ export function DepartmentsList() {
             <TableHead>Departamento</TableHead>
             <TableHead>Área finalística</TableHead>
             <TableHead>Administradores</TableHead>
+            <TableHead>Revisores ativos</TableHead>
+            <TableHead>Projetos</TableHead>
             <TableHead>Documentos</TableHead>
             <TableHead className='w-px' />
           </TableRow>
@@ -62,7 +64,7 @@ export function DepartmentsList() {
         <TableBody>
           {departments.data?.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className='text-muted-foreground text-center'>
+              <TableCell colSpan={7} className='text-muted-foreground text-center'>
                 Nenhum departamento cadastrado.
               </TableCell>
             </TableRow>
@@ -78,6 +80,15 @@ export function DepartmentsList() {
                 )}
               </TableCell>
               <TableCell className='tabular-nums'>{d.userCount}</TableCell>
+              <TableCell className='tabular-nums'>
+                {d.reviewerCount}
+                {d.isFinalistic && d.reviewerCount === 0 && (
+                  <Badge variant='destructive' className='ml-2'>
+                    Sem revisor
+                  </Badge>
+                )}
+              </TableCell>
+              <TableCell className='tabular-nums'>{d.projectCount}</TableCell>
               <TableCell className='tabular-nums'>{d.documentCount}</TableCell>
               <TableCell>
                 <div className='flex justify-end gap-1'>
@@ -90,10 +101,10 @@ export function DepartmentsList() {
                     <Button
                       size='sm'
                       variant='ghost'
-                      disabled={d.userCount + d.documentCount > 0}
+                      disabled={d.userCount + d.documentCount + d.projectCount > 0}
                       title={
-                        d.userCount + d.documentCount > 0
-                          ? 'Há administradores ou documentos vinculados.'
+                        d.userCount + d.documentCount + d.projectCount > 0
+                          ? 'Há administradores, documentos ou projetos vinculados.'
                           : undefined
                       }
                       onClick={() => setToDelete(d)}

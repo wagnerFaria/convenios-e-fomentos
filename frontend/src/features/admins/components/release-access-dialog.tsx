@@ -20,10 +20,12 @@ import type { AdminUser } from '../api/types';
 import { adminDisplayName } from '../lib/display';
 import {
   fromDepartmentId,
+  NO_DEPARTMENT,
   toDepartmentId,
   useDepartmentOptions,
   useRoleOptions
 } from './use-options';
+import { REVIEWER_ROLE_CODE, ReviewerDepartmentWarning } from './reviewer-warning';
 
 const schema = z.object({
   roleIds: z.array(z.string()).min(1, 'Selecione ao menos um perfil.'),
@@ -42,7 +44,10 @@ export function ReleaseAccessDialog({
 }) {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const { options: roleOptions } = useRoleOptions();
+  const { options: roleOptions, roles } = useRoleOptions();
+  const reviewerRoleIds = new Set(
+    roles.filter((r) => r.code === REVIEWER_ROLE_CODE).map((r) => r.id)
+  );
   const { options: deptOptions } = useDepartmentOptions();
 
   const release = useMutation({
@@ -106,6 +111,16 @@ export function ReleaseAccessDialog({
                 />
               )}
             />
+            <form.Subscribe selector={(s) => s.values}>
+              {(values) => (
+                <ReviewerDepartmentWarning
+                  show={
+                    values.roleIds.some((id) => reviewerRoleIds.has(id)) &&
+                    values.departmentId === NO_DEPARTMENT
+                  }
+                />
+              )}
+            </form.Subscribe>
             {error && (
               <p role='alert' className='text-destructive text-sm'>
                 {error}
