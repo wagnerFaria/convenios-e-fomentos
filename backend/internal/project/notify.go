@@ -230,3 +230,129 @@ func (s *Service) notifyInvited(ctx context.Context, q *db.Queries, actor Actor,
 	b.WriteString("Se você não esperava este convite, ignore esta mensagem: o titular do projeto pode revogar o acesso a qualquer momento.\n")
 	return s.enqueue(ctx, q, kindInvited, projectID, to, "Você recebeu acesso a um projeto na SEDEC-MT", b.String(), "")
 }
+
+// ---- Enquadramento: avisos aos Supervisores ----
+
+const (
+	kindFramingIndicated = "project.framing-indicated"
+	kindFramingRefused   = "project.framing-refused"
+
+	// maxRefusalInEmail limita a justificativa do Revisor no e-mail; o texto inteiro fica no sistema.
+	maxRefusalInEmail = 500
+)
+
+var (
+	instrumentText = map[string]string{InstrumentConvenio: "Convênio", InstrumentFomento: "Termo de Fomento"}
+	fundingText    = map[string]string{"amendment": "Emenda parlamentar", "own": "Recurso próprio", "mixed": "Misto (recurso próprio e emenda)"}
+	natureText     = map[string]string{"public": "Pública", "private": "Privada"}
+)
+
+func labelOr(m map[string]string, key string) string {
+	if v, ok := m[key]; ok {
+		return v
+	}
+	return key
+}
+
+// framingSummary é o resumo do projeto que vai nos e-mails aos Supervisores. É uma LISTA PERMITIDA: só entra o que está aqui, então um
+// campo novo no cadastro nunca vaza por padrão. Ficam de fora CPF, telefones, e-mails de contato, endereços, dados de quem assina,
+// justificativa, documentos e anexos: o resto está no sistema, atrás de login (link no fim da mensagem).
+func (s *Service) framingSummary(ctx context.Context, q *db.Queries, p *Project) (string, error) {
+	entityType := ""
+	if id, err := uuid.Parse(p.Institution.EntityTypeID); err == nil {
+		t, err := q.GetEntityType(ctx, id)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", err
+		}
+		entityType = t.Name
+	}
+	var munis []string
+	for _, m := range p.Proposal.Municipalities {
+		munis = append(munis, m.Name)
+	}
+	f := p.Funding
+	var b strings.Builder
+	fmt.Fprintf(&b, "Código: %s\nInstrumento: %s\nTítulo: %s\n", p.Code, labelOr(instrumentText, p.Institution.Instrument), p.Proposal.Title)
+	if p.Proposal.Object != "" {
+		fmt.Fprintf(&b, "Objeto: %s\n", p.Proposal.Object)
+	}
+	if p.Proposal.SigconNumber != "" {
+		fmt.Fprintf(&b, "Nº SIGCon: %s\n", p.Proposal.SigconNumber)
+	}
+	if p.Proposal.StartDate != "" || p.Proposal.EndDate != "" {
+		fmt.Fprintf(&b, "Vigência: %s a %s\n", brDate(p.Proposal.StartDate), brDate(p.Proposal.EndDate))
+	}
+	fmt.Fprintf(&b, "Tipo de recurso: %s\nValor total: %s\n", labelOr(fundingText, f.Type), brl(f.TotalCents))
+	if f.AmendmentTotalCents > 0 {
+		fmt.Fprintf(&b, "Emendas: %s\n", brl(f.AmendmentTotalCents))
+	}
+	if f.OwnAmountCents > 0 {
+		fmt.Fprintf(&b, "Recurso próprio: %s\n", brl(f.OwnAmountCents))
+	}
+	if f.CounterpartCents > 0 {
+		fmt.Fprintf(&b, "Contrapartida: %s\n", brl(f.CounterpartCents))
+	}
+	if len(munis) > 0 {
+		fmt.Fprintf(&b, "Municípios de execução: %s\n", strings.Join(munis, ", "))
+	}
+	fmt.Fprintf(&b, "\nInstituição: %s\nCNPJ: %s\n", p.Institution.Name, p.Institution.CNPJ)
+	if entityType != "" {
+		fmt.Fprintf(&b, "Tipo de entidade: %s\n", entityType)
+	}
+	fmt.Fprintf(&b, "Natureza: %s\nUF: %s\n", labelOr(natureText, p.Institution.Nature), p.Institution.UF)
+	fmt.Fprintf(&b, "\nProponente: %s", p.Proponent.Name)
+	if p.Proponent.JobTitle != "" {
+		fmt.Fprintf(&b, " (%s)", p.Proponent.JobTitle)
+	}
+	b.WriteString("\n")
+	return b.String(), nil
+}
+
+// toSupervisors grava o e-mail para cada Supervisor ativo (uma vez por endereço).
+func (s *Service) toSupervisors(ctx context.Context, q *db.Queries, kind, dedupPrefix string, p *Project, subject, body string) error {
+	list, err := q.ListStaffEmailsByRole(ctx, roleSupervisor)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, to := range list {
+		k := strings.ToLower(strings.TrimSpace(to))
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		if err := s.enqueue(ctx, q, kind, p.ID, to, subject, body, dedupPrefix+":"+k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// notifyFramingIndicated: a documentação está regular e o projeto foi encaminhado ao Revisor do Departamento indicado.
+func (s *Service) notifyFramingIndicated(ctx context.Context, q *db.Queries, p *Project, round int, department string) error {
+	summary, err := s.framingSummary(ctx, q, p)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "A documentação do projeto %s está regular e ele foi encaminhado ao Revisor do Departamento, para confirmar o enquadramento.\n\n", p.Code)
+	fmt.Fprintf(&b, "Departamento indicado: %s (indicação nº %d)\n\n%s\n", department, round, summary)
+	fmt.Fprintf(&b, "Os documentos e os demais dados estão no sistema:\n%s\n", s.link(p.ID))
+	return s.toSupervisors(ctx, q, kindFramingIndicated, fmt.Sprintf("framing-indicated:%s:%d", p.ID, round), p,
+		fmt.Sprintf("Projeto %s encaminhado ao departamento %s", p.Code, department), b.String())
+}
+
+// notifyFramingRefused: o Revisor do Departamento recusou o enquadramento; o projeto voltou ao Analista.
+func (s *Service) notifyFramingRefused(ctx context.Context, q *db.Queries, p *Project, round int, department, justification string) error {
+	if r := []rune(justification); len(r) > maxRefusalInEmail {
+		justification = string(r[:maxRefusalInEmail]) + "…"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "O Revisor do Departamento recusou o enquadramento do projeto %s.\n\n", p.Code)
+	fmt.Fprintf(&b, "Título: %s\nInstituição: %s\nDepartamento recusado: %s (indicação nº %d)\n\n", p.Proposal.Title, p.Institution.Name, department, round)
+	fmt.Fprintf(&b, "Justificativa:\n%s\n\n", justification)
+	b.WriteString("O projeto voltou ao Analista, que indicará outro departamento.\n")
+	fmt.Fprintf(&b, "Detalhes no sistema:\n%s\n", s.link(p.ID))
+	return s.toSupervisors(ctx, q, kindFramingRefused, fmt.Sprintf("framing-refused:%s:%d", p.ID, round), p,
+		fmt.Sprintf("Projeto %s: enquadramento recusado pelo departamento %s", p.Code, department), b.String())
+}

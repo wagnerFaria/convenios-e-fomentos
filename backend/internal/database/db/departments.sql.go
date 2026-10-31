@@ -55,7 +55,10 @@ func (q *Queries) GetDepartmentForUpdate(ctx context.Context, id uuid.UUID) (Dep
 const getDepartmentWithCounts = `-- name: GetDepartmentWithCounts :one
 SELECT d.id, d.name, d.is_finalistic,
        (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
-       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
+       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count,
+       (SELECT count(*) FROM admins a JOIN admin_users_roles ur ON ur.admin_id = a.id JOIN admin_roles r ON r.id = ur.role_id
+         WHERE a.department_id = d.id AND r.code = 'department-reviewer' AND a.is_active AND NOT a.blocked) AS reviewer_count,
+       (SELECT count(*) FROM projects pr WHERE pr.department_id = d.id) AS project_count
 FROM departments d
 WHERE d.id = $1
 `
@@ -66,6 +69,8 @@ type GetDepartmentWithCountsRow struct {
 	IsFinalistic  bool      `json:"is_finalistic"`
 	UserCount     int64     `json:"user_count"`
 	DocumentCount int64     `json:"document_count"`
+	ReviewerCount int64     `json:"reviewer_count"`
+	ProjectCount  int64     `json:"project_count"`
 }
 
 func (q *Queries) GetDepartmentWithCounts(ctx context.Context, id uuid.UUID) (GetDepartmentWithCountsRow, error) {
@@ -77,6 +82,8 @@ func (q *Queries) GetDepartmentWithCounts(ctx context.Context, id uuid.UUID) (Ge
 		&i.IsFinalistic,
 		&i.UserCount,
 		&i.DocumentCount,
+		&i.ReviewerCount,
+		&i.ProjectCount,
 	)
 	return i, err
 }
@@ -108,7 +115,10 @@ func (q *Queries) ListDepartments(ctx context.Context) ([]Department, error) {
 const listDepartmentsWithCounts = `-- name: ListDepartmentsWithCounts :many
 SELECT d.id, d.name, d.is_finalistic,
        (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
-       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
+       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count,
+       (SELECT count(*) FROM admins a JOIN admin_users_roles ur ON ur.admin_id = a.id JOIN admin_roles r ON r.id = ur.role_id
+         WHERE a.department_id = d.id AND r.code = 'department-reviewer' AND a.is_active AND NOT a.blocked) AS reviewer_count,
+       (SELECT count(*) FROM projects pr WHERE pr.department_id = d.id) AS project_count
 FROM departments d
 WHERE (NOT $1::boolean OR d.is_finalistic)
 ORDER BY d.name
@@ -120,6 +130,8 @@ type ListDepartmentsWithCountsRow struct {
 	IsFinalistic  bool      `json:"is_finalistic"`
 	UserCount     int64     `json:"user_count"`
 	DocumentCount int64     `json:"document_count"`
+	ReviewerCount int64     `json:"reviewer_count"`
+	ProjectCount  int64     `json:"project_count"`
 }
 
 // only_finalistic = true devolve só as áreas finalísticas.
@@ -138,6 +150,8 @@ func (q *Queries) ListDepartmentsWithCounts(ctx context.Context, onlyFinalistic 
 			&i.IsFinalistic,
 			&i.UserCount,
 			&i.DocumentCount,
+			&i.ReviewerCount,
+			&i.ProjectCount,
 		); err != nil {
 			return nil, err
 		}

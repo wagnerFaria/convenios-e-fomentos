@@ -33,7 +33,7 @@ func errStageForReview(stage string) error {
 	if stage == StageAwaitingChecklist {
 		return httpapi.ErrConflict("analysis_not_started", "Assuma a análise do projeto antes de conferir os itens.")
 	}
-	return httpapi.ErrConflict("project_stage_invalid", "O projeto está aguardando o proponente.")
+	return errStage(stage)
 }
 
 // lockedForReview trava o projeto e confere permissão e situação (enviado e ativo).
@@ -79,7 +79,7 @@ func (s *Service) StartAnalysis(ctx context.Context, actor Actor, id uuid.UUID, 
 			}
 			changed = true
 		default:
-			return httpapi.ErrConflict("project_stage_invalid", "O projeto já está aguardando o proponente.")
+			return errStage(str(cur.Stage))
 		}
 		if changed {
 			if err := s.audit.Record(ctx, q, actor.entry("project.start-analysis", id, map[string]any{"stage": StageInAnalysis})); err != nil {
@@ -110,6 +110,9 @@ func (s *Service) ReviewItem(ctx context.Context, actor Actor, id uuid.UUID, in 
 		}
 		if str(cur.Stage) != StageInAnalysis {
 			return errStageForReview(str(cur.Stage))
+		}
+		if framingPending(cur) {
+			return errFramingPending()
 		}
 		_, cl, err := s.viewWithChecklist(ctx, q, cur, actor)
 		if err != nil {
@@ -187,27 +190,37 @@ func (s *Service) recordStaffOpening(ctx context.Context, projectID, fileID uuid
 	return s.q.RecordFileView(ctx, db.RecordFileViewParams{FileID: fileID, AdminID: actor.ID})
 }
 
+// reviewState monta a conferência a partir do que está gravado. opened pode ser nulo quando só interessa o resultado (allApproved).
+func (s *Service) reviewState(ctx context.Context, q *db.Queries, projectID uuid.UUID, cl *Checklist, opened map[uuid.UUID]bool) (Review, error) {
+	rows, err := q.ListItemReviews(ctx, projectID)
+	if err != nil {
+		return Review{}, err
+	}
+	saved := make(map[string]reviewRow, len(rows))
+	for _, x := range rows {
+		saved[x.Kind+":"+x.Target] = reviewRow{Status: x.Status, By: x.ReviewedByName, At: x.ReviewedAt}
+	}
+	return buildReview(reviewTargets(cl), saved, opened), nil
+}
+
 // attachReview acrescenta à visão da equipe o analista responsável e a conferência. O titular e os membros não recebem (é interna),
 // nem rascunhos (a equipe não os vê), nem as chamadas internas sem pessoa (Actor vazio).
 func (s *Service) attachReview(ctx context.Context, q *db.Queries, r db.Project, p *Project, cl *Checklist, actor Actor) error {
 	if p.Access != "" || actor.ID == uuid.Nil || r.Status == StatusDraft {
 		return nil
 	}
-	rows, err := q.ListItemReviews(ctx, r.ID)
-	if err != nil {
-		return err
-	}
-	saved := make(map[string]reviewRow, len(rows))
-	for _, x := range rows {
-		at := x.ReviewedAt
-		saved[x.Kind+":"+x.Target] = reviewRow{Status: x.Status, By: x.ReviewedByName, At: at}
-	}
 	opened, err := s.openedBy(ctx, q, r.ID, actor.ID)
 	if err != nil {
 		return err
 	}
-	rv := buildReview(reviewTargets(cl), saved, opened)
+	rv, err := s.reviewState(ctx, q, r.ID, cl, opened)
+	if err != nil {
+		return err
+	}
 	p.Review = &rv
+	if p.Framing, p.Framings, err = s.framingViews(ctx, q, r); err != nil {
+		return err
+	}
 	if r.AnalystID != nil {
 		a, err := q.GetAdminByID(ctx, *r.AnalystID)
 		if err == nil {

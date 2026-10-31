@@ -346,6 +346,7 @@ type Project struct {
 	ProponentPersonal           []byte      `json:"proponent_personal"`
 	LegalRepPersonal            []byte      `json:"legal_rep_personal"`
 	AnalystID                   *uuid.UUID  `json:"analyst_id"`
+	FramingStatus               *string     `json:"framing_status"`
 }
 
 type ProjectAmendment struct {
@@ -444,6 +445,20 @@ type ProjectFileView struct {
 	FileID   uuid.UUID `json:"file_id"`
 	AdminID  uuid.UUID `json:"admin_id"`
 	OpenedAt time.Time `json:"opened_at"`
+}
+
+type ProjectFraming struct {
+	ID             uuid.UUID  `json:"id"`
+	ProjectID      uuid.UUID  `json:"project_id"`
+	Round          int32      `json:"round"`
+	DepartmentID   *uuid.UUID `json:"department_id"`
+	DepartmentName string     `json:"department_name"`
+	IndicatedByID  *uuid.UUID `json:"indicated_by_id"`
+	IndicatedAt    time.Time  `json:"indicated_at"`
+	Decision       string     `json:"decision"`
+	DecidedByID    *uuid.UUID `json:"decided_by_id"`
+	DecidedAt      *time.Time `json:"decided_at"`
+	Justification  string     `json:"justification"`
 }
 
 type ProjectItemReview struct {

@@ -137,8 +137,11 @@ func adminRoles() []roleSpec {
 			},
 		},
 		{
-			code: RoleReviewer, name: "Revisor do Departamento", description: "Vê os projetos enviados do próprio departamento.",
-			perms: append([]authz.Permission{{Action: project.ActionRead, Conditions: []string{project.ConditionSubmittedSameDepartment}}}, staffReference()...),
+			code: RoleReviewer, name: "Revisor do Departamento", description: "Vê os projetos enviados do próprio departamento e confirma ou recusa o enquadramento.",
+			perms: append([]authz.Permission{
+				{Action: project.ActionRead, Conditions: []string{project.ConditionSubmittedSameDepartment}},
+				{Action: project.ActionReviewFraming, Conditions: []string{project.ConditionSubmittedSameDepartment}},
+			}, staffReference()...),
 		},
 		{
 			code: RoleAnalyst, name: "Analista", system: true,
@@ -149,6 +152,7 @@ func adminRoles() []roleSpec {
 				{Action: project.ActionArchive, Conditions: []string{project.ConditionSubmitted}},
 				{Action: project.ActionStartAnalysis, Conditions: []string{project.ConditionSubmitted}},
 				{Action: project.ActionReviewItem, Conditions: []string{project.ConditionSubmitted}},
+				{Action: project.ActionAssignDepartment, Conditions: []string{project.ConditionSubmitted}},
 				{Action: actionDepartmentsRead}, {Action: actionDepartmentsUpdate}, {Action: actionDepartmentsDelete},
 			}, staffReference()...),
 		},

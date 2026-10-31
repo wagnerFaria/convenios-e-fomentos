@@ -486,7 +486,7 @@ paths:
     get:
       tags: [Departamentos]
       summary: Lista departamentos com a contagem de administradores e documentos
-      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read` (alimenta o seletor de departamento dos administradores). Resposta: `[{id, name, isFinalistic, userCount, documentCount}]`. Com `finalistic=true`, só as áreas finalísticas."
+      description: "Permissão: `admin::settings.departments.read` ou `admin::settings.users.read` (alimenta o seletor de departamento dos administradores). Resposta: `[{id, name, isFinalistic, userCount, documentCount, reviewerCount (Revisores ativos), projectCount (projetos que o referenciam)}]`. Com `finalistic=true`, só as áreas finalísticas."
       security: [{adminBearer: []}]
       parameters:
         - {name: finalistic, in: query, required: false, schema: {type: boolean}, description: "true devolve só os departamentos marcados como área finalística (os que podem ser indicados para enquadrar um projeto)."}
@@ -555,7 +555,7 @@ paths:
     delete:
       tags: [Departamentos]
       summary: Exclui um departamento
-      description: "Recusado com 409 `department_in_use` (`details.userCount`, `details.documentCount`) se houver administradores ou documentos vinculados. Permissão: `admin::settings.departments.delete`."
+      description: "Recusado com 409 `department_in_use` (`details.userCount`, `details.documentCount`, `details.projectCount`) se houver administradores, documentos ou projetos vinculados. Permissão: `admin::settings.departments.delete`."
       security: [{adminBearer: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -939,11 +939,15 @@ paths:
     get:
       tags: [Projetos]
       summary: Lista projetos
-      description: "Cada pessoa vê os projetos permitidos pela condição de sua permissão de leitura (o proponente, os que criou e os em que foi convidado por CPF). `q` busca em título, nome da instituição, número do SIGCon e CNPJ (com ou sem pontuação). Permissão: `admin::projects.read`. Resposta: `[{id, status, version, instrument, title, institutionName, institutionCnpj, sigconNumber, totalCents, code, submittedAt, stage, archiveReason, complementDueAt, isOwner, access (owner|edit|read; vazio para a equipe), createdAt, updatedAt}]`."
+      description: "Cada pessoa vê os projetos permitidos pela condição de sua permissão de leitura (o proponente, os que criou e os em que foi convidado por CPF). `q` busca em título, nome da instituição, número do SIGCon e CNPJ (com ou sem pontuação). Permissão: `admin::projects.read`. Resposta: `[{id, status, version, instrument, title, institutionName, institutionCnpj, sigconNumber, totalCents, code, submittedAt, stage, archiveReason, complementDueAt, isOwner, access (owner|edit|read; vazio para a equipe), createdAt, updatedAt}]`. A equipe recebe também `department {id, name}`, `framingStatus` (`pending`|`confirmed`) e `analyst {id, name}` (ausentes quando não se aplicam); o titular e os membros não. Filtros das filas da equipe: `stage`, `framing`, `department`, `analyst` (combinam-se com a permissão de leitura: o Revisor só enxerga o que é do departamento dele, mesmo sem filtro)."
       security: [{adminBearer: []}]
       parameters:
         - {name: q, in: query, schema: {type: string}}
         - {name: status, in: query, schema: {type: string, enum: [draft, submitted, archived]}}
+        - {name: stage, in: query, schema: {type: string}, description: "Uma ou mais etapas separadas por vírgula: `awaiting_checklist`, `in_analysis`, `awaiting_proponent`, `awaiting_opinion`."}
+        - {name: framing, in: query, schema: {type: string, enum: [pending, confirmed, none]}, description: "Situação do enquadramento. `none` = sem enquadramento em andamento."}
+        - {name: department, in: query, schema: {type: string, format: uuid}, description: "Projetos cujo departamento atual é este."}
+        - {name: analyst, in: query, schema: {type: string, format: uuid}, description: "Projetos cujo analista responsável é este."}
         - {name: sort, in: query, schema: {type: string, enum: [updated_at, created_at, title, institution_name]}, description: "Prefixo `-` para decrescente. Padrão: `-updated_at`."}
         - {name: page, in: query, schema: {type: integer, minimum: 1}}
         - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
@@ -1870,6 +1874,90 @@ paths:
                 kind: {type: string, enum: [section, document, extra]}
                 target: {type: string}
                 approved: {type: boolean}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/department:
+    put:
+      tags: [Projetos]
+      summary: Indica o departamento de enquadramento (Analista)
+      description: |
+        Abre uma **rodada** de enquadramento: o projeto passa a aparecer só para os Revisores do departamento indicado, e os Supervisores recebem um e-mail.
+        Exige `submitted`, etapa `in_analysis` (409 `analysis_not_started` antes de assumir; 409 `project_stage_invalid` aguardando o proponente ou o parecer),
+        **tudo aprovado** na conferência (409 `review_incomplete`, com `details.pending` e `details.blockers`) e nenhum enquadramento pendente (409 `framing_pending`).
+        O departamento precisa existir (422), ser área finalística (422 `department_not_finalistic`) e ter ao menos um Revisor ativo (422 `department_without_reviewer`).
+        A etapa continua `in_analysis`. Responde o projeto completo com `framing` (a rodada em curso) e `framings` (o histórico). Permissão: `admin::projects.assign-department`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [departmentId]
+              properties:
+                departmentId: {type: string, format: uuid}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/framing/confirm:
+    post:
+      tags: [Projetos]
+      summary: Confirma o enquadramento (Revisor do Departamento)
+      description: |
+        O projeto se enquadra no departamento: a rodada fica `confirmed`, o departamento é mantido e a etapa passa a `awaiting_opinion` ("Aguardando parecer"). Não envia e-mail.
+        `round` é a rodada que o Revisor viu (409 `framing_round_stale` se mudou). **Vale a primeira decisão de qualquer Revisor do departamento**: a segunda recebe 409
+        `framing_already_decided`, inclusive quando a primeira foi uma recusa. Permissão: `admin::projects.review-framing`, só sobre os projetos enviados do próprio departamento.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [round]
+              properties:
+                round: {type: integer, minimum: 1}
+      responses:
+        "200": {description: OK}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/admin/projects/{id}/framing/refuse:
+    post:
+      tags: [Projetos]
+      summary: Recusa o enquadramento (Revisor do Departamento)
+      description: |
+        O projeto não se enquadra: a rodada fica `refused` com a justificativa (3 a 1.000 caracteres, obrigatória), o departamento do projeto é **limpo** (ele sai da fila do
+        departamento), a etapa continua `in_analysis` e a conferência não é tocada, então o Analista pode indicar outro departamento direto. **Não há limite de recusas.**
+        Os Supervisores recebem um e-mail com o departamento recusado e a justificativa (até 500 caracteres); o Analista não. Mesmos erros de `confirm`.
+        Permissão: `admin::projects.review-framing`.
+      security: [{adminBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [round, justification]
+              properties:
+                round: {type: integer, minimum: 1}
+                justification: {type: string, minLength: 3, maxLength: 1000}
       responses:
         "200": {description: OK}
         "401": {$ref: "#/components/responses/Error"}

@@ -130,8 +130,11 @@ func (s *Service) RequestComplement(ctx context.Context, actor Actor, id uuid.UU
 		if cur.Status != StatusSubmitted {
 			return httpapi.ErrConflict("project_not_submitted", "Só projetos enviados e ativos recebem pedido de complementação.")
 		}
+		if framingPending(cur) {
+			return errFramingPending()
+		}
 		if st := str(cur.Stage); st != StageAwaitingChecklist && st != StageInAnalysis {
-			return httpapi.ErrConflict("project_stage_invalid", "O projeto já está aguardando o proponente.")
+			return errStage(st)
 		}
 		_, cl, err := s.viewWithChecklist(ctx, q, cur, actor)
 		if err != nil {
@@ -332,7 +335,8 @@ func cleanNote(note string) (string, error) {
 }
 
 // archive é o arquivamento feito por uma pessoa: confere o alcance da permissão e a situação do projeto.
-func (s *Service) archive(ctx context.Context, actor Actor, id uuid.UUID, reason, note string, dec authz.Decision) (*Project, error) {
+// blockOnFraming impede o arquivamento pelo Analista com enquadramento pendente; a desistência e a negação não são bloqueadas.
+func (s *Service) archive(ctx context.Context, actor Actor, id uuid.UUID, reason, note string, dec authz.Decision, blockOnFraming bool) (*Project, error) {
 	note, err := cleanNote(note)
 	if err != nil {
 		return nil, err
@@ -353,6 +357,9 @@ func (s *Service) archive(ctx context.Context, actor Actor, id uuid.UUID, reason
 			return httpapi.ErrConflict("project_not_submitted", "Rascunho não se arquiva: exclua-o.")
 		case StatusArchived:
 			return httpapi.ErrConflict("project_archived", "Este projeto já está arquivado.")
+		}
+		if blockOnFraming && framingPending(cur) {
+			return errFramingPending()
 		}
 		row, err := s.archiveRow(ctx, q, cur, &actor.ID, reason, note)
 		if err != nil {
@@ -387,12 +394,12 @@ func (s *Service) archiveRow(ctx context.Context, q *db.Queries, cur db.Project,
 
 // Withdraw é a desistência do proponente: o projeto é arquivado, com o motivo informado.
 func (s *Service) Withdraw(ctx context.Context, actor Actor, id uuid.UUID, note string, dec authz.Decision) (*Project, error) {
-	return s.archive(ctx, actor, id, ArchiveWithdrawn, note, dec)
+	return s.archive(ctx, actor, id, ArchiveWithdrawn, note, dec, false)
 }
 
 // Deny é a negativa do Secretário: o projeto é arquivado sem passar por parecer.
 func (s *Service) Deny(ctx context.Context, actor Actor, id uuid.UUID, note string, dec authz.Decision) (*Project, error) {
-	return s.archive(ctx, actor, id, ArchiveDenied, note, dec)
+	return s.archive(ctx, actor, id, ArchiveDenied, note, dec, false)
 }
 
 // Archive é o arquivamento pela equipe por falta de documentos obrigatórios ou outro motivo.
@@ -400,7 +407,7 @@ func (s *Service) Archive(ctx context.Context, actor Actor, id uuid.UUID, in Arc
 	if in.Reason != ArchiveMissingDocuments && in.Reason != ArchiveOther {
 		return nil, fieldIssue("reason", "Use missing_documents ou other.")
 	}
-	return s.archive(ctx, actor, id, in.Reason, in.Note, dec)
+	return s.archive(ctx, actor, id, in.Reason, in.Note, dec, true)
 }
 
 // ExpireComplements arquiva os projetos cujo prazo de complementação venceu. Pode rodar em várias instâncias ao mesmo tempo

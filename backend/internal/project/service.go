@@ -320,8 +320,13 @@ type ListParams struct {
 	Actor  Actor
 	Q      string
 	Status string
-	Sort   httpapi.Sort
-	Page   httpapi.Page
+	// Filtros da equipe (filas): etapas, situação do enquadramento (pending, confirmed ou none), departamento e analista.
+	Stages     []string
+	Framing    string
+	Department *uuid.UUID
+	Analyst    *uuid.UUID
+	Sort       httpapi.Sort
+	Page       httpapi.Page
 }
 
 // SortColumns é a lista permitida de ordenação.
@@ -348,6 +353,22 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Summary, int, error
 	if p.Status != "" {
 		conds = append(conds, "status = "+arg(p.Status))
 	}
+	if len(p.Stages) > 0 {
+		conds = append(conds, "stage = ANY("+arg(p.Stages)+")")
+	}
+	switch p.Framing {
+	case "":
+	case "none":
+		conds = append(conds, "framing_status IS NULL")
+	default:
+		conds = append(conds, "framing_status = "+arg(p.Framing))
+	}
+	if p.Department != nil {
+		conds = append(conds, "department_id = "+arg(*p.Department))
+	}
+	if p.Analyst != nil {
+		conds = append(conds, "analyst_id = "+arg(*p.Analyst))
+	}
 	if q := strings.TrimSpace(p.Q); q != "" {
 		like := arg("%" + escapeLike(q) + "%")
 		cond := fmt.Sprintf("(title ILIKE %[1]s OR institution_name ILIKE %[1]s OR sigcon_number ILIKE %[1]s", like)
@@ -366,7 +387,10 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Summary, int, error
 	}
 	query := fmt.Sprintf(`SELECT id, status, version, COALESCE(instrument, ''), title, institution_name, COALESCE(institution_cnpj, ''),
 		COALESCE(sigcon_number, ''), total_amount_cents, COALESCE(code, ''), submitted_at, COALESCE(stage, ''), COALESCE(archive_reason, ''),
-		(SELECT due_at FROM project_complement_requests c WHERE c.project_id = projects.id AND c.status = 'open'), created_by_id, created_at, updated_at FROM projects%s ORDER BY %s, id LIMIT %d OFFSET %d`,
+		(SELECT due_at FROM project_complement_requests c WHERE c.project_id = projects.id AND c.status = 'open'), created_by_id, created_at, updated_at,
+		department_id, (SELECT d.name FROM departments d WHERE d.id = projects.department_id), COALESCE(framing_status, ''),
+		analyst_id, (SELECT NULLIF(trim(a.first_name || ' ' || a.last_name), '') FROM admins a WHERE a.id = projects.analyst_id)
+		FROM projects%s ORDER BY %s, id LIMIT %d OFFSET %d`,
 		where, p.Sort.SQL(), p.Page.PageSize, p.Page.Offset())
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -381,7 +405,10 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Summary, int, error
 	for rows.Next() {
 		var x Summary
 		var owner uuid.UUID
-		if err := rows.Scan(&x.ID, &x.Status, &x.Version, &x.Instrument, &x.Title, &x.InstitutionName, &x.InstitutionCNPJ, &x.SigconNumber, &x.TotalCents, &x.Code, &x.SubmittedAt, &x.Stage, &x.ArchiveReason, &x.ComplementDueAt, &owner, &x.CreatedAt, &x.UpdatedAt); err != nil {
+		var depID, anID *uuid.UUID
+		var depName, anName *string
+		if err := rows.Scan(&x.ID, &x.Status, &x.Version, &x.Instrument, &x.Title, &x.InstitutionName, &x.InstitutionCNPJ, &x.SigconNumber, &x.TotalCents, &x.Code, &x.SubmittedAt, &x.Stage, &x.ArchiveReason, &x.ComplementDueAt, &owner, &x.CreatedAt, &x.UpdatedAt,
+			&depID, &depName, &x.FramingStatus, &anID, &anName); err != nil {
 			return nil, 0, err
 		}
 		x.IsOwner = owner == p.Actor.ID
@@ -389,6 +416,16 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Summary, int, error
 			x.Access = AccessOwner
 		} else {
 			x.Access = member[x.ID]
+		}
+		if x.Access == "" { // equipe: os campos internos
+			if depID != nil {
+				x.Department = &DepartmentRef{ID: depID, Name: str(depName)}
+			}
+			if anID != nil {
+				x.Analyst = &AnalystInfo{ID: *anID, Name: str(anName)}
+			}
+		} else {
+			x.FramingStatus = ""
 		}
 		out = append(out, x)
 	}

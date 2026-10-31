@@ -12,7 +12,10 @@ RETURNING id, name, is_finalistic;
 -- name: ListDepartmentsWithCounts :many
 SELECT d.id, d.name, d.is_finalistic,
        (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
-       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
+       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count,
+       (SELECT count(*) FROM admins a JOIN admin_users_roles ur ON ur.admin_id = a.id JOIN admin_roles r ON r.id = ur.role_id
+         WHERE a.department_id = d.id AND r.code = 'department-reviewer' AND a.is_active AND NOT a.blocked) AS reviewer_count,
+       (SELECT count(*) FROM projects pr WHERE pr.department_id = d.id) AS project_count
 FROM departments d
 WHERE (NOT sqlc.arg(only_finalistic)::boolean OR d.is_finalistic)
 ORDER BY d.name;
@@ -20,7 +23,10 @@ ORDER BY d.name;
 -- name: GetDepartmentWithCounts :one
 SELECT d.id, d.name, d.is_finalistic,
        (SELECT count(*) FROM admins a WHERE a.department_id = d.id) AS user_count,
-       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count
+       (SELECT count(*) FROM documents x WHERE x.department_id = d.id) AS document_count,
+       (SELECT count(*) FROM admins a JOIN admin_users_roles ur ON ur.admin_id = a.id JOIN admin_roles r ON r.id = ur.role_id
+         WHERE a.department_id = d.id AND r.code = 'department-reviewer' AND a.is_active AND NOT a.blocked) AS reviewer_count,
+       (SELECT count(*) FROM projects pr WHERE pr.department_id = d.id) AS project_count
 FROM departments d
 WHERE d.id = $1;
 
