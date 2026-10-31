@@ -5,8 +5,10 @@ import type { Department } from './types';
 const base = '/admin/departments';
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 
-export async function listDepartments() {
-  return (await apiClient<ApiResponse<Department[]>>(base)).data;
+/** `finalistic: true` devolve só as áreas finalísticas (as que podem ser indicadas para enquadrar um projeto). */
+export async function listDepartments({ finalistic }: { finalistic?: boolean } = {}) {
+  const query = finalistic ? '?finalistic=true' : '';
+  return (await apiClient<ApiResponse<Department[]>>(`${base}${query}`)).data;
 }
 
 export interface DepartmentInput {

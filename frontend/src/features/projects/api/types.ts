@@ -7,13 +7,25 @@ export const projectActions = {
   submit: 'admin::projects.submit',
   withdraw: 'admin::projects.withdraw',
   share: 'admin::projects.share',
+  // Equipe: o Analista confere e indica o departamento; o Revisor decide o enquadramento; o Secretário nega.
+  requestComplement: 'admin::projects.request-complement',
+  archive: 'admin::projects.archive',
+  deny: 'admin::projects.deny',
+  startAnalysis: 'admin::projects.start-analysis',
+  reviewItem: 'admin::projects.review-item',
+  assignDepartment: 'admin::projects.assign-department',
+  reviewFraming: 'admin::projects.review-framing',
   profileRead: 'admin::proponent-profile.read',
   profileUpdate: 'admin::proponent-profile.update'
 } as const;
 
 export type Instrument = 'convenio' | 'fomento';
 export type ProjectStatus = 'draft' | 'submitted' | 'archived';
-export type ProjectStage = 'awaiting_checklist' | 'in_analysis' | 'awaiting_proponent';
+export type ProjectStage =
+  | 'awaiting_checklist'
+  | 'in_analysis'
+  | 'awaiting_proponent'
+  | 'awaiting_opinion';
 export type PhoneType = 'mobile' | 'landline';
 export type MemberLevel = 'read' | 'edit';
 /** owner = titular; edit/read = convidado por CPF; vazio = equipe. */
@@ -281,6 +293,12 @@ export interface Project {
   lateSubmission: boolean;
   complement: Complement | null;
   archive: ArchiveInfo | null;
+  /** Só a equipe recebe: analista responsável, conferência e enquadramento (o titular e os membros não). */
+  analyst?: AnalystInfo;
+  review?: Review;
+  /** Rodada de enquadramento em curso (pendente ou confirmada) e o histórico, da mais antiga à mais nova. */
+  framing?: Framing;
+  framings?: Framing[];
   originProjectId: string;
   originCode: string;
   createdAt: string;
@@ -313,6 +331,10 @@ export interface ProjectSummary {
   access: ProjectAccess;
   createdAt: string;
   updatedAt: string;
+  /** Só a equipe recebe. */
+  department?: DepartmentRef;
+  framingStatus?: FramingStatus;
+  analyst?: AnalystInfo;
 }
 
 export const instrumentLabels: Record<Instrument, string> = {
@@ -329,7 +351,84 @@ export const statusLabels: Record<ProjectStatus, string> = {
 export const stageLabels: Record<ProjectStage, string> = {
   awaiting_checklist: 'Aguardando análise de checklist',
   in_analysis: 'Em análise',
-  awaiting_proponent: 'Aguardando correções do proponente'
+  awaiting_proponent: 'Aguardando correções do proponente',
+  awaiting_opinion: 'Aguardando parecer'
+};
+
+// ---- Conferência e enquadramento (equipe) ----
+
+export interface AnalystInfo {
+  id: string;
+  name: string;
+}
+
+/** O id some se o departamento foi excluído; o nome é o da data da indicação. */
+export interface DepartmentRef {
+  id: string | null;
+  name: string;
+}
+
+/** Tipo do item conferido: seção, documento do checklist ou documento adicional. */
+export type ReviewKind = 'section' | 'document' | 'extra';
+
+export interface ReviewFile {
+  id: string;
+  filename: string;
+  /** De quem consulta: cada Analista vê os arquivos que ele mesmo abriu. */
+  opened: boolean;
+}
+
+export interface ReviewItem {
+  kind: ReviewKind;
+  /** Seção, chave do documento (`codigo` ou `codigo@emenda`) ou id do documento adicional. */
+  target: string;
+  label: string;
+  status: 'pending' | 'approved';
+  /** Impedimento: documento obrigatório sem arquivo nem justificativa. Não há o que aprovar. */
+  blocking: boolean;
+  reason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  files: ReviewFile[];
+}
+
+export interface Review {
+  items: ReviewItem[];
+  summary: { total: number; approved: number; pending: number; blockers: number };
+  /** Há itens, todos aprovados e nenhum impedimento: condição para indicar o departamento. */
+  allApproved: boolean;
+}
+
+export type FramingStatus = 'pending' | 'confirmed';
+export type FramingDecision = 'pending' | 'confirmed' | 'refused';
+
+/** Uma rodada de enquadramento: o Analista indicou um departamento e o Revisor dele decidiu (ou ainda não). */
+export interface Framing {
+  round: number;
+  department: DepartmentRef;
+  decision: FramingDecision;
+  indicatedBy: string;
+  indicatedAt: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  justification?: string;
+}
+
+export const framingStatusLabels: Record<FramingStatus, string> = {
+  pending: 'Aguardando decisão do departamento',
+  confirmed: 'Enquadrado'
+};
+
+export const framingDecisionLabels: Record<FramingDecision, string> = {
+  pending: 'Pendente',
+  confirmed: 'Confirmado',
+  refused: 'Recusado'
+};
+
+export const reviewKindLabels: Record<ReviewKind, string> = {
+  section: 'Seções do cadastro',
+  document: 'Documentos',
+  extra: 'Documentos adicionais'
 };
 
 export type ArchiveReason =

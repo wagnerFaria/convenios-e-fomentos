@@ -13,4 +13,8 @@ export interface Department {
   isFinalistic: boolean;
   userCount: number;
   documentCount: number;
+  /** Revisores ativos do departamento: sem nenhum, ele não pode ser indicado para enquadrar projetos. */
+  reviewerCount: number;
+  /** Projetos que o referenciam (enquadramento pendente ou confirmado). */
+  projectCount: number;
 }
