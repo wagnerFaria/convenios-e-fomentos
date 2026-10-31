@@ -336,6 +336,7 @@ func TestExpiracaoSimultaneaArquivaUmaVez(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	p.drainOutbox() // ExpireComplements é chamada direto, sem requisição que esvazie a caixa de saída
 	close(counts)
 	total := 0
 	for n := range counts {
@@ -377,7 +378,11 @@ func TestDesistenciaDoProponente(t *testing.T) {
 	assert.Equal(t, "withdrawn", r.data()["archive"].(map[string]any)["reason"])
 	assert.Equal(t, "Não vamos mais executar o projeto.", r.data()["archive"].(map[string]any)["note"])
 	assert.Equal(t, "cancelled", r.data()["complement"].(map[string]any)["status"])
-	assert.Equal(t, mailsBefore, p.mail.Count(), "quem desiste não precisa de e-mail")
+	assert.Equal(t, mailsBefore+1, p.mail.Count(), "a desistência também avisa o proponente")
+	msg := p.mail.Msgs[len(p.mail.Msgs)-1]
+	assert.Contains(t, msg.Subject, "arquivado")
+	assert.Contains(t, msg.Body, "a pedido do próprio proponente")
+	assert.Contains(t, msg.Body, "Não vamos mais executar o projeto.")
 
 	// Arquivado é definitivo.
 	assert.Equal(t, "project_archived", withdraw(p.maria, "de novo").errCode())

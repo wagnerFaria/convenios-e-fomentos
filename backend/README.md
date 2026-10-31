@@ -349,7 +349,7 @@ desenvolvimento, nem com Argon2 abaixo do mínimo da OWASP. A API também não s
 | `MAX_BODY_BYTES` | `1048576` | Tamanho máximo do corpo (413 acima disso). |
 | `TRUSTED_PROXIES` | *(vazio)* | CIDRs de proxies reversos confiáveis; só neles o `X-Forwarded-For` é considerado. |
 | `INITIAL_REGISTRATION_ENABLED` | *(vazio)* | Registro inicial por HTTP. Vazio: ligado fora de produção, desligado em produção. |
-| `SMTP_HOST` / `SMTP_PORT` | *(vazio)* / `587` | Servidor SMTP (STARTTLS; TLS implícito na 465). Sem host: log em dev, descarte em produção. |
+| `SMTP_HOST` / `SMTP_PORT` | *(vazio)* / `587` | Servidor SMTP (STARTTLS; TLS implícito na 465). Sem host: log em dev, descarte em produção. Os e-mails de projeto saem pela caixa de saída (`outbound_emails`): a requisição só grava, um processo em segundo plano envia (tentativas em 1 min, 5 min, 30 min, 2 h, 12 h; até 8) e `cleanup` apaga os já resolvidos. |
 | `SMTP_USER` / `SMTP_PASSWORD` | *(vazio)* | Credenciais SMTP (opcionais). |
 | `SMTP_FROM` | `no-reply@localhost` | Remetente padrão e dos templates criados no seed. |
 | `STORAGE_ENDPOINT` | *(vazio)* | Endpoint interno do MinIO/S3 (`host:porta`). Vazio desliga os arquivos dos documentos (rotas respondem 503). |
@@ -405,6 +405,7 @@ internal/apitoken  tokens de API
 internal/policy    policies reutilizáveis (is-owner, All, Any)
 internal/audit     registro e consulta da auditoria
 internal/mailer    interface Mailer + SMTP, log (dev) e descarte
+internal/outbox    caixa de saída de e-mails: gravação na transação + envio assíncrono com tentativas
 internal/catalog   cadastros de referência: tipos de entidade, municípios (IBGE, embutidos) e parlamentares
 internal/rules     parâmetros das regras de negócio (limites, prazos, datas), versionados por vigência
 internal/project   cadastro de projetos pelo proponente (rascunho em seções: Proponente, Instituição, Proposta) e perfil do proponente

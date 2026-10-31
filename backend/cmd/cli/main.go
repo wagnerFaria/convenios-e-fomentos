@@ -107,7 +107,7 @@ func run(ctx context.Context, cmd string, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Removidos: %d sessões de usuário final, %d tokens de uso único.\n", res.EndUserSessions, res.OneTimeTokens)
+		fmt.Printf("Removidos: %d sessões de usuário final, %d tokens de uso único, %d e-mails já enviados.\n", res.EndUserSessions, res.OneTimeTokens, res.ResolvedEmails)
 		// Arquivos com envio autorizado e nunca confirmado há mais de 24 horas.
 		a, err := app.New(ctx, cfg, logging.New(os.Stdout, cfg.LogLevel), pool, mailer.NopMailer{Log: logging.New(os.Stdout, cfg.LogLevel)})
 		if err != nil {

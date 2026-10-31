@@ -25,6 +25,7 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mtid"
+	"github.com/wagner/convenios-e-fomentos/backend/internal/outbox"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/project"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/scan"
@@ -57,17 +58,21 @@ type App struct {
 	Catalog    *catalog.Service
 	Rules      *rules.Service
 	Projects   *project.Service
+	// Outbox envia a caixa de saída de e-mails em segundo plano (iniciado por Start).
+	Outbox *outbox.Worker
 
-	log  *slog.Logger
-	pool *pgxpool.Pool
+	log            *slog.Logger
+	pool           *pgxpool.Pool
+	noOutboxWorker bool
 }
 
 // Option ajusta a montagem do grafo (usada principalmente pelos testes).
 type Option func(*options)
 
 type options struct {
-	store storage.Store
-	mtid  mtid.Client
+	store          storage.Store
+	mtid           mtid.Client
+	noOutboxWorker bool
 }
 
 // WithStore usa o armazenamento dado em vez de criar o S3 a partir da configuração.
@@ -76,6 +81,10 @@ func WithStore(s storage.Store) Option { return func(o *options) { o.store = s }
 // WithMTID liga o MT-ID (assinatura das declarações). Sem ele, emitir declaração responde 503: o cliente HTTP real ainda não existe
 // (docs/debito-tecnico-mt-id.md).
 func WithMTID(c mtid.Client) Option { return func(o *options) { o.mtid = c } }
+
+// WithoutOutboxWorker não inicia o envio de e-mails em segundo plano. Os testes usam para controlar quando a caixa de saída é
+// esvaziada (App.DrainOutbox) e assim ler os e-mails de forma determinística.
+func WithoutOutboxWorker() Option { return func(o *options) { o.noOutboxWorker = true } }
 
 // NewStore cria o armazenamento S3 da configuração; devolve nil quando STORAGE_ENDPOINT não está definido.
 func NewStore(cfg *config.Config) (storage.Store, error) {
@@ -153,7 +162,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 	catalogSvc := catalog.NewService(pool)
 	rulesSvc := rules.NewService(pool)
 	projectSvc := project.NewService(pool, rulesSvc)
-	projectSvc.SetNotifier(mail, cfg.PublicURL, log)
+	projectSvc.SetNotifier(cfg.PublicURL, log)
 	if cfg.ClamAVAddr != "" {
 		projectSvc.SetScanner(scan.ClamAV{Addr: cfg.ClamAVAddr})
 	}
@@ -184,7 +193,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpoo
 		},
 	})
 	mux := r.(*chi.Mux)
-	return &App{Handler: mux, Router: mux, Authz: engine, Actions: actions, Identifier: identifier, EndUsers: endUserSvc, APITokens: tokenSvc, Documents: documentSvc, Catalog: catalogSvc, Rules: rulesSvc, Projects: projectSvc, log: log, pool: pool}, nil
+	return &App{Handler: mux, Router: mux, Authz: engine, Actions: actions, Identifier: identifier, EndUsers: endUserSvc, APITokens: tokenSvc, Documents: documentSvc, Catalog: catalogSvc, Rules: rulesSvc, Projects: projectSvc, Outbox: outbox.NewWorker(pool, mail, log, outbox.DefaultConfig()), log: log, pool: pool, noOutboxWorker: o.noOutboxWorker}, nil
 }
 
 // Start sincroniza o registro de ações com o banco e passa a escutar as
@@ -209,6 +218,9 @@ func (a *App) Start(ctx context.Context) error {
 		return err
 	}
 	go a.expireComplements(ctx)
+	if !a.noOutboxWorker {
+		go a.Outbox.Run(ctx)
+	}
 	go func() {
 		if err := a.Authz.Listen(ctx); err != nil {
 			a.log.ErrorContext(ctx, "escuta de invalidações encerrada", "error", err)
@@ -216,6 +228,9 @@ func (a *App) Start(ctx context.Context) error {
 	}()
 	return nil
 }
+
+// DrainOutbox envia agora todos os e-mails vencidos da caixa de saída e devolve quantos reservou.
+func (a *App) DrainOutbox(ctx context.Context) (int, error) { return a.Outbox.Drain(ctx) }
 
 // expireInterval é a frequência com que a rotina arquiva projetos com o prazo de complementação vencido.
 const expireInterval = 5 * time.Minute

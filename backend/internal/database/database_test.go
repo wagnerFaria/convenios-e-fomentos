@@ -58,8 +58,18 @@ func TestMigracoesEConsultas(t *testing.T) {
 		require.NoError(t, err, "a migração deve avisar o cache ao %s", when)
 		require.Equal(t, "[]", n.Payload)
 	}
-	require.NoError(t, m.Down(ctx))
+	// Down desfaz UMA migração. Desce até a 00024 sair (reconhece pela coluna que ela criou), por mais migrações que venham depois.
+	hasMarker := func() bool {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'departments' AND column_name = 'is_finalistic'").Scan(&n))
+		return n > 0
+	}
+	for steps := 0; hasMarker(); steps++ {
+		require.Less(t, steps, 20, "a 00024 deveria sair")
+		require.NoError(t, m.Down(ctx))
+	}
 	expectInvalidation("descer")
 	require.NoError(t, m.Up(ctx))
+	require.True(t, hasMarker())
 	expectInvalidation("subir")
 }

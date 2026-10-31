@@ -22,7 +22,6 @@ import (
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/database/db"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/httpapi"
-	"github.com/wagner/convenios-e-fomentos/backend/internal/mailer"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/mtid"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/rules"
 	"github.com/wagner/convenios-e-fomentos/backend/internal/scan"
@@ -61,8 +60,7 @@ type Service struct {
 	// MT-ID, que assina as declarações geradas pelo sistema (opcional; ver SetMTID).
 	mtid mtid.Client
 
-	// Confirmação de recebimento por e-mail (opcional; ver SetNotifier).
-	mail      mailer.Mailer
+	// Link dos e-mails para o painel (ver SetNotifier). Os e-mails vão para a caixa de saída (internal/outbox), nunca direto ao SMTP.
 	publicURL string
 }
 

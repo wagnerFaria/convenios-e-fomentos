@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/url"
 	"strings"
 	"sync"
@@ -77,8 +78,16 @@ func NewPool(t testing.TB) *pgxpool.Pool {
 
 // CaptureMailer guarda os e-mails enviados, para os testes lerem os tokens.
 type CaptureMailer struct {
-	mu   sync.Mutex
-	Msgs []mailer.Message
+	mu       sync.Mutex
+	Msgs     []mailer.Message
+	failures int
+}
+
+// FailTimes faz os n próximos envios falharem (SMTP fora do ar), para os testes de nova tentativa.
+func (c *CaptureMailer) FailTimes(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.failures = n
 }
 
 // LastToken extrai o valor de "token=" do último e-mail enviado.
@@ -111,6 +120,10 @@ func (c *CaptureMailer) Count() int {
 func (c *CaptureMailer) Send(_ context.Context, msg mailer.Message) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.failures > 0 {
+		c.failures--
+		return errors.New("SMTP fora do ar (simulado)")
+	}
 	c.Msgs = append(c.Msgs, msg)
 	return nil
 }

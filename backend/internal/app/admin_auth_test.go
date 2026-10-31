@@ -43,6 +43,8 @@ type env struct {
 	oidc  *testutil.FakeOIDC
 	store *storage.Memory
 	mtid  *mtid.Memory
+	// keepOutbox desliga o esvaziamento automático da caixa de saída depois de cada requisição (ver do).
+	keepOutbox bool
 }
 
 type resp struct {
@@ -83,7 +85,7 @@ func newEnv(t *testing.T, mutate ...func(*config.Config)) *env {
 	t.Cleanup(cancel)
 	store := storage.NewMemory()
 	signer := mtid.NewMemory()
-	a, err := app.New(ctx, cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), pool, mail, app.WithStore(store), app.WithMTID(signer))
+	a, err := app.New(ctx, cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), pool, mail, app.WithStore(store), app.WithMTID(signer), app.WithoutOutboxWorker())
 	require.NoError(t, err)
 	require.NoError(t, a.Start(ctx))
 	return &env{store: store, mtid: signer, t: t, h: a.Handler, pool: pool, mail: mail, cfg: cfg, authz: a.Authz, app: a, oidc: oidc}
@@ -103,11 +105,24 @@ func (e *env) do(method, path string, body any, token string) resp {
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, req)
+	e.drainOutbox()
 	out := resp{Status: rec.Code}
 	if rec.Body.Len() > 0 {
 		require.NoError(e.t, json.Unmarshal(rec.Body.Bytes(), &out.Body), rec.Body.String())
 	}
 	return out
+}
+
+// drainOutbox envia agora os e-mails que a requisição deixou na caixa de saída. Em produção quem envia é um processo em segundo
+// plano; nos testes ele não roda, e o esvaziamento depois de cada requisição mantém as asserções simples (ler p.mail logo em seguida).
+// Os testes da própria caixa de saída ligam keepOutbox para controlar quando ela é esvaziada.
+func (e *env) drainOutbox() {
+	e.t.Helper()
+	if e.keepOutbox {
+		return
+	}
+	_, err := e.app.DrainOutbox(context.Background())
+	require.NoError(e.t, err)
 }
 
 // cpfFor deriva, do e-mail, um CPF válido e estável: os testes identificam os administradores

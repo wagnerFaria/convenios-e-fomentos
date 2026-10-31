@@ -236,6 +236,23 @@ type OneTimeToken struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
+type OutboundEmail struct {
+	ID            uuid.UUID  `json:"id"`
+	Kind          string     `json:"kind"`
+	ProjectID     *uuid.UUID `json:"project_id"`
+	ToEmail       string     `json:"to_email"`
+	Subject       string     `json:"subject"`
+	Body          string     `json:"body"`
+	DedupKey      string     `json:"dedup_key"`
+	Status        string     `json:"status"`
+	Attempts      int32      `json:"attempts"`
+	NextAttemptAt time.Time  `json:"next_attempt_at"`
+	LockedUntil   *time.Time `json:"locked_until"`
+	LastError     string     `json:"last_error"`
+	CreatedAt     time.Time  `json:"created_at"`
+	SentAt        *time.Time `json:"sent_at"`
+}
+
 type Parliamentarian struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
