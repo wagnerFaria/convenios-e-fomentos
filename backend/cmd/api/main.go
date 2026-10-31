@@ -96,5 +96,8 @@ func run() error {
 	defer cancel()
 	err = srv.Shutdown(shutdownCtx)
 	application.APITokens.Wait() // conclui as gravações pendentes de last_used_at
+	if !application.Wait(20 * time.Second) {
+		log.Warn("o envio de e-mails não terminou a tempo; as mensagens em andamento serão retomadas por outra instância")
+	}
 	return err
 }

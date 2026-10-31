@@ -64,6 +64,8 @@ type App struct {
 	log            *slog.Logger
 	pool           *pgxpool.Pool
 	noOutboxWorker bool
+	// outboxDone fecha quando o worker de e-mail termina (ver Wait). Nulo se o worker não foi iniciado.
+	outboxDone chan struct{}
 }
 
 // Option ajusta a montagem do grafo (usada principalmente pelos testes).
@@ -219,7 +221,11 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	go a.expireComplements(ctx)
 	if !a.noOutboxWorker {
-		go a.Outbox.Run(ctx)
+		a.outboxDone = make(chan struct{})
+		go func() {
+			defer close(a.outboxDone)
+			a.Outbox.Run(ctx)
+		}()
 	}
 	go func() {
 		if err := a.Authz.Listen(ctx); err != nil {
@@ -227,6 +233,21 @@ func (a *App) Start(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// Wait espera o worker de e-mail terminar o envio que tem em andamento depois que o contexto de Start foi cancelado, por no máximo
+// timeout. Sem isso o processo pode sair no meio de um envio e a mensagem, já entregue ao servidor SMTP, voltar à fila e sair de novo.
+// Devolve false se o prazo acabou antes. Sem worker iniciado, devolve true na hora.
+func (a *App) Wait(timeout time.Duration) bool {
+	if a.outboxDone == nil {
+		return true
+	}
+	select {
+	case <-a.outboxDone:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 // DrainOutbox envia agora todos os e-mails vencidos da caixa de saída e devolve quantos reservou.
